@@ -3,10 +3,13 @@
 // Content-addressed, arbitrary depth, circular-reflexive.
 // Reality for git.
 //
-// A Fragment is a node in the possibility space.
-// Every fragment knows its own address (Ref) and carries data.
-// Shards are terminal. Fractals continue — self-similar structure
-// at every scale, arbitrary width, arbitrary depth.
+// Every fragment knows its own address (Ref), carries metadata (Meta),
+// and holds data. Shards are terminal. Fragments continue.
+// Meta is git: author, committer, timestamp, message.
+// Witnessed reality.
+
+import gleam/list
+import gleam/string
 
 // ---------------------------------------------------------------------------
 // Types
@@ -22,12 +25,22 @@ pub type Ref {
   Ref(sha: Sha, label: String)
 }
 
+/// Git commit metadata. Witnessed reality.
+pub type Meta {
+  Meta(
+    author: String,
+    committer: String,
+    timestamp: String,
+    message: String,
+  )
+}
+
 /// A node in the possibility space.
 pub type Fragment {
-  /// Terminal: self-addressed, carries data, stops.
-  Shard(ref: Ref, data: String)
-  /// Self-similar: self-addressed, carries data, contains fragments.
-  Fractal(ref: Ref, data: String, fragments: List(Fragment))
+  /// Terminal: self-addressed, witnessed, carries data, stops.
+  Shard(ref: Ref, meta: Meta, data: String)
+  /// Self-similar: self-addressed, witnessed, carries data, contains fragments.
+  Fragment(ref: Ref, meta: Meta, data: String, fragments: List(Fragment))
 }
 
 // ---------------------------------------------------------------------------
@@ -40,22 +53,38 @@ pub fn sha(value: String) -> Sha {
 }
 
 /// Create a reference.
-pub fn ref(sha: Sha, label: String) -> Ref {
-  Ref(sha: sha, label: label)
+pub fn ref(s: Sha, label: String) -> Ref {
+  Ref(sha: s, label: label)
+}
+
+/// Create metadata.
+pub fn meta(
+  author: String,
+  committer: String,
+  timestamp: String,
+  message: String,
+) -> Meta {
+  Meta(
+    author: author,
+    committer: committer,
+    timestamp: timestamp,
+    message: message,
+  )
 }
 
 /// Create a shard. Terminal fragment.
-pub fn shard(ref: Ref, data: String) -> Fragment {
-  Shard(ref: ref, data: data)
+pub fn shard(ref: Ref, meta: Meta, data: String) -> Fragment {
+  Shard(ref: ref, meta: meta, data: data)
 }
 
-/// Create a fractal. Self-similar fragment.
-pub fn fractal(
+/// Create a fragment. Self-similar, contains other fragments.
+pub fn fragment(
   ref: Ref,
+  meta: Meta,
   data: String,
   fragments: List(Fragment),
 ) -> Fragment {
-  Fractal(ref: ref, data: data, fragments: fragments)
+  Fragment(ref: ref, meta: meta, data: data, fragments: fragments)
 }
 
 // ---------------------------------------------------------------------------
@@ -67,14 +96,54 @@ pub fn hash(data: String) -> Sha {
   Sha(self: sha256(data))
 }
 
+/// Deterministic canonical serialization of metadata.
+pub fn serialize_meta(m: Meta) -> String {
+  "author:"
+  <> m.author
+  <> "\ncommitter:"
+  <> m.committer
+  <> "\ntimestamp:"
+  <> m.timestamp
+  <> "\nmessage:"
+  <> m.message
+}
+
+/// Deterministic canonical serialization of a ref.
+pub fn serialize_ref(r: Ref) -> String {
+  let Ref(Sha(s), label) = r
+  "ref:" <> s <> ":" <> label
+}
+
 /// Deterministic canonical serialization of a fragment.
-pub fn serialize(fragment: Fragment) -> String {
-  todo
+pub fn serialize(frag: Fragment) -> String {
+  case frag {
+    Shard(r, m, d) ->
+      "shard\n"
+      <> serialize_ref(r)
+      <> "\n"
+      <> serialize_meta(m)
+      <> "\ndata:"
+      <> d
+    Fragment(r, m, d, fs) ->
+      "fragment\n"
+      <> serialize_ref(r)
+      <> "\n"
+      <> serialize_meta(m)
+      <> "\ndata:"
+      <> d
+      <> "\nfragments:["
+      <> {
+        fs
+        |> list.map(fn(f) { serialize(f) })
+        |> string.join(",")
+      }
+      <> "]"
+  }
 }
 
 /// Content-address a fragment: SHA-256 of its canonical serialization.
-pub fn hash_fragment(fragment: Fragment) -> String {
-  todo
+pub fn hash_fragment(frag: Fragment) -> String {
+  sha256(serialize(frag))
 }
 
 // ---------------------------------------------------------------------------
@@ -82,42 +151,50 @@ pub fn hash_fragment(fragment: Fragment) -> String {
 // ---------------------------------------------------------------------------
 
 /// Get the ref (self-address) of a fragment.
-pub fn self_ref(fragment: Fragment) -> Ref {
-  case fragment {
-    Shard(r, _) -> r
-    Fractal(r, _, _) -> r
+pub fn self_ref(frag: Fragment) -> Ref {
+  case frag {
+    Shard(r, _, _) -> r
+    Fragment(r, _, _, _) -> r
+  }
+}
+
+/// Get the meta (witnessing) of a fragment.
+pub fn self_meta(frag: Fragment) -> Meta {
+  case frag {
+    Shard(_, m, _) -> m
+    Fragment(_, m, _, _) -> m
   }
 }
 
 /// Get the data from a fragment.
-pub fn data(fragment: Fragment) -> String {
-  case fragment {
-    Shard(_, d) -> d
-    Fractal(_, d, _) -> d
+pub fn data(frag: Fragment) -> String {
+  case frag {
+    Shard(_, _, d) -> d
+    Fragment(_, _, d, _) -> d
   }
 }
 
 /// Get child fragments. Shards have none.
-pub fn children(fragment: Fragment) -> List(Fragment) {
-  case fragment {
-    Shard(_, _) -> []
-    Fractal(_, _, fs) -> fs
+pub fn children(frag: Fragment) -> List(Fragment) {
+  case frag {
+    Shard(_, _, _) -> []
+    Fragment(_, _, _, fs) -> fs
   }
 }
 
 /// Check if a fragment is a shard.
-pub fn is_shard(fragment: Fragment) -> Bool {
-  case fragment {
-    Shard(_, _) -> True
-    Fractal(_, _, _) -> False
+pub fn is_shard(frag: Fragment) -> Bool {
+  case frag {
+    Shard(_, _, _) -> True
+    Fragment(_, _, _, _) -> False
   }
 }
 
-/// Check if a fragment is a fractal.
-pub fn is_fractal(fragment: Fragment) -> Bool {
-  case fragment {
-    Shard(_, _) -> False
-    Fractal(_, _, _) -> True
+/// Check if a fragment is a fragment (non-terminal).
+pub fn is_fragment(frag: Fragment) -> Bool {
+  case frag {
+    Shard(_, _, _) -> False
+    Fragment(_, _, _, _) -> True
   }
 }
 

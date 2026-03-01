@@ -5,6 +5,7 @@
 /// the tree, not SHA indirection.
 
 import fragmentation.{type Fragment}
+import gleam/list
 
 // ---------------------------------------------------------------------------
 // Types
@@ -24,7 +25,17 @@ pub type Visitor(a) {
 
 /// Collect all fragments in a tree, depth-first.
 pub fn collect(root: Fragment) -> List(Fragment) {
-  todo
+  do_collect(root, [])
+  |> list.reverse
+}
+
+fn do_collect(frag: Fragment, acc: List(Fragment)) -> List(Fragment) {
+  let acc = [frag, ..acc]
+  case fragmentation.children(frag) {
+    [] -> acc
+    children ->
+      list.fold(children, acc, fn(a, child) { do_collect(child, a) })
+  }
 }
 
 /// Fold over all fragments in a tree, depth-first.
@@ -33,12 +44,42 @@ pub fn fold(
   acc: a,
   f: fn(a, Fragment) -> Visitor(a),
 ) -> a {
-  todo
+  do_fold(root, acc, f)
+}
+
+fn do_fold(
+  frag: Fragment,
+  acc: a,
+  f: fn(a, Fragment) -> Visitor(a),
+) -> a {
+  case f(acc, frag) {
+    Stop(result) -> result
+    Continue(result) ->
+      case fragmentation.children(frag) {
+        [] -> result
+        children ->
+          list.fold(children, result, fn(a, child) { do_fold(child, a, f) })
+      }
+  }
 }
 
 /// Get the depth of a fragment tree.
 pub fn depth(root: Fragment) -> Int {
-  todo
+  case fragmentation.children(root) {
+    [] -> 0
+    children -> {
+      let max_child_depth =
+        children
+        |> list.map(fn(child) { depth(child) })
+        |> list.fold(0, fn(best, d) {
+          case d > best {
+            True -> d
+            False -> best
+          }
+        })
+      1 + max_child_depth
+    }
+  }
 }
 
 /// Find the first fragment matching a predicate, depth-first.
@@ -46,5 +87,24 @@ pub fn find(
   root: Fragment,
   predicate: fn(Fragment) -> Bool,
 ) -> Result(Fragment, Nil) {
-  todo
+  case predicate(root) {
+    True -> Ok(root)
+    False ->
+      fragmentation.children(root)
+      |> do_find(predicate)
+  }
+}
+
+fn do_find(
+  fragments: List(Fragment),
+  predicate: fn(Fragment) -> Bool,
+) -> Result(Fragment, Nil) {
+  case fragments {
+    [] -> Error(Nil)
+    [first, ..rest] ->
+      case find(first, predicate) {
+        Ok(found) -> Ok(found)
+        Error(Nil) -> do_find(rest, predicate)
+      }
+  }
 }

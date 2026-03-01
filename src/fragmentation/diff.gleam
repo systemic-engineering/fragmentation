@@ -4,7 +4,8 @@
 /// Since fragments carry their own refs, comparison uses
 /// self-addressed identity.
 
-import fragmentation.{type Fragment, type Sha}
+import fragmentation.{type Fragment}
+import gleam/list
 
 // ---------------------------------------------------------------------------
 // Types
@@ -16,7 +17,7 @@ pub type Change {
   Added(fragment: Fragment)
   /// Fragment exists only in the old tree.
   Removed(fragment: Fragment)
-  /// Same ref, different content.
+  /// Same position, different content.
   Modified(old: Fragment, new: Fragment)
   /// Same ref, same content.
   Unchanged(fragment: Fragment)
@@ -27,11 +28,50 @@ pub type Change {
 // ---------------------------------------------------------------------------
 
 /// Diff two fragment trees by their roots.
+/// Compares structurally: same hash = unchanged, different hash = modified.
+/// Children compared positionally.
 pub fn diff(old: Fragment, new: Fragment) -> List(Change) {
-  todo
+  case fragmentation.hash_fragment(old) == fragmentation.hash_fragment(new) {
+    True -> [Unchanged(old)]
+    False -> diff_fragments(old, new)
+  }
+}
+
+fn diff_fragments(old: Fragment, new: Fragment) -> List(Change) {
+  let old_children = fragmentation.children(old)
+  let new_children = fragmentation.children(new)
+
+  // Root changed
+  let root_change = [Modified(old, new)]
+
+  // Compare children positionally
+  let child_changes = diff_children(old_children, new_children)
+
+  list.append(root_change, child_changes)
+}
+
+fn diff_children(
+  old: List(Fragment),
+  new: List(Fragment),
+) -> List(Change) {
+  case old, new {
+    [], [] -> []
+    [], [n, ..rest] -> [Added(n), ..diff_children([], rest)]
+    [o, ..rest], [] -> [Removed(o), ..diff_children(rest, [])]
+    [o, ..orest], [n, ..nrest] ->
+      list.append(diff(o, n), diff_children(orest, nrest))
+  }
 }
 
 /// Summarize a list of changes: #(added, removed, modified, unchanged).
 pub fn summary(changes: List(Change)) -> #(Int, Int, Int, Int) {
-  todo
+  list.fold(changes, #(0, 0, 0, 0), fn(acc, change) {
+    let #(a, r, m, u) = acc
+    case change {
+      Added(_) -> #(a + 1, r, m, u)
+      Removed(_) -> #(a, r + 1, m, u)
+      Modified(_, _) -> #(a, r, m + 1, u)
+      Unchanged(_) -> #(a, r, m, u + 1)
+    }
+  })
 }

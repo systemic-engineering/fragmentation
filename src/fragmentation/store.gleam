@@ -29,31 +29,41 @@ pub fn new() -> Store {
 // ---------------------------------------------------------------------------
 
 /// Insert a fragment by its self-ref SHA.
-pub fn put(store: Store, fragment: Fragment) -> Store {
-  todo
+pub fn put(store: Store, frag: Fragment) -> Store {
+  let fragmentation.Ref(fragmentation.Sha(key), _) = fragmentation.self_ref(frag)
+  Store(fragments: dict.insert(store.fragments, key, frag))
 }
 
 /// Look up a fragment by SHA.
-pub fn get(store: Store, sha: Sha) -> Result(Fragment, Nil) {
-  todo
+pub fn get(store: Store, s: Sha) -> Result(Fragment, Nil) {
+  let fragmentation.Sha(key) = s
+  dict.get(store.fragments, key)
 }
 
 /// Check if a fragment exists.
-pub fn has(store: Store, sha: Sha) -> Bool {
-  todo
+pub fn has(store: Store, s: Sha) -> Bool {
+  let fragmentation.Sha(key) = s
+  dict.has_key(store.fragments, key)
 }
 
 /// Count fragments in the store.
 pub fn size(store: Store) -> Int {
-  todo
+  dict.size(store.fragments)
 }
 
-/// Merge two stores.
+/// Merge two stores. Same SHA = same content.
 pub fn merge(a: Store, b: Store) -> Store {
-  todo
+  Store(fragments: dict.merge(a.fragments, b.fragments))
 }
 
 /// List all SHAs in the store.
 pub fn keys(store: Store) -> List(Sha) {
-  todo
+  dict.keys(store.fragments)
+  |> list.map(fn(k) { fragmentation.Sha(k) })
 }
+
+// ---------------------------------------------------------------------------
+// Imports
+// ---------------------------------------------------------------------------
+
+import gleam/list
