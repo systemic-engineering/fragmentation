@@ -3,17 +3,24 @@
 The `Witnessed` type is the most important thing in this library. Not because it's complex -- it's four strings. Because of what it means for identity.
 
 ```gleam
+pub type Author { Author(self: String) }
+pub type Committer { Committer(self: String) }
+pub type Timestamp { Timestamp(self: String) }
+pub type Message { Message(self: String) }
+
 pub type Witnessed {
   Witnessed(
-    author: String,
-    committer: String,
-    timestamp: String,
-    message: String,
+    author: Author,
+    committer: Committer,
+    timestamp: Timestamp,
+    message: Message,
   )
 }
 ```
 
 These are the same four fields as a git commit. Author, committer, timestamp, message. This is not a metaphor. This IS git commit metadata, extracted into a type that can live on any node in any tree.
+
+Each field is a distinct type. The same principle as `Sha`: a string that knows what it is. You cannot pass a `Committer` where an `Author` is expected. The distinction the library encodes conceptually -- author wrote it, committer ran it -- is now enforced structurally.
 
 ## Why Witnessed Is Not Metadata
 
@@ -22,8 +29,8 @@ Metadata is information about information. It lives outside the thing it describ
 Witnessed is different. The witness record is part of the hash. If you change the author, the hash changes. If you change the message, the hash changes. If you change the timestamp, the hash changes.
 
 ```gleam
-let w1 = witnessed("alex", "reed", "2026-03-01", "first observation")
-let w2 = witnessed("alex", "reed", "2026-03-01", "second observation")
+let w1 = witnessed(author("alex"), committer("reed"), timestamp("2026-03-01"), message("first observation"))
+let w2 = witnessed(author("alex"), committer("reed"), timestamp("2026-03-01"), message("second observation"))
 let s1 = shard(r, w1, "same-data")
 let s2 = shard(r, w2, "same-data")
 // hash_fragment(s1) != hash_fragment(s2)
@@ -52,14 +59,14 @@ This is correct. Two observations of the same event are not the same observation
 
 ## Timestamp
 
-The timestamp is a string, not a datetime type. This is deliberate. Fragmentation doesn't enforce a format. The canonical serialization includes the timestamp exactly as provided. This means:
+The timestamp is a `Timestamp` value, not a datetime type. This is deliberate. Fragmentation doesn't enforce a format. The canonical serialization includes the inner string exactly as provided. This means:
 
-- You can use ISO 8601 (`2026-03-01T19:30:00Z`)
+- You can use ISO 8601 (`timestamp("2026-03-01T19:30:00Z")`)
 - You can use epoch seconds
 - You can use a logical clock value
 - You can use anything that serializes to a string
 
-The library doesn't parse it. It hashes it. What matters is that the same timestamp string always produces the same hash, and different strings produce different hashes.
+The library doesn't parse it. It hashes it. What matters is that the same string always produces the same hash, and different strings produce different hashes.
 
 ## Message
 

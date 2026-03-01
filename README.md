@@ -18,7 +18,12 @@ Different witness, different hash. The observation is part of the content.
 ```gleam
 import fragmentation
 
-let witness = fragmentation.witnessed("alex", "reed", "2026-03-01T00:00:00Z", "initial")
+let witness = fragmentation.witnessed(
+  fragmentation.author("alex"),
+  fragmentation.committer("reed"),
+  fragmentation.timestamp("2026-03-01T00:00:00Z"),
+  fragmentation.message("initial"),
+)
 let leaf = fragmentation.shard(
   fragmentation.ref(fragmentation.hash("leaf-data"), "self"),
   witness,

@@ -15,9 +15,9 @@ Source: `src/fragmentation.gleam`
 
 Everything starts here. Types, construction functions, serialization, hashing, and queries.
 
-**Types**: `Sha`, `Ref`, `Witnessed`, `Fragment` (with variants `Shard` and `Fragment`).
+**Types**: `Sha`, `Ref`, `Author`, `Committer`, `Timestamp`, `Message`, `Witnessed`, `Fragment` (with variants `Shard` and `Fragment`).
 
-**Construction**: `sha`, `ref`, `witnessed`, `shard`, `fragment`. Each constructs the corresponding type. No validation. No magic. What you give is what you get.
+**Construction**: `sha`, `ref`, `author`, `committer`, `timestamp`, `message`, `witnessed`, `shard`, `fragment`. Each constructs the corresponding type. No validation. No magic. What you give is what you get.
 
 **Hashing**: `hash` takes a string, returns its SHA-256 as a `Sha`. `hash_fragment` serializes a fragment canonically and SHA-256 hashes the result. `serialize`, `serialize_witnessed`, and `serialize_ref` produce deterministic string representations.
 

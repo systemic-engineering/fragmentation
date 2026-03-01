@@ -11,8 +11,12 @@ Fragmentation takes that principle and makes it the only principle. Two types of
 ```gleam
 pub type Sha { Sha(self: String) }
 pub type Ref { Ref(sha: Sha, label: String) }
+pub type Author { Author(self: String) }
+pub type Committer { Committer(self: String) }
+pub type Timestamp { Timestamp(self: String) }
+pub type Message { Message(self: String) }
 pub type Witnessed {
-  Witnessed(author: String, committer: String, timestamp: String, message: String)
+  Witnessed(author: Author, committer: Committer, timestamp: Timestamp, message: Message)
 }
 pub type Fragment {
   Shard(ref: Ref, witnessed: Witnessed, data: String)
@@ -20,9 +24,9 @@ pub type Fragment {
 }
 ```
 
-Four types. That's it. Everything else is operations on these.
+Eight types. Still small. Everything else is operations on these.
 
-`Sha` is a content-addressed hash. `Ref` is an address with a label -- a named pointer. `Witnessed` is who was here when this happened. `Fragment` is a node that is either terminal (Shard) or recursive (Fragment).
+`Sha` is a content-addressed hash. `Ref` is an address with a label -- a named pointer. `Author`, `Committer`, `Timestamp`, and `Message` are typed wrappers for each field of a witness record -- the same principle as `Sha`: a string that knows what it is. `Witnessed` composes them into the observer record. `Fragment` is a node that is either terminal (Shard) or recursive (Fragment).
 
 ## What This Is Not
 
