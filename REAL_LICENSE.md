@@ -284,4 +284,4 @@ Questions may be directed to me at systemic.engineering.
 
 ---
 
-*End of License — Systemic Engineering License v2.0*
+*End of License — Systemic Engineering License v1.0*
