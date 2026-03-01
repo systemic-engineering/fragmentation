@@ -14,13 +14,13 @@ pub fn main() -> Nil {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn test_meta() -> fragmentation.Meta {
-  fragmentation.meta("alex", "reed", "2026-03-01T00:00:00Z", "test")
+fn test_witnessed() -> fragmentation.Witnessed {
+  fragmentation.witnessed("alex", "reed", "2026-03-01T00:00:00Z", "test")
 }
 
 fn make_shard(data: String) -> fragmentation.Fragment {
   let r = fragmentation.ref(fragmentation.hash(data), "self")
-  fragmentation.shard(r, test_meta(), data)
+  fragmentation.shard(r, test_witnessed(), data)
 }
 
 fn make_fragment(
@@ -28,7 +28,7 @@ fn make_fragment(
   children: List(fragmentation.Fragment),
 ) -> fragmentation.Fragment {
   let r = fragmentation.ref(fragmentation.hash(label), "self")
-  fragmentation.fragment(r, test_meta(), label, children)
+  fragmentation.fragment(r, test_witnessed(), label, children)
 }
 
 // ===========================================================================
@@ -72,22 +72,22 @@ pub fn ref_construction_test() {
 // Meta
 // ===========================================================================
 
-pub fn meta_construction_test() {
-  let m = fragmentation.meta("alex", "reed", "2026-03-01T00:00:00Z", "initial")
-  assert m
-    == fragmentation.Meta("alex", "reed", "2026-03-01T00:00:00Z", "initial")
+pub fn witnessed_construction_test() {
+  let w = fragmentation.witnessed("alex", "reed", "2026-03-01T00:00:00Z", "initial")
+  assert w
+    == fragmentation.Witnessed("alex", "reed", "2026-03-01T00:00:00Z", "initial")
 }
 
-pub fn meta_serialize_deterministic_test() {
-  let m = test_meta()
-  let s1 = fragmentation.serialize_meta(m)
-  let s2 = fragmentation.serialize_meta(m)
+pub fn witnessed_serialize_deterministic_test() {
+  let w = test_witnessed()
+  let s1 = fragmentation.serialize_witnessed(w)
+  let s2 = fragmentation.serialize_witnessed(w)
   assert s1 == s2
 }
 
-pub fn meta_fields_in_serialization_test() {
-  let m = fragmentation.meta("alex", "reed", "2026-03-01", "commit msg")
-  let s = fragmentation.serialize_meta(m)
+pub fn witnessed_fields_in_serialization_test() {
+  let w = fragmentation.witnessed("alex", "reed", "2026-03-01", "commit msg")
+  let s = fragmentation.serialize_witnessed(w)
   assert string.contains(s, "author:alex")
   assert string.contains(s, "committer:reed")
   assert string.contains(s, "timestamp:2026-03-01")
@@ -100,17 +100,17 @@ pub fn meta_fields_in_serialization_test() {
 
 pub fn shard_construction_test() {
   let r = fragmentation.ref(fragmentation.hash("data"), "self")
-  let m = test_meta()
-  let s = fragmentation.shard(r, m, "hello")
-  assert s == fragmentation.Shard(r, m, "hello")
+  let w = test_witnessed()
+  let s = fragmentation.shard(r, w, "hello")
+  assert s == fragmentation.Shard(r, w, "hello")
 }
 
 pub fn fragment_construction_test() {
   let leaf = make_shard("leaf-data")
   let r = fragmentation.ref(fragmentation.hash("root"), "self")
-  let m = test_meta()
-  let f = fragmentation.fragment(r, m, "root-data", [leaf])
-  assert f == fragmentation.Fragment(r, m, "root-data", [leaf])
+  let w = test_witnessed()
+  let f = fragmentation.fragment(r, w, "root-data", [leaf])
+  assert f == fragmentation.Fragment(r, w, "root-data", [leaf])
 }
 
 pub fn fragment_empty_children_test() {
@@ -143,9 +143,9 @@ pub fn self_ref_fragment_test() {
   assert sha == fragmentation.hash("node")
 }
 
-pub fn self_meta_test() {
+pub fn self_witnessed_test() {
   let s = make_shard("x")
-  assert fragmentation.self_meta(s) == test_meta()
+  assert fragmentation.self_witnessed(s) == test_witnessed()
 }
 
 pub fn data_shard_test() {
@@ -189,13 +189,13 @@ pub fn hash_fragment_different_data_test() {
   assert fragmentation.hash_fragment(s1) != fragmentation.hash_fragment(s2)
 }
 
-pub fn hash_fragment_meta_matters_test() {
+pub fn hash_fragment_witnessed_matters_test() {
   let r = fragmentation.ref(fragmentation.hash("x"), "self")
-  let m1 = fragmentation.meta("alex", "reed", "2026-03-01", "first")
-  let m2 = fragmentation.meta("alex", "reed", "2026-03-01", "second")
-  let s1 = fragmentation.shard(r, m1, "same-data")
-  let s2 = fragmentation.shard(r, m2, "same-data")
-  // Different meta = different hash (different witness = different reality)
+  let w1 = fragmentation.witnessed("alex", "reed", "2026-03-01", "first")
+  let w2 = fragmentation.witnessed("alex", "reed", "2026-03-01", "second")
+  let s1 = fragmentation.shard(r, w1, "same-data")
+  let s2 = fragmentation.shard(r, w2, "same-data")
+  // Different witness = different hash (different witness = different reality)
   assert fragmentation.hash_fragment(s1) != fragmentation.hash_fragment(s2)
 }
 
@@ -454,13 +454,13 @@ pub fn diff_summary_empty_test() {
 // Witnessed reality (trace-as-branch)
 // ===========================================================================
 
-pub fn witnessed_fragment_test() {
+pub fn different_witness_different_hash_test() {
   // A fragment witnessed by different people produces different hashes
   let r = fragmentation.ref(fragmentation.hash("x"), "self")
-  let m_alex = fragmentation.meta("alex", "alex", "2026-03-01", "observed")
-  let m_reed = fragmentation.meta("reed", "reed", "2026-03-01", "traced")
-  let s_alex = fragmentation.shard(r, m_alex, "same-data")
-  let s_reed = fragmentation.shard(r, m_reed, "same-data")
+  let w_alex = fragmentation.witnessed("alex", "alex", "2026-03-01", "observed")
+  let w_reed = fragmentation.witnessed("reed", "reed", "2026-03-01", "traced")
+  let s_alex = fragmentation.shard(r, w_alex, "same-data")
+  let s_reed = fragmentation.shard(r, w_reed, "same-data")
   assert fragmentation.hash_fragment(s_alex)
     != fragmentation.hash_fragment(s_reed)
 }
@@ -493,15 +493,15 @@ pub fn trace_chain_test() {
 pub fn author_committer_split_test() {
   // The committer is who ran the bias. The author is who wrote it.
   let r = fragmentation.ref(fragmentation.hash("decision"), "self")
-  let m = fragmentation.meta(
+  let w = fragmentation.witnessed(
     "alex",     // author: wrote the bias
     "reed",     // committer: ran the bias
     "2026-03-01T19:30:00Z",
     "bias execution trace",
   )
-  let traced = fragmentation.shard(r, m, "decision:allow")
-  let meta = fragmentation.self_meta(traced)
-  assert meta.author == "alex"
-  assert meta.committer == "reed"
-  assert meta.message == "bias execution trace"
+  let traced = fragmentation.shard(r, w, "decision:allow")
+  let witness = fragmentation.self_witnessed(traced)
+  assert witness.author == "alex"
+  assert witness.committer == "reed"
+  assert witness.message == "bias execution trace"
 }

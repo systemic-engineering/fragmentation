@@ -3,10 +3,9 @@
 // Content-addressed, arbitrary depth, circular-reflexive.
 // Reality for git.
 //
-// Every fragment knows its own address (Ref), carries metadata (Meta),
+// Every fragment knows its own address (Ref), is witnessed (Witnessed),
 // and holds data. Shards are terminal. Fragments continue.
-// Meta is git: author, committer, timestamp, message.
-// Witnessed reality.
+// Witnessed is git: author, committer, timestamp, message.
 
 import gleam/list
 import gleam/string
@@ -25,9 +24,9 @@ pub type Ref {
   Ref(sha: Sha, label: String)
 }
 
-/// Git commit metadata. Witnessed reality.
-pub type Meta {
-  Meta(
+/// Git commit metadata. Who was here when this happened.
+pub type Witnessed {
+  Witnessed(
     author: String,
     committer: String,
     timestamp: String,
@@ -38,9 +37,9 @@ pub type Meta {
 /// A node in the possibility space.
 pub type Fragment {
   /// Terminal: self-addressed, witnessed, carries data, stops.
-  Shard(ref: Ref, meta: Meta, data: String)
+  Shard(ref: Ref, witnessed: Witnessed, data: String)
   /// Self-similar: self-addressed, witnessed, carries data, contains fragments.
-  Fragment(ref: Ref, meta: Meta, data: String, fragments: List(Fragment))
+  Fragment(ref: Ref, witnessed: Witnessed, data: String, fragments: List(Fragment))
 }
 
 // ---------------------------------------------------------------------------
@@ -57,14 +56,14 @@ pub fn ref(s: Sha, label: String) -> Ref {
   Ref(sha: s, label: label)
 }
 
-/// Create metadata.
-pub fn meta(
+/// Create a witness record.
+pub fn witnessed(
   author: String,
   committer: String,
   timestamp: String,
   message: String,
-) -> Meta {
-  Meta(
+) -> Witnessed {
+  Witnessed(
     author: author,
     committer: committer,
     timestamp: timestamp,
@@ -73,18 +72,18 @@ pub fn meta(
 }
 
 /// Create a shard. Terminal fragment.
-pub fn shard(ref: Ref, meta: Meta, data: String) -> Fragment {
-  Shard(ref: ref, meta: meta, data: data)
+pub fn shard(ref: Ref, witnessed: Witnessed, data: String) -> Fragment {
+  Shard(ref: ref, witnessed: witnessed, data: data)
 }
 
 /// Create a fragment. Self-similar, contains other fragments.
 pub fn fragment(
   ref: Ref,
-  meta: Meta,
+  witnessed: Witnessed,
   data: String,
   fragments: List(Fragment),
 ) -> Fragment {
-  Fragment(ref: ref, meta: meta, data: data, fragments: fragments)
+  Fragment(ref: ref, witnessed: witnessed, data: data, fragments: fragments)
 }
 
 // ---------------------------------------------------------------------------
@@ -96,8 +95,8 @@ pub fn hash(data: String) -> Sha {
   Sha(self: sha256(data))
 }
 
-/// Deterministic canonical serialization of metadata.
-pub fn serialize_meta(m: Meta) -> String {
+/// Deterministic canonical serialization of a witness record.
+pub fn serialize_witnessed(m: Witnessed) -> String {
   "author:"
   <> m.author
   <> "\ncommitter:"
@@ -121,14 +120,14 @@ pub fn serialize(frag: Fragment) -> String {
       "shard\n"
       <> serialize_ref(r)
       <> "\n"
-      <> serialize_meta(m)
+      <> serialize_witnessed(m)
       <> "\ndata:"
       <> d
     Fragment(r, m, d, fs) ->
       "fragment\n"
       <> serialize_ref(r)
       <> "\n"
-      <> serialize_meta(m)
+      <> serialize_witnessed(m)
       <> "\ndata:"
       <> d
       <> "\nfragments:["
@@ -158,11 +157,11 @@ pub fn self_ref(frag: Fragment) -> Ref {
   }
 }
 
-/// Get the meta (witnessing) of a fragment.
-pub fn self_meta(frag: Fragment) -> Meta {
+/// Get the witness record of a fragment.
+pub fn self_witnessed(frag: Fragment) -> Witnessed {
   case frag {
-    Shard(_, m, _) -> m
-    Fragment(_, m, _, _) -> m
+    Shard(_, w, _) -> w
+    Fragment(_, w, _, _) -> w
   }
 }
 
