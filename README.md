@@ -4,6 +4,7 @@ Content-addressed, arbitrary-depth, circular-reflexive trees. Reality for git.
 
 [![Package Version](https://img.shields.io/hexpm/v/fragmentation)](https://hex.pm/packages/fragmentation)
 [![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)](https://hexdocs.pm/fragmentation/)
+[![CI](https://github.com/systemic-engineering/fragmentation/actions/workflows/test.yml/badge.svg)](https://github.com/systemic-engineering/fragmentation/actions/workflows/test.yml)
 
 ```sh
 gleam add fragmentation@1
