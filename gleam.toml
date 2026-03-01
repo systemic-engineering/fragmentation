@@ -2,6 +2,7 @@ name = "fragmentation"
 version = "0.1.0"
 description = "fragmentation — encoded possibility space. content-addressed, arbitrary depth, circular-reflexive. reality for git."
 licences = ["Apache-2.0"]
+# Hex requires an SPDX identifier. The actual governing terms are in REAL_LICENSE.md.
 repository = { type = "github", user = "systemic-engineering", repo = "fragmentation" }
 
 [dependencies]

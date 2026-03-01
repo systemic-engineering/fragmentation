@@ -60,5 +60,10 @@ See [`docs/`](docs/INDEX.md) for the full documentation, including:
 ## Development
 
 ```sh
-gleam test  # 58 tests
+gleam test  # 62 tests
 ```
+
+## Licence
+
+`LICENSE.md` contains the Apache-2.0 licence required by Hex. The actual
+governing terms are the [Systemic Engineering License v1.1](REAL_LICENSE.md).
