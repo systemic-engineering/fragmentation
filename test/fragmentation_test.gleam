@@ -69,13 +69,47 @@ pub fn ref_construction_test() {
 }
 
 // ===========================================================================
+// Witnessed value types
+// ===========================================================================
+
+pub fn author_construction_test() {
+  let a = fragmentation.author("alex")
+  assert a == fragmentation.Author("alex")
+}
+
+pub fn committer_construction_test() {
+  let c = fragmentation.committer("reed")
+  assert c == fragmentation.Committer("reed")
+}
+
+pub fn timestamp_construction_test() {
+  let t = fragmentation.timestamp("2026-03-01T00:00:00Z")
+  assert t == fragmentation.Timestamp("2026-03-01T00:00:00Z")
+}
+
+pub fn message_construction_test() {
+  let m = fragmentation.message("commit msg")
+  assert m == fragmentation.Message("commit msg")
+}
+
+// ===========================================================================
 // Meta
 // ===========================================================================
 
 pub fn witnessed_construction_test() {
-  let w = fragmentation.witnessed("alex", "reed", "2026-03-01T00:00:00Z", "initial")
+  let w = fragmentation.witnessed(
+    fragmentation.author("alex"),
+    fragmentation.committer("reed"),
+    fragmentation.timestamp("2026-03-01T00:00:00Z"),
+    fragmentation.message("initial"),
+  )
   assert w
-    == fragmentation.Witnessed("alex", "reed", "2026-03-01T00:00:00Z", "initial")
+    == fragmentation.Witnessed(
+      fragmentation.Author("alex"),
+      fragmentation.Committer("reed"),
+      fragmentation.Timestamp("2026-03-01T00:00:00Z"),
+      fragmentation.Message("initial"),
+    )
 }
 
 pub fn witnessed_serialize_deterministic_test() {
