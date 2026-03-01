@@ -1,0 +1,10 @@
+name = "fragmentation"
+version = "0.1.0"
+description = "fragmentation — encoded possibility space. content-addressed, arbitrary depth, circular-reflexive. reality for git."
+repository = { type = "github", user = "systemic-engineering", repo = "fragmentation" }
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"
