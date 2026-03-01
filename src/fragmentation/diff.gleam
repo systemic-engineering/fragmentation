@@ -3,7 +3,6 @@
 /// Walks two trees and reports what changed.
 /// Since fragments carry their own refs, comparison uses
 /// self-addressed identity.
-
 import fragmentation.{type Fragment}
 import gleam/list
 
@@ -50,10 +49,7 @@ fn diff_fragments(old: Fragment, new: Fragment) -> List(Change) {
   list.append(root_change, child_changes)
 }
 
-fn diff_children(
-  old: List(Fragment),
-  new: List(Fragment),
-) -> List(Change) {
+fn diff_children(old: List(Fragment), new: List(Fragment)) -> List(Change) {
   case old, new {
     [], [] -> []
     [], [n, ..rest] -> [Added(n), ..diff_children([], rest)]

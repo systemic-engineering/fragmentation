@@ -59,7 +59,12 @@ pub type Fragment {
   /// Terminal: self-addressed, witnessed, carries data, stops.
   Shard(ref: Ref, witnessed: Witnessed, data: String)
   /// Self-similar: self-addressed, witnessed, carries data, contains fragments.
-  Fragment(ref: Ref, witnessed: Witnessed, data: String, fragments: List(Fragment))
+  Fragment(
+    ref: Ref,
+    witnessed: Witnessed,
+    data: String,
+    fragments: List(Fragment),
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -136,7 +141,14 @@ pub fn serialize_witnessed(m: Witnessed) -> String {
   let Committer(c) = m.committer
   let Timestamp(ts) = m.timestamp
   let Message(msg) = m.message
-  "author:" <> a <> "\ncommitter:" <> c <> "\ntimestamp:" <> ts <> "\nmessage:" <> msg
+  "author:"
+  <> a
+  <> "\ncommitter:"
+  <> c
+  <> "\ntimestamp:"
+  <> ts
+  <> "\nmessage:"
+  <> msg
 }
 
 /// Deterministic canonical serialization of a ref.

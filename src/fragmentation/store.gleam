@@ -2,7 +2,6 @@
 ///
 /// Maps Sha -> Fragment. Fragments know their own address.
 /// The store is the possibility space made concrete.
-
 import fragmentation.{type Fragment, type Sha}
 import gleam/dict.{type Dict}
 
@@ -30,7 +29,8 @@ pub fn new() -> Store {
 
 /// Insert a fragment by its self-ref SHA.
 pub fn put(store: Store, frag: Fragment) -> Store {
-  let fragmentation.Ref(fragmentation.Sha(key), _) = fragmentation.self_ref(frag)
+  let fragmentation.Ref(fragmentation.Sha(key), _) =
+    fragmentation.self_ref(frag)
   Store(fragments: dict.insert(store.fragments, key, frag))
 }
 

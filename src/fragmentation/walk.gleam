@@ -3,7 +3,6 @@
 /// Depth-first traversal of the fragment structure.
 /// Fragments embed their children directly — the walk follows
 /// the tree, not SHA indirection.
-
 import fragmentation.{type Fragment}
 import gleam/list
 
@@ -33,25 +32,16 @@ fn do_collect(frag: Fragment, acc: List(Fragment)) -> List(Fragment) {
   let acc = [frag, ..acc]
   case fragmentation.children(frag) {
     [] -> acc
-    children ->
-      list.fold(children, acc, fn(a, child) { do_collect(child, a) })
+    children -> list.fold(children, acc, fn(a, child) { do_collect(child, a) })
   }
 }
 
 /// Fold over all fragments in a tree, depth-first.
-pub fn fold(
-  root: Fragment,
-  acc: a,
-  f: fn(a, Fragment) -> Visitor(a),
-) -> a {
+pub fn fold(root: Fragment, acc: a, f: fn(a, Fragment) -> Visitor(a)) -> a {
   do_fold(root, acc, f)
 }
 
-fn do_fold(
-  frag: Fragment,
-  acc: a,
-  f: fn(a, Fragment) -> Visitor(a),
-) -> a {
+fn do_fold(frag: Fragment, acc: a, f: fn(a, Fragment) -> Visitor(a)) -> a {
   case f(acc, frag) {
     Stop(result) -> result
     Continue(result) ->
