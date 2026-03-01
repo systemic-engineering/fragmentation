@@ -24,13 +24,33 @@ pub type Ref {
   Ref(sha: Sha, label: String)
 }
 
+/// Who wrote the content. Who made the decision. Who holds the intent.
+pub type Author {
+  Author(self: String)
+}
+
+/// Who ran the process. Who executed. Who was the mechanism.
+pub type Committer {
+  Committer(self: String)
+}
+
+/// When the observation happened. Opaque string: ISO 8601, epoch, logical clock.
+pub type Timestamp {
+  Timestamp(self: String)
+}
+
+/// The witness's account of what happened.
+pub type Message {
+  Message(self: String)
+}
+
 /// Git commit metadata. Who was here when this happened.
 pub type Witnessed {
   Witnessed(
-    author: String,
-    committer: String,
-    timestamp: String,
-    message: String,
+    author: Author,
+    committer: Committer,
+    timestamp: Timestamp,
+    message: Message,
   )
 }
 
@@ -56,19 +76,34 @@ pub fn ref(s: Sha, label: String) -> Ref {
   Ref(sha: s, label: label)
 }
 
+/// Create an author value.
+pub fn author(value: String) -> Author {
+  Author(self: value)
+}
+
+/// Create a committer value.
+pub fn committer(value: String) -> Committer {
+  Committer(self: value)
+}
+
+/// Create a timestamp value.
+pub fn timestamp(value: String) -> Timestamp {
+  Timestamp(self: value)
+}
+
+/// Create a message value.
+pub fn message(value: String) -> Message {
+  Message(self: value)
+}
+
 /// Create a witness record.
 pub fn witnessed(
-  author: String,
-  committer: String,
-  timestamp: String,
-  message: String,
+  a: Author,
+  c: Committer,
+  ts: Timestamp,
+  msg: Message,
 ) -> Witnessed {
-  Witnessed(
-    author: author,
-    committer: committer,
-    timestamp: timestamp,
-    message: message,
-  )
+  Witnessed(author: a, committer: c, timestamp: ts, message: msg)
 }
 
 /// Create a shard. Terminal fragment.
@@ -97,14 +132,11 @@ pub fn hash(data: String) -> Sha {
 
 /// Deterministic canonical serialization of a witness record.
 pub fn serialize_witnessed(m: Witnessed) -> String {
-  "author:"
-  <> m.author
-  <> "\ncommitter:"
-  <> m.committer
-  <> "\ntimestamp:"
-  <> m.timestamp
-  <> "\nmessage:"
-  <> m.message
+  let Author(a) = m.author
+  let Committer(c) = m.committer
+  let Timestamp(ts) = m.timestamp
+  let Message(msg) = m.message
+  "author:" <> a <> "\ncommitter:" <> c <> "\ntimestamp:" <> ts <> "\nmessage:" <> msg
 }
 
 /// Deterministic canonical serialization of a ref.

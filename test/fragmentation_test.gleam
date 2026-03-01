@@ -15,7 +15,12 @@ pub fn main() -> Nil {
 // ---------------------------------------------------------------------------
 
 fn test_witnessed() -> fragmentation.Witnessed {
-  fragmentation.witnessed("alex", "reed", "2026-03-01T00:00:00Z", "test")
+  fragmentation.witnessed(
+    fragmentation.author("alex"),
+    fragmentation.committer("reed"),
+    fragmentation.timestamp("2026-03-01T00:00:00Z"),
+    fragmentation.message("test"),
+  )
 }
 
 fn make_shard(data: String) -> fragmentation.Fragment {
@@ -120,7 +125,12 @@ pub fn witnessed_serialize_deterministic_test() {
 }
 
 pub fn witnessed_fields_in_serialization_test() {
-  let w = fragmentation.witnessed("alex", "reed", "2026-03-01", "commit msg")
+  let w = fragmentation.witnessed(
+    fragmentation.author("alex"),
+    fragmentation.committer("reed"),
+    fragmentation.timestamp("2026-03-01"),
+    fragmentation.message("commit msg"),
+  )
   let s = fragmentation.serialize_witnessed(w)
   assert string.contains(s, "author:alex")
   assert string.contains(s, "committer:reed")
@@ -225,8 +235,18 @@ pub fn hash_fragment_different_data_test() {
 
 pub fn hash_fragment_witnessed_matters_test() {
   let r = fragmentation.ref(fragmentation.hash("x"), "self")
-  let w1 = fragmentation.witnessed("alex", "reed", "2026-03-01", "first")
-  let w2 = fragmentation.witnessed("alex", "reed", "2026-03-01", "second")
+  let w1 = fragmentation.witnessed(
+    fragmentation.author("alex"),
+    fragmentation.committer("reed"),
+    fragmentation.timestamp("2026-03-01"),
+    fragmentation.message("first"),
+  )
+  let w2 = fragmentation.witnessed(
+    fragmentation.author("alex"),
+    fragmentation.committer("reed"),
+    fragmentation.timestamp("2026-03-01"),
+    fragmentation.message("second"),
+  )
   let s1 = fragmentation.shard(r, w1, "same-data")
   let s2 = fragmentation.shard(r, w2, "same-data")
   // Different witness = different hash (different witness = different reality)
@@ -491,8 +511,18 @@ pub fn diff_summary_empty_test() {
 pub fn different_witness_different_hash_test() {
   // A fragment witnessed by different people produces different hashes
   let r = fragmentation.ref(fragmentation.hash("x"), "self")
-  let w_alex = fragmentation.witnessed("alex", "alex", "2026-03-01", "observed")
-  let w_reed = fragmentation.witnessed("reed", "reed", "2026-03-01", "traced")
+  let w_alex = fragmentation.witnessed(
+    fragmentation.author("alex"),
+    fragmentation.committer("alex"),
+    fragmentation.timestamp("2026-03-01"),
+    fragmentation.message("observed"),
+  )
+  let w_reed = fragmentation.witnessed(
+    fragmentation.author("reed"),
+    fragmentation.committer("reed"),
+    fragmentation.timestamp("2026-03-01"),
+    fragmentation.message("traced"),
+  )
   let s_alex = fragmentation.shard(r, w_alex, "same-data")
   let s_reed = fragmentation.shard(r, w_reed, "same-data")
   assert fragmentation.hash_fragment(s_alex)
@@ -528,14 +558,14 @@ pub fn author_committer_split_test() {
   // The committer is who ran the bias. The author is who wrote it.
   let r = fragmentation.ref(fragmentation.hash("decision"), "self")
   let w = fragmentation.witnessed(
-    "alex",     // author: wrote the bias
-    "reed",     // committer: ran the bias
-    "2026-03-01T19:30:00Z",
-    "bias execution trace",
+    fragmentation.author("alex"),
+    fragmentation.committer("reed"),
+    fragmentation.timestamp("2026-03-01T19:30:00Z"),
+    fragmentation.message("bias execution trace"),
   )
   let traced = fragmentation.shard(r, w, "decision:allow")
   let witness = fragmentation.self_witnessed(traced)
-  assert witness.author == "alex"
-  assert witness.committer == "reed"
-  assert witness.message == "bias execution trace"
+  assert witness.author == fragmentation.Author("alex")
+  assert witness.committer == fragmentation.Committer("reed")
+  assert witness.message == fragmentation.Message("bias execution trace")
 }
