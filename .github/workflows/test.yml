@@ -1,10 +1,8 @@
-name: test
+name: CI
 
 on:
   push:
-    branches:
-      - master
-      - main
+    branches: [main]
   pull_request:
 
 jobs:
@@ -12,12 +10,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: erlef/setup-beam@v1
-        with:
-          otp-version: "28"
-          gleam-version: "1.14.0"
-          rebar3-version: "3"
-          # elixir-version: "1"
-      - run: gleam deps download
-      - run: gleam test
-      - run: gleam format --check src test
+
+      - uses: systemic-engineering/ci/actions/nix-setup@main
+
+      - name: Download deps
+        run: nix develop -c gleam deps download
+
+      - name: Test
+        run: nix develop -c gleam test
+
+      - name: Format check
+        run: nix develop -c gleam format --check src test
