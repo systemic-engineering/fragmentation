@@ -19,6 +19,6 @@ jobs:
         run: nix develop -c gleam test
 
       - name: Publish to Hex.pm
-        run: nix develop -c gleam hex publish --yes
+        run: nix develop -c gleam publish --yes
         env:
           HEXPM_API_KEY: ${{ secrets.HEX_API_KEY }}
