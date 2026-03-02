@@ -49,6 +49,8 @@ fragmentation.hash_fragment(root)
 | `fragmentation/store` | Content-addressed in-memory storage (Sha -> Fragment) |
 | `fragmentation/walk` | Depth-first traversal, fold, find, depth |
 | `fragmentation/diff` | Structural comparison between trees |
+| `fragmentation/encoding` | Text as content-addressed trees (document/paragraph/sentence/word/char) |
+| `fragmentation/git` | Content-addressed fragment persistence to disk |
 
 ## Documentation
 
@@ -61,7 +63,7 @@ See [`docs/`](docs/INDEX.md) for the full documentation, including:
 ## Development
 
 ```sh
-gleam test  # 62 tests
+gleam test  # 110 tests
 ```
 
 ## Licence

@@ -1,12 +1,14 @@
 # Modules
 
-Fragmentation is four modules. They compose in one direction: core types flow outward, operations build on each other.
+Fragmentation is six modules. They compose in one direction: core types flow outward, operations build on each other.
 
 ```
-fragmentation          core types, construction, hashing, queries
-  fragmentation/store  content-addressed storage (Sha -> Fragment)
-  fragmentation/walk   recursive tree traversal
-  fragmentation/diff   structural comparison between trees
+fragmentation              core types, construction, hashing, queries
+  fragmentation/store      content-addressed storage (Sha -> Fragment)
+  fragmentation/walk       recursive tree traversal
+  fragmentation/diff       structural comparison between trees
+  fragmentation/encoding   text as content-addressed trees
+  fragmentation/git        content-addressed fragment persistence
 ```
 
 ## fragmentation (core)
@@ -93,6 +95,51 @@ Positional comparison means: the first child of old is compared with the first c
 
 **`summary`** reduces a list of changes to four counts: `#(added, removed, modified, unchanged)`.
 
+## fragmentation/encoding
+
+Source: `src/fragmentation/encoding.gleam`
+
+Text as content-addressed trees. Five levels of structure: document, paragraph, sentence, word, character. Each level is a fragment containing the next level down. Characters are terminal shards.
+
+```gleam
+let root = encoding.encode("Hello world.", witness)
+// document Fragment
+//   paragraph Fragment
+//     sentence Fragment
+//       word Fragment ("Hello")
+//         char Shard ("H")
+//         char Shard ("e")
+//         char Shard ("l")
+//         char Shard ("l")
+//         char Shard ("o")
+//       word Fragment ("world.")
+//         ...
+```
+
+**`encode`**: takes text and a witness, returns a document fragment. Splits on double newlines into paragraphs, paragraphs into sentences (on `. `, `! `, `? ` boundaries), sentences into words (on spaces), words into characters (grapheme clusters).
+
+**`encode_paragraph`**, **`encode_sentence`**, **`encode_word`**, **`encode_char`**: individual constructors for each level. You can enter the hierarchy wherever you want.
+
+**`ingest`**: encodes text and collects every node into a `Store`, returning the root fragment and the populated store. Shared subtrees deduplicate automatically -- if two paragraphs contain the same word, that word's character shards exist once in the store.
+
+**`decode`**: extracts the data string from a fragment. Lossless round-trip: `encode` then `decode` returns the original text.
+
+**`DecodeError`**: error type for decode failures. Variant `UnknownLabel(String)`.
+
+Labels prevent cross-level collisions. A character "a" and a one-letter word "a" have different SHAs because their labels differ (`utf8/a` vs `token/a`). The label is hashed alongside the data via `labeled_hash`, which prefixes the data with its level before hashing.
+
+## fragmentation/git
+
+Source: `src/fragmentation/git.gleam`
+
+Content-addressed fragment persistence. Writes a fragment to disk named by its SHA.
+
+**`write`**: takes a fragment and a directory path. Computes the SHA via `hash_fragment`, serializes via `serialize`, writes to `<dir>/<sha>`. Returns `Ok(Nil)` on success, `Error(simplifile.FileError)` on failure.
+
+Idempotent. Writing the same fragment twice produces the same file at the same path with the same content. The file name is the content address. The file content is the canonical serialization.
+
+The store is a directory. Each fragment becomes a file. This is the simplest possible persistence layer for content-addressed data -- the same principle as git's object store, without the pack files.
+
 ## How They Compose
 
 A typical workflow:
@@ -101,5 +148,7 @@ A typical workflow:
 2. **Store** them for deduplication and lookup.
 3. **Walk** trees to traverse, search, or aggregate.
 4. **Diff** trees to understand what changed between two versions.
+5. **Encode** text into fragment trees for content-addressed document storage.
+6. **Persist** fragments to disk with git for durable, content-addressed storage.
 
-These modules don't depend on each other (except that all depend on core types). You can use walk without store. You can use diff without walk. They're independent operations on the same data structure.
+These modules don't depend on each other (except that all depend on core types). You can use walk without store. You can use diff without walk. Encoding uses walk and store internally but doesn't require you to. They're independent operations on the same data structure.
