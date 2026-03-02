@@ -1,0 +1,24 @@
+name: Publish
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: systemic-engineering/ci/actions/nix-setup@main
+
+      - name: Download deps
+        run: nix develop -c gleam deps download
+
+      - name: Test
+        run: nix develop -c gleam test
+
+      - name: Publish to Hex.pm
+        run: nix develop -c gleam hex publish --yes
+        env:
+          HEXPM_API_KEY: ${{ secrets.HEX_API_KEY }}
