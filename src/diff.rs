@@ -1,22 +1,23 @@
+use crate::encoding::Encode;
 use crate::fragment::{self, Fragment};
 
 /// A change between two fragment trees.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Change {
+pub enum Change<E = String> {
     /// Fragment exists only in the new tree.
-    Added(Fragment),
+    Added(Fragment<E>),
     /// Fragment exists only in the old tree.
-    Removed(Fragment),
+    Removed(Fragment<E>),
     /// Same position, different content.
-    Modified { old: Fragment, new: Fragment },
+    Modified { old: Fragment<E>, new: Fragment<E> },
     /// Same ref, same content.
-    Unchanged(Fragment),
+    Unchanged(Fragment<E>),
 }
 
 /// Diff two fragment trees by their roots.
 /// Compares structurally: same hash = unchanged, different hash = modified.
 /// Children compared positionally.
-pub fn diff(old: &Fragment, new: &Fragment) -> Vec<Change> {
+pub fn diff<E: Encode + Clone>(old: &Fragment<E>, new: &Fragment<E>) -> Vec<Change<E>> {
     if fragment::content_oid(old) == fragment::content_oid(new) {
         vec![Change::Unchanged(old.clone())]
     } else {
@@ -24,7 +25,7 @@ pub fn diff(old: &Fragment, new: &Fragment) -> Vec<Change> {
     }
 }
 
-fn diff_fragments(old: &Fragment, new: &Fragment) -> Vec<Change> {
+fn diff_fragments<E: Encode + Clone>(old: &Fragment<E>, new: &Fragment<E>) -> Vec<Change<E>> {
     let mut changes = vec![Change::Modified {
         old: old.clone(),
         new: new.clone(),
@@ -35,7 +36,7 @@ fn diff_fragments(old: &Fragment, new: &Fragment) -> Vec<Change> {
     changes
 }
 
-fn diff_children(old: &[Fragment], new: &[Fragment]) -> Vec<Change> {
+fn diff_children<E: Encode + Clone>(old: &[Fragment<E>], new: &[Fragment<E>]) -> Vec<Change<E>> {
     let mut changes = Vec::new();
     let max_len = old.len().max(new.len());
 
@@ -52,7 +53,7 @@ fn diff_children(old: &[Fragment], new: &[Fragment]) -> Vec<Change> {
 }
 
 /// Summarize a list of changes: (added, removed, modified, unchanged).
-pub fn summary(changes: &[Change]) -> (usize, usize, usize, usize) {
+pub fn summary<E>(changes: &[Change<E>]) -> (usize, usize, usize, usize) {
     changes
         .iter()
         .fold((0, 0, 0, 0), |(a, r, m, u), change| match change {
