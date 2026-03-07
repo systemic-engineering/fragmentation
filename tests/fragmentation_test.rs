@@ -15,9 +15,9 @@ fn make_shard(data: &str) -> Fragment {
     Fragment::shard(r, data)
 }
 
-fn make_fragment(label: &str, children: Vec<Fragment>) -> Fragment {
+fn make_fractal(label: &str, children: Vec<Fragment>) -> Fragment {
     let r = Ref::new(sha::Sha(fragment::tree_oid(label, &children)), "self");
-    Fragment::new_fragment(r, label, children)
+    Fragment::fractal(r, label, children)
 }
 
 // ===========================================================================
@@ -140,15 +140,15 @@ fn fragment_construction() {
         sha::Sha(fragment::tree_oid("root-data", &[leaf.clone()])),
         "self",
     );
-    let f = Fragment::new_fragment(r.clone(), "root-data", vec![leaf.clone()]);
-    assert!(f.is_fragment());
+    let f = Fragment::fractal(r.clone(), "root-data", vec![leaf.clone()]);
+    assert!(f.is_fractal());
     assert_eq!(f.data(), "root-data");
     assert_eq!(f.children(), &[leaf]);
 }
 
 #[test]
 fn fragment_empty_children() {
-    let f = make_fragment("empty", vec![]);
+    let f = make_fractal("empty", vec![]);
     assert!(f.children().is_empty());
 }
 
@@ -156,7 +156,7 @@ fn fragment_empty_children() {
 fn fragment_multiple_children() {
     let a = make_shard("alpha");
     let b = make_shard("beta");
-    let f = make_fragment("parent", vec![a.clone(), b.clone()]);
+    let f = make_fractal("parent", vec![a.clone(), b.clone()]);
     assert_eq!(f.children(), &[a, b]);
 }
 
@@ -173,7 +173,7 @@ fn self_ref_shard() {
 
 #[test]
 fn self_ref_fragment() {
-    let f = make_fragment("node", vec![]);
+    let f = make_fractal("node", vec![]);
     let r = f.self_ref();
     assert_eq!(r.sha, sha::Sha(fragment::tree_oid("node", &[])));
 }
@@ -186,20 +186,20 @@ fn data_shard() {
 
 #[test]
 fn data_fragment() {
-    let f = make_fragment("payload", vec![]);
+    let f = make_fractal("payload", vec![]);
     assert_eq!(f.data(), "payload");
 }
 
 #[test]
 fn is_shard_test() {
     assert!(make_shard("x").is_shard());
-    assert!(!make_fragment("x", vec![]).is_shard());
+    assert!(!make_fractal("x", vec![]).is_shard());
 }
 
 #[test]
-fn is_fragment_test() {
-    assert!(make_fragment("x", vec![]).is_fragment());
-    assert!(!make_shard("x").is_fragment());
+fn is_fractal_test() {
+    assert!(make_fractal("x", vec![]).is_fractal());
+    assert!(!make_shard("x").is_fractal());
 }
 
 #[test]
@@ -315,7 +315,7 @@ fn walk_single_shard() {
 #[test]
 fn walk_depth_first() {
     let leaf = make_shard("leaf");
-    let parent = make_fragment("parent", vec![leaf]);
+    let parent = make_fractal("parent", vec![leaf]);
     let collected = walk::collect(&parent);
     assert_eq!(collected.len(), 2);
     assert_eq!(collected[0].data(), "parent");
@@ -324,8 +324,8 @@ fn walk_depth_first() {
 #[test]
 fn walk_nested_three_levels() {
     let leaf = make_shard("leaf");
-    let mid = make_fragment("mid", vec![leaf]);
-    let root = make_fragment("root", vec![mid]);
+    let mid = make_fractal("mid", vec![leaf]);
+    let root = make_fractal("root", vec![mid]);
     let collected = walk::collect(&root);
     assert_eq!(collected.len(), 3);
 }
@@ -335,28 +335,28 @@ fn walk_wide_tree() {
     let a = make_shard("a");
     let b = make_shard("b");
     let c = make_shard("c");
-    let root = make_fragment("root", vec![a, b, c]);
+    let root = make_fractal("root", vec![a, b, c]);
     let collected = walk::collect(&root);
     assert_eq!(collected.len(), 4);
 }
 
 #[test]
 fn walk_fold_count() {
-    let root = make_fragment("root", vec![make_shard("a"), make_shard("b")]);
+    let root = make_fractal("root", vec![make_shard("a"), make_shard("b")]);
     let count = walk::fold(&root, 0, &|acc, _frag| walk::Visitor::Continue(acc + 1));
     assert_eq!(count, 3);
 }
 
 #[test]
 fn walk_fold_stop() {
-    let root = make_fragment("root", vec![make_shard("a"), make_shard("b")]);
+    let root = make_fractal("root", vec![make_shard("a"), make_shard("b")]);
     let count = walk::fold(&root, 0, &|acc, _frag| walk::Visitor::Stop(acc + 1));
     assert_eq!(count, 1);
 }
 
 #[test]
 fn walk_fold_collect_data() {
-    let root = make_fragment("root", vec![make_shard("a"), make_shard("b")]);
+    let root = make_fractal("root", vec![make_shard("a"), make_shard("b")]);
     let data = walk::fold(&root, vec![], &|mut acc, frag| {
         acc.push(frag.data().to_string());
         walk::Visitor::Continue(acc)
@@ -374,23 +374,23 @@ fn walk_depth_shard() {
 
 #[test]
 fn walk_depth_one_level() {
-    let parent = make_fragment("parent", vec![make_shard("leaf")]);
+    let parent = make_fractal("parent", vec![make_shard("leaf")]);
     assert_eq!(walk::depth(&parent), 1);
 }
 
 #[test]
 fn walk_depth_two_levels() {
     let leaf = make_shard("leaf");
-    let mid = make_fragment("mid", vec![leaf]);
-    let root = make_fragment("root", vec![mid]);
+    let mid = make_fractal("mid", vec![leaf]);
+    let root = make_fractal("root", vec![mid]);
     assert_eq!(walk::depth(&root), 2);
 }
 
 #[test]
 fn walk_depth_asymmetric() {
-    let deep = make_fragment("deep", vec![make_shard("leaf")]);
+    let deep = make_fractal("deep", vec![make_shard("leaf")]);
     let shallow = make_shard("shallow");
-    let root = make_fragment("root", vec![deep, shallow]);
+    let root = make_fractal("root", vec![deep, shallow]);
     assert_eq!(walk::depth(&root), 2);
 }
 
@@ -398,7 +398,7 @@ fn walk_depth_asymmetric() {
 fn walk_find() {
     let target = make_shard("needle");
     let other = make_shard("hay");
-    let root = make_fragment("root", vec![other, target.clone()]);
+    let root = make_fractal("root", vec![other, target.clone()]);
     let result = walk::find(&root, &|f| f.data() == "needle");
     assert_eq!(result, Some(&target));
 }
@@ -413,8 +413,8 @@ fn walk_find_not_found() {
 #[test]
 fn walk_find_nested() {
     let target = make_shard("deep-needle");
-    let mid = make_fragment("mid", vec![target.clone()]);
-    let root = make_fragment("root", vec![make_shard("hay"), mid]);
+    let mid = make_fractal("mid", vec![target.clone()]);
+    let root = make_fractal("root", vec![make_shard("hay"), mid]);
     let result = walk::find(&root, &|f| f.data() == "deep-needle");
     assert_eq!(result, Some(&target));
 }
@@ -441,8 +441,8 @@ fn diff_different_roots() {
 #[test]
 fn diff_added_child() {
     let child = make_shard("child");
-    let old = make_fragment("root", vec![]);
-    let new = make_fragment("root", vec![child]);
+    let old = make_fractal("root", vec![]);
+    let new = make_fractal("root", vec![child]);
     let changes = diff::diff(&old, &new);
     assert!(changes.iter().any(|c| matches!(c, Change::Added(_))));
 }
@@ -450,8 +450,8 @@ fn diff_added_child() {
 #[test]
 fn diff_removed_child() {
     let child = make_shard("child");
-    let old = make_fragment("root", vec![child]);
-    let new = make_fragment("root", vec![]);
+    let old = make_fractal("root", vec![child]);
+    let new = make_fractal("root", vec![]);
     let changes = diff::diff(&old, &new);
     assert!(changes.iter().any(|c| matches!(c, Change::Removed(_))));
 }
@@ -483,8 +483,8 @@ fn diff_summary_empty() {
 #[test]
 fn parallel_branch_pattern() {
     let decision = make_shard("decision:allow");
-    let bias_root = make_fragment("bias", vec![decision]);
-    let trace = make_fragment("trace", vec![bias_root]);
+    let bias_root = make_fractal("bias", vec![decision]);
+    let trace = make_fractal("trace", vec![bias_root]);
     let collected = walk::collect(&trace);
     assert_eq!(collected.len(), 3);
 }
@@ -492,9 +492,9 @@ fn parallel_branch_pattern() {
 #[test]
 fn trace_chain() {
     let bias = make_shard("bias:v1");
-    let t1 = make_fragment("step:observe", vec![bias]);
-    let t2 = make_fragment("step:decide", vec![t1]);
-    let t3 = make_fragment("step:act", vec![t2]);
+    let t1 = make_fractal("step:observe", vec![bias]);
+    let t2 = make_fractal("step:decide", vec![t1]);
+    let t3 = make_fractal("step:act", vec![t2]);
     assert_eq!(walk::depth(&t3), 3);
     let collected = walk::collect(&t3);
     assert_eq!(collected.len(), 4);

@@ -11,9 +11,9 @@ fn make_shard(data: &str) -> Fragment {
     Fragment::shard(Ref::new(sha::Sha(oid), "self"), data)
 }
 
-fn make_fragment(label: &str, data: &str, children: Vec<Fragment>) -> Fragment {
+fn make_fractal(label: &str, data: &str, children: Vec<Fragment>) -> Fragment {
     let oid = fragment::tree_oid(data, &children);
-    Fragment::new_fragment(Ref::new(sha::Sha(oid), label), data, children)
+    Fragment::fractal(Ref::new(sha::Sha(oid), label), data, children)
 }
 
 // ===========================================================================
@@ -54,7 +54,7 @@ fn content_oid_shard_is_40_hex_chars() {
 #[test]
 fn content_oid_fragment_differs_from_shard_same_data() {
     let shard = make_shard("a");
-    let frag = make_fragment("test", "a", vec![]);
+    let frag = make_fractal("test", "a", vec![]);
     assert_ne!(fragment::content_oid(&shard), fragment::content_oid(&frag));
 }
 
@@ -139,7 +139,7 @@ mod git_native {
     fn write_tree_fragment_creates_tree() {
         let (_dir, repo) = init_repo();
         let child = make_shard("leaf");
-        let parent = make_fragment("root", "root-data", vec![child]);
+        let parent = make_fractal("root", "root-data", vec![child]);
         let oid = git::write_tree(&repo, &parent).unwrap();
         let obj = repo.find_object(oid, None).unwrap();
         assert_eq!(obj.kind(), Some(git2::ObjectType::Tree));
@@ -149,7 +149,7 @@ mod git_native {
     fn write_tree_fragment_has_data_and_children() {
         let (_dir, repo) = init_repo();
         let child = make_shard("leaf");
-        let parent = make_fragment("root", "root-data", vec![child]);
+        let parent = make_fractal("root", "root-data", vec![child]);
         let oid = git::write_tree(&repo, &parent).unwrap();
         let tree = repo.find_tree(oid).unwrap();
         assert_eq!(tree.len(), 2);
@@ -170,7 +170,7 @@ mod git_native {
     fn write_tree_fragment_oid_matches_content_oid() {
         let (_dir, repo) = init_repo();
         let child = make_shard("leaf");
-        let parent = make_fragment("root", "parent-data", vec![child]);
+        let parent = make_fractal("root", "parent-data", vec![child]);
         let git_oid = git::write_tree(&repo, &parent).unwrap();
         let mem_oid = fragment::content_oid(&parent);
         assert_eq!(git_oid.to_string(), mem_oid);
@@ -226,10 +226,10 @@ mod git_native {
     fn read_tree_roundtrip_fragment() {
         let (_dir, repo) = init_repo();
         let child = make_shard("leaf");
-        let parent = make_fragment("root", "parent-data", vec![child]);
+        let parent = make_fractal("root", "parent-data", vec![child]);
         let oid = git::write_tree(&repo, &parent).unwrap();
         let recovered = git::read_tree(&repo, oid).unwrap();
-        assert!(recovered.is_fragment());
+        assert!(recovered.is_fractal());
         assert_eq!(recovered.data(), "parent-data");
         assert_eq!(recovered.children().len(), 1);
         assert_eq!(recovered.children()[0].data(), "leaf");
@@ -241,7 +241,7 @@ mod git_native {
         let a = make_shard("alpha");
         let b = make_shard("beta");
         let c = make_shard("gamma");
-        let parent = make_fragment("root", "data", vec![a, b, c]);
+        let parent = make_fractal("root", "data", vec![a, b, c]);
         let oid = git::write_tree(&repo, &parent).unwrap();
         let recovered = git::read_tree(&repo, oid).unwrap();
         let data: Vec<&str> = recovered.children().iter().map(|f| f.data()).collect();

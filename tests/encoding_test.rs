@@ -57,9 +57,9 @@ fn encode_char_oid_is_blob_oid() {
 // ===========================================================================
 
 #[test]
-fn encode_word_is_fragment() {
+fn encode_word_is_fractal() {
     let result = encoding::encode_word("hi");
-    assert!(result.is_fragment());
+    assert!(result.is_fractal());
 }
 
 #[test]
@@ -107,9 +107,9 @@ fn encode_word_oid_matches_content_oid() {
 // ===========================================================================
 
 #[test]
-fn encode_paragraph_is_fragment() {
+fn encode_paragraph_is_fractal() {
     let result = encoding::encode_paragraph("hi reed");
-    assert!(result.is_fragment());
+    assert!(result.is_fractal());
 }
 
 #[test]
@@ -123,7 +123,7 @@ fn encode_paragraph_children_are_sentences() {
     let result = encoding::encode_paragraph("hi reed");
     let children = result.children();
     assert_eq!(children.len(), 1);
-    assert!(children.iter().all(|c| c.is_fragment()));
+    assert!(children.iter().all(|c| c.is_fractal()));
 }
 
 #[test]
@@ -157,9 +157,9 @@ fn encode_paragraph_filters_empty_words() {
 // ===========================================================================
 
 #[test]
-fn encode_sentence_is_fragment() {
+fn encode_sentence_is_fractal() {
     let result = encoding::encode_sentence("hello world");
-    assert!(result.is_fragment());
+    assert!(result.is_fractal());
 }
 
 #[test]
@@ -236,9 +236,9 @@ fn encode_paragraph_sentence_has_words() {
 // ===========================================================================
 
 #[test]
-fn encode_is_fragment() {
+fn encode_is_fractal() {
     let result = encoding::encode("Hi Reed.\n\nHow are you?");
-    assert!(result.is_fragment());
+    assert!(result.is_fractal());
 }
 
 #[test]
@@ -296,7 +296,7 @@ fn encode_document_oid_matches_content_oid() {
 fn ingest_returns_root_and_store() {
     let s = Store::new();
     let (root, updated) = encoding::ingest("hello", s);
-    assert!(root.is_fragment());
+    assert!(root.is_fractal());
     assert!(updated.size() > 0);
 }
 
