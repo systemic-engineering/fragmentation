@@ -144,7 +144,7 @@ impl fmt::Display for LocalKeysError {
 pub enum LocalKeys {
     Plain,
     #[cfg(feature = "ssh")]
-    Ssh(SshKey),
+    Ssh(Box<SshKey>),
     #[cfg(feature = "gpg")]
     Gpg(GpgKey),
 }
@@ -153,15 +153,35 @@ impl Keys for LocalKeys {
     type Error = LocalKeysError;
 
     fn sign<E>(&self, fragment: Fragment<E>) -> Result<Signed<Self, Fragment<E>>, Self::Error> {
-        todo!()
+        match self {
+            LocalKeys::Plain => Ok(Signed::new(fragment, vec![], LocalKeys::Plain)),
+            #[cfg(feature = "ssh")]
+            LocalKeys::Ssh(ssh_key) => {
+                let sha_bytes = fragment.self_ref().sha.0.as_bytes();
+                let signature = ssh_key.sign_bytes(sha_bytes)?;
+                Ok(Signed::new(fragment, signature, self.clone()))
+            }
+            #[cfg(feature = "gpg")]
+            LocalKeys::Gpg(gpg_key) => {
+                let sha_bytes = fragment.self_ref().sha.0.as_bytes();
+                let signature = gpg_key.sign_bytes(sha_bytes)?;
+                Ok(Signed::new(fragment, signature, self.clone()))
+            }
+        }
     }
 
     fn encrypt<E: Encode>(&self, fragment: Fragment<E>) -> Result<Encrypted<Self>, Self::Error> {
-        todo!()
+        // Pass-through for all variants this cycle.
+        Ok(Encrypted::new(fragment.data().encode(), self.clone()))
     }
 
     fn decrypt<E: Decode>(&self, encrypted: &Encrypted<Self>) -> Result<Fragment<E>, Self::Error> {
-        todo!()
+        // Pass-through for all variants this cycle.
+        let data = E::decode(&encrypted.ciphertext)
+            .map_err(|e| LocalKeysError::Decode(format!("{}", e)))?;
+        let sha = Sha(fragment::blob_oid_bytes(&encrypted.ciphertext));
+        let ref_ = Ref::new(sha, "decrypted");
+        Ok(Fragment::shard_typed(ref_, data))
     }
 }
 
@@ -179,17 +199,35 @@ pub struct SshKey {
 impl SshKey {
     /// Load an SSH private key from a file path.
     pub fn from_path(path: impl AsRef<std::path::Path>) -> Result<Self, ssh_key::Error> {
-        todo!()
+        let key = ssh_key::PrivateKey::read_openssh_file(path.as_ref())?;
+        Ok(SshKey { key })
     }
 
     /// Generate an Ed25519 key in memory (for testing).
     pub fn generate_ed25519() -> Result<Self, ssh_key::Error> {
-        todo!()
+        let key = ssh_key::PrivateKey::random(
+            &mut ssh_key::rand_core::OsRng,
+            ssh_key::Algorithm::Ed25519,
+        )?;
+        Ok(SshKey { key })
     }
 
     /// Write the private key to a file (for testing).
     pub fn write_to_file(&self, path: impl AsRef<std::path::Path>) -> Result<(), ssh_key::Error> {
-        todo!()
+        self.key
+            .write_openssh_file(path.as_ref(), ssh_key::LineEnding::LF)
+    }
+
+    /// Sign raw bytes, returning the PEM-encoded SSH signature.
+    fn sign_bytes(&self, data: &[u8]) -> Result<Vec<u8>, LocalKeysError> {
+        let sig = self
+            .key
+            .sign("fragmentation", ssh_key::HashAlg::Sha256, data)
+            .map_err(|e| LocalKeysError::Ssh(format!("{}", e)))?;
+        let pem = sig
+            .to_pem(ssh_key::LineEnding::LF)
+            .map_err(|e| LocalKeysError::Ssh(format!("{}", e)))?;
+        Ok(pem.into_bytes())
     }
 }
 
@@ -210,6 +248,46 @@ impl GpgKey {
             key_id: key_id.into(),
         }
     }
+
+    /// Sign raw bytes via gpg CLI, returning the detached signature.
+    fn sign_bytes(&self, data: &[u8]) -> Result<Vec<u8>, LocalKeysError> {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+
+        let mut child = Command::new("gpg")
+            .args([
+                "--detach-sign",
+                "--armor",
+                "-u",
+                &self.key_id,
+                "--batch",
+                "--yes",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| LocalKeysError::Gpg(format!("failed to spawn gpg: {}", e)))?;
+
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(data)
+            .map_err(|e| LocalKeysError::Gpg(format!("failed to write to gpg stdin: {}", e)))?;
+
+        let output = child
+            .wait_with_output()
+            .map_err(|e| LocalKeysError::Gpg(format!("gpg failed: {}", e)))?;
+
+        if !output.status.success() {
+            return Err(LocalKeysError::Gpg(
+                String::from_utf8_lossy(&output.stderr).to_string(),
+            ));
+        }
+
+        Ok(output.stdout)
+    }
 }
 
 // ===========================================================================
@@ -221,6 +299,24 @@ impl LocalKeys {
     /// Detect signing configuration from a git repository.
     /// Reads gpg.format and user.signingkey from git config.
     pub fn from_repo(repo: &git2::Repository) -> Result<Self, LocalKeysError> {
-        todo!()
+        let config = repo
+            .config()
+            .and_then(|c| c.open_level(git2::ConfigLevel::Local))
+            .map_err(|e| LocalKeysError::Decode(format!("failed to read git config: {}", e)))?;
+
+        let format = config.get_string("gpg.format").unwrap_or_default();
+        let signing_key = config.get_string("user.signingkey").ok();
+
+        match (format.as_str(), signing_key) {
+            #[cfg(feature = "ssh")]
+            ("ssh", Some(key_path)) => {
+                let ssh_key = SshKey::from_path(&key_path)
+                    .map_err(|e| LocalKeysError::Ssh(format!("{}", e)))?;
+                Ok(LocalKeys::Ssh(Box::new(ssh_key)))
+            }
+            #[cfg(feature = "gpg")]
+            ("openpgp" | "", Some(key_id)) => Ok(LocalKeys::Gpg(GpgKey::new(key_id))),
+            _ => Ok(LocalKeys::Plain),
+        }
     }
 }

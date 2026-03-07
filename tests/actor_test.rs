@@ -293,7 +293,7 @@ mod ssh_tests {
     #[test]
     fn ssh_key_sign_produces_signature() {
         let key = test_ssh_key();
-        let local = LocalKeys::Ssh(key);
+        let local = LocalKeys::Ssh(Box::new(key));
         let shard = make_blob_shard(vec![1, 2, 3]);
         let signed = local.sign(shard).unwrap();
         assert!(!signed.signature().is_empty());
@@ -302,7 +302,7 @@ mod ssh_tests {
     #[test]
     fn ssh_key_sign_preserves_content() {
         let key = test_ssh_key();
-        let local = LocalKeys::Ssh(key);
+        let local = LocalKeys::Ssh(Box::new(key));
         let shard = make_blob_shard(vec![1, 2, 3]);
         let signed = local.sign(shard.clone()).unwrap();
         assert_eq!(signed.into_inner().data(), shard.data());
@@ -311,16 +311,16 @@ mod ssh_tests {
     #[test]
     fn ssh_key_signed_carries_signer() {
         let key = test_ssh_key();
-        let local = LocalKeys::Ssh(key.clone());
+        let local = LocalKeys::Ssh(Box::new(key.clone()));
         let shard = make_blob_shard(vec![42]);
         let signed = local.sign(shard).unwrap();
-        assert_eq!(signed.signer(), &LocalKeys::Ssh(key));
+        assert_eq!(signed.signer(), &LocalKeys::Ssh(Box::new(key)));
     }
 
     #[test]
     fn ssh_key_encrypt_decrypt_roundtrip() {
         let key = test_ssh_key();
-        let local = LocalKeys::Ssh(key);
+        let local = LocalKeys::Ssh(Box::new(key));
         let data = vec![1, 2, 3];
         let shard = make_blob_shard(data.clone());
         let encrypted = local.encrypt(shard).unwrap();
