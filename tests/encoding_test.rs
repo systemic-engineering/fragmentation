@@ -86,7 +86,7 @@ fn encode_word_children_are_char_shards() {
 fn encode_word_children_data() {
     let result = encoding::encode_word("hi");
     let children = result.children();
-    let data: Vec<&str> = children.iter().map(|c| c.data()).collect();
+    let data: Vec<&str> = children.iter().map(|c| c.data().as_str()).collect();
     assert_eq!(data, vec!["h", "i"]);
 }
 

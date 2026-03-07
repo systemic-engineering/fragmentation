@@ -1,8 +1,53 @@
+use std::convert::Infallible;
+
 use crate::fragment::{self, Fragment};
 use crate::ref_::Ref;
 use crate::sha;
 use crate::store::Store;
 use crate::walk;
+
+// ===========================================================================
+// Encode / Decode traits
+// ===========================================================================
+
+pub trait Encode {
+    fn encode(&self) -> Vec<u8>;
+}
+
+pub trait Decode: Sized {
+    type Error: std::fmt::Display;
+    fn decode(bytes: &[u8]) -> Result<Self, Self::Error>;
+}
+
+impl Encode for Vec<u8> {
+    fn encode(&self) -> Vec<u8> {
+        self.clone()
+    }
+}
+
+impl Decode for Vec<u8> {
+    type Error = Infallible;
+    fn decode(bytes: &[u8]) -> Result<Self, Self::Error> {
+        Ok(bytes.to_vec())
+    }
+}
+
+impl Encode for String {
+    fn encode(&self) -> Vec<u8> {
+        self.as_bytes().to_vec()
+    }
+}
+
+impl Decode for String {
+    type Error = std::string::FromUtf8Error;
+    fn decode(bytes: &[u8]) -> Result<Self, Self::Error> {
+        String::from_utf8(bytes.to_vec())
+    }
+}
+
+// ===========================================================================
+// Text encoding (five-level trees: document/paragraph/sentence/word/char)
+// ===========================================================================
 
 /// Error type for decode failures.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -15,7 +60,7 @@ pub fn encode_char(ch: &str) -> Fragment {
     let label = format!("utf8/{}", ch);
     let s = sha::Sha(fragment::blob_oid(ch));
     let r = Ref::new(s, label);
-    Fragment::shard(r, ch)
+    Fragment::shard(r, ch.to_string())
 }
 
 /// Encode a word as a Fragment of character Shards.
@@ -24,7 +69,7 @@ pub fn encode_word(word: &str) -> Fragment {
     let label = format!("token/{}", word);
     let s = sha::Sha(fragment::tree_oid(word, &chars));
     let r = Ref::new(s, label);
-    Fragment::fractal(r, word, chars)
+    Fragment::fractal(r, word.to_string(), chars)
 }
 
 /// Encode a sentence as a Fragment of word Fragments.
@@ -36,7 +81,7 @@ pub fn encode_sentence(text: &str) -> Fragment {
         .collect();
     let s = sha::Sha(fragment::tree_oid(text, &words));
     let r = Ref::new(s, "sentence");
-    Fragment::fractal(r, text, words)
+    Fragment::fractal(r, text.to_string(), words)
 }
 
 /// Encode a paragraph as a Fragment of sentence Fragments.
@@ -48,7 +93,7 @@ pub fn encode_paragraph(text: &str) -> Fragment {
         .collect();
     let s = sha::Sha(fragment::tree_oid(text, &sentences));
     let r = Ref::new(s, "paragraph");
-    Fragment::fractal(r, text, sentences)
+    Fragment::fractal(r, text.to_string(), sentences)
 }
 
 /// Encode full text as a document Fragment.
@@ -61,7 +106,7 @@ pub fn encode(text: &str) -> Fragment {
         .collect();
     let s = sha::Sha(fragment::tree_oid(text, &paragraphs));
     let r = Ref::new(s, "document");
-    Fragment::fractal(r, text, paragraphs)
+    Fragment::fractal(r, text.to_string(), paragraphs)
 }
 
 /// Encode and store, returning root Fragment + updated Store (deduped).

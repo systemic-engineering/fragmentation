@@ -1,20 +1,21 @@
+use crate::encoding::Encode;
 use crate::ref_::Ref;
 
 /// A node in the possibility space.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Fragment {
+pub enum Fragment<E = String> {
     /// Terminal: self-addressed, carries data, stops.
-    Shard { ref_: Ref, data: String },
+    Shard { ref_: Ref, data: E },
     /// Self-similar: self-addressed, carries data, contains fragments.
     Fractal {
         ref_: Ref,
-        data: String,
-        fragments: Vec<Fragment>,
+        data: E,
+        fragments: Vec<Fragment<E>>,
     },
 }
 
-impl Fragment {
-    /// Create a shard. Terminal fragment.
+impl Fragment<String> {
+    /// Create a shard from string-like data. Terminal fragment.
     pub fn shard(ref_: Ref, data: impl Into<String>) -> Self {
         Fragment::Shard {
             ref_,
@@ -22,11 +23,27 @@ impl Fragment {
         }
     }
 
-    /// Create a fractal. Self-similar, contains other fragments.
-    pub fn fractal(ref_: Ref, data: impl Into<String>, fragments: Vec<Fragment>) -> Self {
+    /// Create a fractal from string-like data. Self-similar, contains other fragments.
+    pub fn fractal(ref_: Ref, data: impl Into<String>, fragments: Vec<Fragment<String>>) -> Self {
         Fragment::Fractal {
             ref_,
             data: data.into(),
+            fragments,
+        }
+    }
+}
+
+impl<E> Fragment<E> {
+    /// Create a shard with typed data. Terminal fragment.
+    pub fn shard_typed(ref_: Ref, data: E) -> Self {
+        Fragment::Shard { ref_, data }
+    }
+
+    /// Create a fractal with typed data. Self-similar, contains other fragments.
+    pub fn fractal_typed(ref_: Ref, data: E, fragments: Vec<Fragment<E>>) -> Self {
+        Fragment::Fractal {
+            ref_,
+            data,
             fragments,
         }
     }
@@ -40,7 +57,7 @@ impl Fragment {
     }
 
     /// Get the data from a fragment.
-    pub fn data(&self) -> &str {
+    pub fn data(&self) -> &E {
         match self {
             Fragment::Shard { data, .. } => data,
             Fragment::Fractal { data, .. } => data,
@@ -48,7 +65,7 @@ impl Fragment {
     }
 
     /// Get child fragments. Shards have none.
-    pub fn children(&self) -> &[Fragment] {
+    pub fn children(&self) -> &[Fragment<E>] {
         match self {
             Fragment::Shard { .. } => &[],
             Fragment::Fractal { fragments, .. } => fragments,
@@ -67,31 +84,42 @@ impl Fragment {
 }
 
 /// Compute a git-compatible content OID for a fragment.
-/// Shard → blob OID, Fragment → tree OID.
-/// Witness metadata is NOT included — same content = same OID.
-pub fn content_oid(frag: &Fragment) -> String {
+/// Shard -> blob OID, Fragment -> tree OID.
+/// Witness metadata is NOT included -- same content = same OID.
+pub fn content_oid<E: Encode>(frag: &Fragment<E>) -> String {
     match frag {
-        Fragment::Shard { data, .. } => blob_oid(data),
+        Fragment::Shard { data, .. } => blob_oid_bytes(&data.encode()),
         Fragment::Fractal {
             data, fragments, ..
-        } => tree_oid(data, fragments),
+        } => tree_oid_bytes(&data.encode(), fragments),
     }
 }
 
-/// Compute the git blob OID for raw data.
-/// SHA-1("blob {len}\0{data}") — matches `git hash-object --stdin`.
+/// Compute the git blob OID for string data.
+/// SHA-1("blob {len}\0{data}") -- matches `git hash-object --stdin`.
 pub fn blob_oid(data: &str) -> String {
+    blob_oid_bytes(data.as_bytes())
+}
+
+/// Compute the git blob OID for raw byte data.
+/// SHA-1("blob {len}\0{data}") -- matches `git hash-object --stdin`.
+pub fn blob_oid_bytes(data: &[u8]) -> String {
     use sha1::{Digest, Sha1};
     let header = format!("blob {}\0", data.len());
     let mut hasher = Sha1::new();
     hasher.update(header.as_bytes());
-    hasher.update(data.as_bytes());
+    hasher.update(data);
     hex::encode(hasher.finalize())
 }
 
 /// Compute the git tree OID for a fragment with data and children.
 /// Builds the same binary tree object that git would, then SHA-1 hashes it.
 pub fn tree_oid(data: &str, children: &[Fragment]) -> String {
+    tree_oid_bytes(data.as_bytes(), children)
+}
+
+/// Compute the git tree OID for a fragment with byte data and children.
+pub fn tree_oid_bytes<E: Encode>(data: &[u8], children: &[Fragment<E>]) -> String {
     use sha1::{Digest, Sha1};
 
     let tree_bytes = build_tree_bytes(data, children);
@@ -105,11 +133,11 @@ pub fn tree_oid(data: &str, children: &[Fragment]) -> String {
 /// Build the raw bytes of a git tree object (without header).
 /// Entries: ".data" blob + "0000", "0001", ... numbered children.
 /// Each entry: "{mode} {name}\0{20-byte SHA-1}"
-fn build_tree_bytes(data: &str, children: &[Fragment]) -> Vec<u8> {
+fn build_tree_bytes<E: Encode>(data: &[u8], children: &[Fragment<E>]) -> Vec<u8> {
     let mut entries: Vec<(String, u32, [u8; 20])> = Vec::new();
 
-    // .data entry — the fragment's own data as a blob
-    let data_oid_hex = blob_oid(data);
+    // .data entry -- the fragment's own data as a blob
+    let data_oid_hex = blob_oid_bytes(data);
     let data_oid_bytes = hex_to_bytes20(&data_oid_hex);
     entries.push((".data".to_string(), 0o100644, data_oid_bytes));
 

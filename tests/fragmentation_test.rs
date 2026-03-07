@@ -232,7 +232,7 @@ fn content_oid_different_data() {
 
 #[test]
 fn store_new_is_empty() {
-    let s = Store::new();
+    let s: Store = Store::new();
     assert_eq!(s.size(), 0);
 }
 
@@ -276,7 +276,7 @@ fn store_put_idempotent() {
 
 #[test]
 fn store_get_missing() {
-    let s = Store::new();
+    let s: Store = Store::new();
     assert_eq!(s.get(&sha::Sha("nope".into())), None);
 }
 
@@ -473,7 +473,7 @@ fn diff_summary() {
 
 #[test]
 fn diff_summary_empty() {
-    assert_eq!(diff::summary(&[]), (0, 0, 0, 0));
+    assert_eq!(diff::summary::<String>(&[]), (0, 0, 0, 0));
 }
 
 // ===========================================================================

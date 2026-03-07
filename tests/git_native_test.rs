@@ -244,7 +244,11 @@ mod git_native {
         let parent = make_fractal("root", "data", vec![a, b, c]);
         let oid = git::write_tree(&repo, &parent).unwrap();
         let recovered = git::read_tree(&repo, oid).unwrap();
-        let data: Vec<&str> = recovered.children().iter().map(|f| f.data()).collect();
+        let data: Vec<&str> = recovered
+            .children()
+            .iter()
+            .map(|f| f.data().as_str())
+            .collect();
         assert_eq!(data, vec!["alpha", "beta", "gamma"]);
     }
 }

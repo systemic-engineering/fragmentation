@@ -1,21 +1,27 @@
 #[cfg(feature = "git")]
+use crate::encoding::Encode;
+
+#[cfg(feature = "git")]
 use crate::fragment::Fragment;
 
 #[cfg(feature = "git")]
 use crate::witnessed::Witnessed;
 
 /// Write a fragment tree to git objects. Returns the root OID.
-/// Shard → blob, Fragment → tree with .data + numbered children.
+/// Shard -> blob, Fragment -> tree with .data + numbered children.
 #[cfg(feature = "git")]
-pub fn write_tree(repo: &git2::Repository, fragment: &Fragment) -> Result<git2::Oid, git2::Error> {
+pub fn write_tree<E: Encode>(
+    repo: &git2::Repository,
+    fragment: &Fragment<E>,
+) -> Result<git2::Oid, git2::Error> {
     match fragment {
-        Fragment::Shard { data, .. } => repo.blob(data.as_bytes()),
+        Fragment::Shard { data, .. } => repo.blob(&data.encode()),
         Fragment::Fractal {
             data, fragments, ..
         } => {
             let mut builder = repo.treebuilder(None)?;
 
-            let data_oid = repo.blob(data.as_bytes())?;
+            let data_oid = repo.blob(&data.encode())?;
             builder.insert(".data", data_oid, 0o100644)?;
 
             for (i, child) in fragments.iter().enumerate() {
@@ -32,9 +38,9 @@ pub fn write_tree(repo: &git2::Repository, fragment: &Fragment) -> Result<git2::
 /// Write a fragment and commit it. Returns the commit OID.
 /// Witnessed fields map to git author/committer. Message is pass-through.
 #[cfg(feature = "git")]
-pub fn write_commit(
+pub fn write_commit<E: Encode>(
     repo: &git2::Repository,
-    fragment: &Fragment,
+    fragment: &Fragment<E>,
     witnessed: &Witnessed,
     message: &str,
     parent: Option<&git2::Commit>,
@@ -63,8 +69,8 @@ pub fn write_commit(
     repo.commit(None, &author, &committer, message, &tree, &parents)
 }
 
-/// Reconstruct a Fragment from git objects.
-/// Blob → Shard, Tree → Fragment. Witness lives on the commit, not the tree.
+/// Reconstruct a Fragment<String> from git objects.
+/// Blob -> Shard, Tree -> Fragment. Witness lives on the commit, not the tree.
 #[cfg(feature = "git")]
 pub fn read_tree(
     repo: &git2::Repository,

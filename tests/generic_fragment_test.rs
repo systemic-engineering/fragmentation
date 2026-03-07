@@ -1,10 +1,10 @@
+use fragmentation::diff;
 use fragmentation::encoding::{Decode, Encode};
 use fragmentation::fragment::{self, Fragment};
 use fragmentation::ref_::Ref;
 use fragmentation::sha;
 use fragmentation::store::Store;
 use fragmentation::walk;
-use fragmentation::diff;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -12,15 +12,12 @@ use fragmentation::diff;
 
 fn make_bytes_shard(data: Vec<u8>) -> Fragment<Vec<u8>> {
     let r = Ref::new(sha::Sha(fragment::blob_oid_bytes(&data)), "self");
-    Fragment::shard(r, data)
+    Fragment::shard_typed(r, data)
 }
 
 fn make_bytes_fractal(label: &[u8], children: Vec<Fragment<Vec<u8>>>) -> Fragment<Vec<u8>> {
-    let r = Ref::new(
-        sha::Sha(fragment::tree_oid_bytes(label, &children)),
-        "self",
-    );
-    Fragment::fractal(r, label.to_vec(), children)
+    let r = Ref::new(sha::Sha(fragment::tree_oid_bytes(label, &children)), "self");
+    Fragment::fractal_typed(r, label.to_vec(), children)
 }
 
 // ===========================================================================
@@ -183,7 +180,7 @@ fn walk_bytes_find() {
     let target = make_bytes_shard(vec![0x42]);
     let other = make_bytes_shard(vec![0x00]);
     let root = make_bytes_fractal(b"root", vec![other, target.clone()]);
-    let result = walk::find(&root, &|f| f.data() == &vec![0x42u8]);
+    let result = walk::find(&root, &|f| *f.data() == vec![0x42u8]);
     assert_eq!(result, Some(&target));
 }
 
@@ -225,7 +222,9 @@ fn diff_bytes_modified() {
     let old = make_bytes_shard(vec![1]);
     let new = make_bytes_shard(vec![2]);
     let changes = diff::diff(&old, &new);
-    assert!(changes.iter().any(|c| matches!(c, diff::Change::Modified { .. })));
+    assert!(changes
+        .iter()
+        .any(|c| matches!(c, diff::Change::Modified { .. })));
 }
 
 #[test]
