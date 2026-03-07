@@ -75,7 +75,7 @@ pub fn write_commit<E: Encode>(
 pub fn read_tree(
     repo: &git2::Repository,
     oid: git2::Oid,
-) -> Result<Fragment, Box<dyn std::error::Error>> {
+) -> Result<Fragment<String>, Box<dyn std::error::Error>> {
     use crate::ref_::Ref;
     use crate::sha::Sha;
 

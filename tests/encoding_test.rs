@@ -294,7 +294,7 @@ fn encode_document_oid_matches_content_oid() {
 
 #[test]
 fn ingest_returns_root_and_store() {
-    let s = Store::new();
+    let s: Store<String> = Store::new();
     let (root, updated) = encoding::ingest("hello", s);
     assert!(root.is_fractal());
     assert!(updated.size() > 0);
@@ -302,21 +302,21 @@ fn ingest_returns_root_and_store() {
 
 #[test]
 fn ingest_deduplicates_repeated_words() {
-    let s = Store::new();
+    let s: Store<String> = Store::new();
     let (_root, updated) = encoding::ingest("the the the", s);
     assert_eq!(updated.size(), 7);
 }
 
 #[test]
 fn ingest_all_unique_words() {
-    let s = Store::new();
+    let s: Store<String> = Store::new();
     let (_root, updated) = encoding::ingest("a b", s);
     assert_eq!(updated.size(), 7);
 }
 
 #[test]
 fn ingest_preserves_existing_store() {
-    let s = Store::new();
+    let s: Store<String> = Store::new();
     let (_r1, s1) = encoding::ingest("hi", s);
     let (_r2, s2) = encoding::ingest("hi there", s1);
     assert_eq!(s2.size(), 13);

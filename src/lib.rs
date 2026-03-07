@@ -1,7 +1,9 @@
+pub mod actor;
 pub mod diff;
 pub mod encoding;
 pub mod fragment;
 pub mod git;
+pub mod keys;
 pub mod ref_;
 pub mod sha;
 pub mod store;

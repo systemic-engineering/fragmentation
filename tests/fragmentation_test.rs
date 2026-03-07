@@ -10,12 +10,12 @@ use fragmentation::witnessed::{Author, Committer, Message, Timestamp, Witnessed}
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn make_shard(data: &str) -> Fragment {
+fn make_shard(data: &str) -> Fragment<String> {
     let r = Ref::new(sha::Sha(fragment::blob_oid(data)), "self");
     Fragment::shard(r, data)
 }
 
-fn make_fractal(label: &str, children: Vec<Fragment>) -> Fragment {
+fn make_fractal(label: &str, children: Vec<Fragment<String>>) -> Fragment<String> {
     let r = Ref::new(sha::Sha(fragment::tree_oid(label, &children)), "self");
     Fragment::fractal(r, label, children)
 }
@@ -175,7 +175,7 @@ fn self_ref_shard() {
 fn self_ref_fragment() {
     let f = make_fractal("node", vec![]);
     let r = f.self_ref();
-    assert_eq!(r.sha, sha::Sha(fragment::tree_oid("node", &[])));
+    assert_eq!(r.sha, sha::Sha(fragment::tree_oid::<String>("node", &[])));
 }
 
 #[test]
@@ -232,14 +232,14 @@ fn content_oid_different_data() {
 
 #[test]
 fn store_new_is_empty() {
-    let s: Store = Store::new();
+    let s: Store<String> = Store::new();
     assert_eq!(s.size(), 0);
 }
 
 #[test]
 fn store_put_and_get() {
     let frag = make_shard("hello");
-    let mut s = Store::new();
+    let mut s: Store<String> = Store::new();
     s.put(frag.clone());
     let sha = &frag.self_ref().sha;
     assert_eq!(s.get(sha), Some(&frag));
@@ -248,7 +248,7 @@ fn store_put_and_get() {
 #[test]
 fn store_has() {
     let frag = make_shard("exists");
-    let mut s = Store::new();
+    let mut s: Store<String> = Store::new();
     s.put(frag.clone());
     let sha = &frag.self_ref().sha;
     assert!(s.has(sha));
@@ -257,7 +257,7 @@ fn store_has() {
 
 #[test]
 fn store_size() {
-    let mut s = Store::new();
+    let mut s: Store<String> = Store::new();
     assert_eq!(s.size(), 0);
     s.put(make_shard("a"));
     assert_eq!(s.size(), 1);
@@ -268,7 +268,7 @@ fn store_size() {
 #[test]
 fn store_put_idempotent() {
     let frag = make_shard("same");
-    let mut s = Store::new();
+    let mut s: Store<String> = Store::new();
     s.put(frag.clone());
     s.put(frag);
     assert_eq!(s.size(), 1);
@@ -276,15 +276,15 @@ fn store_put_idempotent() {
 
 #[test]
 fn store_get_missing() {
-    let s: Store = Store::new();
+    let s: Store<String> = Store::new();
     assert_eq!(s.get(&sha::Sha("nope".into())), None);
 }
 
 #[test]
 fn store_merge() {
-    let mut a = Store::new();
+    let mut a: Store<String> = Store::new();
     a.put(make_shard("alpha"));
-    let mut b = Store::new();
+    let mut b: Store<String> = Store::new();
     b.put(make_shard("beta"));
     a.merge(b);
     assert_eq!(a.size(), 2);
@@ -293,9 +293,9 @@ fn store_merge() {
 #[test]
 fn store_merge_dedup() {
     let frag = make_shard("shared");
-    let mut a = Store::new();
+    let mut a: Store<String> = Store::new();
     a.put(frag.clone());
-    let mut b = Store::new();
+    let mut b: Store<String> = Store::new();
     b.put(frag);
     a.merge(b);
     assert_eq!(a.size(), 1);

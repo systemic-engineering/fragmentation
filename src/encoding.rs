@@ -15,7 +15,7 @@ pub trait Encode {
 }
 
 pub trait Decode: Sized {
-    type Error: std::fmt::Display;
+    type Error: std::fmt::Display + std::fmt::Debug;
     fn decode(bytes: &[u8]) -> Result<Self, Self::Error>;
 }
 
@@ -56,7 +56,7 @@ pub enum DecodeError {
 }
 
 /// Encode a single character as a Shard.
-pub fn encode_char(ch: &str) -> Fragment {
+pub fn encode_char(ch: &str) -> Fragment<String> {
     let label = format!("utf8/{}", ch);
     let s = sha::Sha(fragment::blob_oid(ch));
     let r = Ref::new(s, label);
@@ -64,8 +64,8 @@ pub fn encode_char(ch: &str) -> Fragment {
 }
 
 /// Encode a word as a Fragment of character Shards.
-pub fn encode_word(word: &str) -> Fragment {
-    let chars: Vec<Fragment> = word.chars().map(|c| encode_char(&c.to_string())).collect();
+pub fn encode_word(word: &str) -> Fragment<String> {
+    let chars: Vec<Fragment<String>> = word.chars().map(|c| encode_char(&c.to_string())).collect();
     let label = format!("token/{}", word);
     let s = sha::Sha(fragment::tree_oid(word, &chars));
     let r = Ref::new(s, label);
@@ -73,8 +73,8 @@ pub fn encode_word(word: &str) -> Fragment {
 }
 
 /// Encode a sentence as a Fragment of word Fragments.
-pub fn encode_sentence(text: &str) -> Fragment {
-    let words: Vec<Fragment> = text
+pub fn encode_sentence(text: &str) -> Fragment<String> {
+    let words: Vec<Fragment<String>> = text
         .split(' ')
         .filter(|w| !w.is_empty())
         .map(encode_word)
@@ -85,8 +85,8 @@ pub fn encode_sentence(text: &str) -> Fragment {
 }
 
 /// Encode a paragraph as a Fragment of sentence Fragments.
-pub fn encode_paragraph(text: &str) -> Fragment {
-    let sentences: Vec<Fragment> = split_sentences(text)
+pub fn encode_paragraph(text: &str) -> Fragment<String> {
+    let sentences: Vec<Fragment<String>> = split_sentences(text)
         .into_iter()
         .filter(|s| !s.is_empty())
         .map(|s| encode_sentence(&s))
@@ -98,8 +98,8 @@ pub fn encode_paragraph(text: &str) -> Fragment {
 
 /// Encode full text as a document Fragment.
 /// Splits on double newlines into paragraphs.
-pub fn encode(text: &str) -> Fragment {
-    let paragraphs: Vec<Fragment> = text
+pub fn encode(text: &str) -> Fragment<String> {
+    let paragraphs: Vec<Fragment<String>> = text
         .split("\n\n")
         .filter(|p| !p.is_empty())
         .map(encode_paragraph)
@@ -110,7 +110,7 @@ pub fn encode(text: &str) -> Fragment {
 }
 
 /// Encode and store, returning root Fragment + updated Store (deduped).
-pub fn ingest(text: &str, mut store: Store) -> (Fragment, Store) {
+pub fn ingest(text: &str, mut store: Store<String>) -> (Fragment<String>, Store<String>) {
     let root = encode(text);
     for frag in walk::collect(&root) {
         store.put(frag.clone());
@@ -119,7 +119,7 @@ pub fn ingest(text: &str, mut store: Store) -> (Fragment, Store) {
 }
 
 /// Decode a Fragment tree back to text.
-pub fn decode(fragment: &Fragment) -> Result<String, DecodeError> {
+pub fn decode(fragment: &Fragment<String>) -> Result<String, DecodeError> {
     Ok(fragment.data().to_string())
 }
 

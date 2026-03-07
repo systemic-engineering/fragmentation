@@ -1,9 +1,11 @@
 use crate::encoding::Encode;
 use crate::fragment::{self, Fragment};
 
+use crate::fragment::Blob;
+
 /// A change between two fragment trees.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Change<E = String> {
+pub enum Change<E = Blob> {
     /// Fragment exists only in the new tree.
     Added(Fragment<E>),
     /// Fragment exists only in the old tree.

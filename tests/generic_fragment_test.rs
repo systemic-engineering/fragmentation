@@ -237,13 +237,23 @@ fn diff_bytes_added_child() {
 }
 
 // ===========================================================================
-// String default still works (existing API unchanged)
+// Blob default (Fragment without type parameter is Fragment<Blob>)
 // ===========================================================================
 
 #[test]
-fn default_type_parameter_is_string() {
-    // Fragment without type parameter should be Fragment<String>
+fn default_type_parameter_is_blob() {
+    // Fragment without type parameter should be Fragment<Blob>
+    use fragmentation::fragment::Blob;
+    let data: Blob = vec![0xCA, 0xFE];
+    let r = Ref::new(sha::Sha(fragment::blob_oid_bytes(&data)), "self");
+    let s: Fragment = Fragment::shard_typed(r, data.clone());
+    assert_eq!(s.data(), &data);
+}
+
+#[test]
+fn string_fragment_still_works() {
+    // Fragment<String> still works with convenience constructors
     let r = Ref::new(sha::Sha(fragment::blob_oid("hello")), "self");
-    let s: Fragment = Fragment::shard(r, "hello");
+    let s: Fragment<String> = Fragment::shard(r, "hello");
     assert_eq!(s.data(), "hello");
 }

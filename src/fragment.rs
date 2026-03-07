@@ -1,9 +1,13 @@
 use crate::encoding::Encode;
 use crate::ref_::Ref;
 
+/// Raw bytes. The default data type for fragments.
+/// String is a lens an actor applies.
+pub type Blob = Vec<u8>;
+
 /// A node in the possibility space.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Fragment<E = String> {
+pub enum Fragment<E = Blob> {
     /// Terminal: self-addressed, carries data, stops.
     Shard { ref_: Ref, data: E },
     /// Self-similar: self-addressed, carries data, contains fragments.
@@ -114,7 +118,7 @@ pub fn blob_oid_bytes(data: &[u8]) -> String {
 
 /// Compute the git tree OID for a fragment with data and children.
 /// Builds the same binary tree object that git would, then SHA-1 hashes it.
-pub fn tree_oid(data: &str, children: &[Fragment]) -> String {
+pub fn tree_oid<E: Encode>(data: &str, children: &[Fragment<E>]) -> String {
     tree_oid_bytes(data.as_bytes(), children)
 }
 

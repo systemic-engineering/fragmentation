@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
-use crate::fragment::Fragment;
+use crate::fragment::{Blob, Fragment};
 use crate::sha::Sha;
 
 /// Content-addressed fragment store.
 #[derive(Clone, Debug)]
-pub struct Store<E = String> {
+pub struct Store<E = Blob> {
     fragments: HashMap<String, Fragment<E>>,
 }
 

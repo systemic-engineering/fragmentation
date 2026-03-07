@@ -6,12 +6,12 @@ use fragmentation::sha;
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn make_shard(data: &str) -> Fragment {
+fn make_shard(data: &str) -> Fragment<String> {
     let oid = fragment::blob_oid(data);
     Fragment::shard(Ref::new(sha::Sha(oid), "self"), data)
 }
 
-fn make_fractal(label: &str, data: &str, children: Vec<Fragment>) -> Fragment {
+fn make_fractal(label: &str, data: &str, children: Vec<Fragment<String>>) -> Fragment<String> {
     let oid = fragment::tree_oid(data, &children);
     Fragment::fractal(Ref::new(sha::Sha(oid), label), data, children)
 }
@@ -78,7 +78,7 @@ fn blob_oid_hello() {
 
 #[test]
 fn tree_oid_is_40_hex_chars() {
-    let oid = fragment::tree_oid("data", &[]);
+    let oid = fragment::tree_oid::<String>("data", &[]);
     assert_eq!(oid.len(), 40);
     assert!(oid.chars().all(|c| c.is_ascii_hexdigit()));
 }
