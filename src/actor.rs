@@ -1,6 +1,6 @@
 use crate::encoding::{Decode, Encode};
 use crate::fragment::{Blob, Fragment};
-use crate::keys::{Encrypted, Keys, PlainKeys, Signed};
+use crate::keys::{Encrypted, Keys, LocalKeys, Signed};
 
 /// Witness identity with encoding boundary.
 ///
@@ -10,7 +10,7 @@ use crate::keys::{Encrypted, Keys, PlainKeys, Signed};
 ///
 /// fn pointers, not closures — simple, cloneable, deterministic.
 #[derive(Clone)]
-pub struct Actor<A = Blob, B = Blob, K: Keys = PlainKeys> {
+pub struct Actor<A = Blob, B = Blob, K: Keys = LocalKeys> {
     name: String,
     email: String,
     encoder: fn(&Fragment<A>) -> Fragment<B>,
@@ -19,7 +19,7 @@ pub struct Actor<A = Blob, B = Blob, K: Keys = PlainKeys> {
 }
 
 impl Actor {
-    /// Default actor: bytes-to-bytes identity, plain keys.
+    /// Default actor: bytes-to-bytes identity, local keys (plain).
     pub fn identity(name: impl Into<String>, email: impl Into<String>) -> Self {
         fn id(f: &Fragment<Blob>) -> Fragment<Blob> {
             f.clone()
@@ -29,7 +29,7 @@ impl Actor {
             email: email.into(),
             encoder: id,
             decoder: id,
-            keys: PlainKeys,
+            keys: LocalKeys::Plain,
         }
     }
 }
@@ -78,12 +78,12 @@ impl<A, B, K: Keys> Actor<A, B, K> {
     }
 
     /// Sign an encoded fragment.
-    pub fn sign(&self, fragment: Fragment<B>) -> Signed<K, Fragment<B>> {
+    pub fn sign(&self, fragment: Fragment<B>) -> Result<Signed<K, Fragment<B>>, K::Error> {
         self.keys.sign(fragment)
     }
 
     /// Encrypt an encoded fragment.
-    pub fn encrypt(&self, fragment: Fragment<B>) -> Encrypted<K>
+    pub fn encrypt(&self, fragment: Fragment<B>) -> Result<Encrypted<K>, K::Error>
     where
         B: Encode,
     {
@@ -91,7 +91,7 @@ impl<A, B, K: Keys> Actor<A, B, K> {
     }
 
     /// Decrypt to an encoded fragment.
-    pub fn decrypt(&self, encrypted: &Encrypted<K>) -> Fragment<B>
+    pub fn decrypt(&self, encrypted: &Encrypted<K>) -> Result<Fragment<B>, K::Error>
     where
         B: Decode,
     {
