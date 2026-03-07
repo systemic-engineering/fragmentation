@@ -20,12 +20,12 @@ fn test_witnessed() -> Witnessed {
 }
 
 fn make_shard(data: &str) -> Fragment {
-    let r = Ref::new(sha::hash(data), "self");
+    let r = Ref::new(sha::Sha(fragment::blob_oid(data)), "self");
     Fragment::shard(r, test_witnessed(), data)
 }
 
 fn make_fragment(label: &str, children: Vec<Fragment>) -> Fragment {
-    let r = Ref::new(sha::hash(label), "self");
+    let r = Ref::new(sha::Sha(fragment::tree_oid(label, &children)), "self");
     Fragment::new_fragment(r, test_witnessed(), label, children)
 }
 
@@ -88,13 +88,6 @@ fn ref_construction() {
     assert_eq!(r.label, "parent");
 }
 
-// Cross-verification: ref serialization
-#[test]
-fn ref_serialize_cross_verify() {
-    let r = Ref::new(sha::Sha("abc123".into()), "self");
-    assert_eq!(fragmentation::ref_::serialize_ref(&r), "ref:abc123:self");
-}
-
 // ===========================================================================
 // Witnessed value types
 // ===========================================================================
@@ -141,47 +134,13 @@ fn witnessed_construction() {
     assert_eq!(w.message, Message("initial".into()));
 }
 
-#[test]
-fn witnessed_serialize_deterministic() {
-    let w = test_witnessed();
-    let s1 = fragmentation::witnessed::serialize_witnessed(&w);
-    let s2 = fragmentation::witnessed::serialize_witnessed(&w);
-    assert_eq!(s1, s2);
-}
-
-#[test]
-fn witnessed_fields_in_serialization() {
-    let w = Witnessed::new(
-        Author("alex".into()),
-        Committer("reed".into()),
-        Timestamp("2026-03-01".into()),
-        Message("commit msg".into()),
-    );
-    let s = fragmentation::witnessed::serialize_witnessed(&w);
-    assert!(s.contains("author:alex"));
-    assert!(s.contains("committer:reed"));
-    assert!(s.contains("timestamp:2026-03-01"));
-    assert!(s.contains("message:commit msg"));
-}
-
-// Cross-verification: witnessed serialization byte-identical to Gleam
-#[test]
-fn witnessed_serialize_cross_verify() {
-    let w = test_witnessed();
-    let s = fragmentation::witnessed::serialize_witnessed(&w);
-    assert_eq!(
-        s,
-        "author:alex\ncommitter:reed\ntimestamp:2026-03-01T00:00:00Z\nmessage:test"
-    );
-}
-
 // ===========================================================================
 // Fragment construction
 // ===========================================================================
 
 #[test]
 fn shard_construction() {
-    let r = Ref::new(sha::hash("data"), "self");
+    let r = Ref::new(sha::Sha(fragment::blob_oid("hello")), "self");
     let w = test_witnessed();
     let s = Fragment::shard(r.clone(), w.clone(), "hello");
     assert!(s.is_shard());
@@ -192,7 +151,10 @@ fn shard_construction() {
 #[test]
 fn fragment_construction() {
     let leaf = make_shard("leaf-data");
-    let r = Ref::new(sha::hash("root"), "self");
+    let r = Ref::new(
+        sha::Sha(fragment::tree_oid("root-data", &[leaf.clone()])),
+        "self",
+    );
     let w = test_witnessed();
     let f = Fragment::new_fragment(r.clone(), w, "root-data", vec![leaf.clone()]);
     assert!(f.is_fragment());
@@ -222,14 +184,14 @@ fn fragment_multiple_children() {
 fn self_ref_shard() {
     let s = make_shard("data");
     let r = s.self_ref();
-    assert_eq!(r.sha, sha::hash("data"));
+    assert_eq!(r.sha, sha::Sha(fragment::blob_oid("data")));
 }
 
 #[test]
 fn self_ref_fragment() {
     let f = make_fragment("node", vec![]);
     let r = f.self_ref();
-    assert_eq!(r.sha, sha::hash("node"));
+    assert_eq!(r.sha, sha::Sha(fragment::tree_oid("node", &[])));
 }
 
 #[test]
@@ -272,23 +234,23 @@ fn children_shard() {
 // ===========================================================================
 
 #[test]
-fn hash_fragment_deterministic() {
+fn content_oid_deterministic() {
     let s = make_shard("hello");
-    let h1 = fragment::hash_fragment(&s);
-    let h2 = fragment::hash_fragment(&s);
+    let h1 = fragment::content_oid(&s);
+    let h2 = fragment::content_oid(&s);
     assert_eq!(h1, h2);
 }
 
 #[test]
-fn hash_fragment_different_data() {
+fn content_oid_different_data() {
     let s1 = make_shard("hello");
     let s2 = make_shard("world");
-    assert_ne!(fragment::hash_fragment(&s1), fragment::hash_fragment(&s2));
+    assert_ne!(fragment::content_oid(&s1), fragment::content_oid(&s2));
 }
 
 #[test]
-fn hash_fragment_witnessed_matters() {
-    let r = Ref::new(sha::hash("x"), "self");
+fn content_oid_witness_excluded() {
+    let r = Ref::new(sha::Sha("placeholder".into()), "self");
     let w1 = Witnessed::new(
         Author("alex".into()),
         Committer("reed".into()),
@@ -303,58 +265,8 @@ fn hash_fragment_witnessed_matters() {
     );
     let s1 = Fragment::shard(r.clone(), w1, "same-data");
     let s2 = Fragment::shard(r, w2, "same-data");
-    // Different witness = different hash (different witness = different reality)
-    assert_ne!(fragment::hash_fragment(&s1), fragment::hash_fragment(&s2));
-}
-
-#[test]
-fn serialize_roundtrip_hash() {
-    let s = make_shard("test");
-    let hash_direct = fragment::hash_fragment(&s);
-    let hash_via_serial = sha::hash(&fragment::serialize(&s)).0;
-    assert_eq!(hash_direct, hash_via_serial);
-}
-
-#[test]
-fn serialize_shard_not_empty() {
-    let s = make_shard("data");
-    assert!(!fragment::serialize(&s).is_empty());
-}
-
-#[test]
-fn serialize_fragment_not_empty() {
-    let f = make_fragment("root", vec![make_shard("leaf")]);
-    assert!(!fragment::serialize(&f).is_empty());
-}
-
-// Cross-verification: shard serialization + hash byte-identical to Gleam
-#[test]
-fn shard_serialize_cross_verify() {
-    let w = test_witnessed();
-    let r = Ref::new(sha::hash("hello"), "self");
-    let shard = Fragment::shard(r, w, "hello");
-    let serialized = fragment::serialize(&shard);
-    assert_eq!(
-        serialized,
-        "shard\nref:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824:self\nauthor:alex\ncommitter:reed\ntimestamp:2026-03-01T00:00:00Z\nmessage:test\ndata:hello"
-    );
-    assert_eq!(
-        fragment::hash_fragment(&shard),
-        "8062ef8eb771914801e151d56008935d47afef6c2bbe5ebfe6361180c50de541"
-    );
-}
-
-// Cross-verification: fragment serialization + hash byte-identical to Gleam
-#[test]
-fn fragment_serialize_cross_verify() {
-    let w = test_witnessed();
-    let child = Fragment::shard(Ref::new(sha::hash("leaf"), "self"), w.clone(), "leaf");
-    let parent =
-        Fragment::new_fragment(Ref::new(sha::hash("root"), "self"), w, "root", vec![child]);
-    assert_eq!(
-        fragment::hash_fragment(&parent),
-        "6a028972957fa706d9cb5eb37a8c359fd745a34d8ac55486ea2156dc2ffc07b9"
-    );
+    // Same content, different witness = same OID
+    assert_eq!(fragment::content_oid(&s1), fragment::content_oid(&s2));
 }
 
 // ===========================================================================
@@ -612,29 +524,6 @@ fn diff_summary_empty() {
 // ===========================================================================
 
 #[test]
-fn different_witness_different_hash() {
-    let r = Ref::new(sha::hash("x"), "self");
-    let w_alex = Witnessed::new(
-        Author("alex".into()),
-        Committer("alex".into()),
-        Timestamp("2026-03-01".into()),
-        Message("observed".into()),
-    );
-    let w_reed = Witnessed::new(
-        Author("reed".into()),
-        Committer("reed".into()),
-        Timestamp("2026-03-01".into()),
-        Message("traced".into()),
-    );
-    let s_alex = Fragment::shard(r.clone(), w_alex, "same-data");
-    let s_reed = Fragment::shard(r, w_reed, "same-data");
-    assert_ne!(
-        fragment::hash_fragment(&s_alex),
-        fragment::hash_fragment(&s_reed)
-    );
-}
-
-#[test]
 fn parallel_branch_pattern() {
     let decision = make_shard("decision:allow");
     let bias_root = make_fragment("bias", vec![decision]);
@@ -656,7 +545,7 @@ fn trace_chain() {
 
 #[test]
 fn author_committer_split() {
-    let r = Ref::new(sha::hash("decision"), "self");
+    let r = Ref::new(sha::Sha(fragment::blob_oid("decision:allow")), "self");
     let w = Witnessed::new(
         Author("alex".into()),
         Committer("reed".into()),

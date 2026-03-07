@@ -1,4 +1,4 @@
-use crate::fragment::Fragment;
+use crate::fragment::{self, Fragment};
 use crate::ref_::Ref;
 use crate::sha;
 use crate::store::Store;
@@ -11,15 +11,10 @@ pub enum DecodeError {
     UnknownLabel(String),
 }
 
-/// Hash data with its label namespace to avoid cross-level collisions.
-fn labeled_hash(label: &str, data: &str) -> sha::Sha {
-    sha::hash(&format!("{}:{}", label, data))
-}
-
 /// Encode a single character as a Shard.
 pub fn encode_char(ch: &str, witness: &Witnessed) -> Fragment {
     let label = format!("utf8/{}", ch);
-    let s = labeled_hash(&label, ch);
+    let s = sha::Sha(fragment::blob_oid(ch));
     let r = Ref::new(s, label);
     Fragment::shard(r, witness.clone(), ch)
 }
@@ -31,7 +26,7 @@ pub fn encode_word(word: &str, witness: &Witnessed) -> Fragment {
         .map(|c| encode_char(&c.to_string(), witness))
         .collect();
     let label = format!("token/{}", word);
-    let s = labeled_hash(&label, word);
+    let s = sha::Sha(fragment::tree_oid(word, &chars));
     let r = Ref::new(s, label);
     Fragment::new_fragment(r, witness.clone(), word, chars)
 }
@@ -43,7 +38,7 @@ pub fn encode_sentence(text: &str, witness: &Witnessed) -> Fragment {
         .filter(|w| !w.is_empty())
         .map(|w| encode_word(w, witness))
         .collect();
-    let s = labeled_hash("sentence", text);
+    let s = sha::Sha(fragment::tree_oid(text, &words));
     let r = Ref::new(s, "sentence");
     Fragment::new_fragment(r, witness.clone(), text, words)
 }
@@ -55,7 +50,7 @@ pub fn encode_paragraph(text: &str, witness: &Witnessed) -> Fragment {
         .filter(|s| !s.is_empty())
         .map(|s| encode_sentence(&s, witness))
         .collect();
-    let s = labeled_hash("paragraph", text);
+    let s = sha::Sha(fragment::tree_oid(text, &sentences));
     let r = Ref::new(s, "paragraph");
     Fragment::new_fragment(r, witness.clone(), text, sentences)
 }
@@ -68,7 +63,7 @@ pub fn encode(text: &str, witness: &Witnessed) -> Fragment {
         .filter(|p| !p.is_empty())
         .map(|p| encode_paragraph(p, witness))
         .collect();
-    let s = labeled_hash("document", text);
+    let s = sha::Sha(fragment::tree_oid(text, &paragraphs));
     let r = Ref::new(s, "document");
     Fragment::new_fragment(r, witness.clone(), text, paragraphs)
 }

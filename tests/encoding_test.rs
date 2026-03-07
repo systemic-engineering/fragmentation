@@ -47,7 +47,7 @@ fn encode_char_deterministic() {
     let w = test_witnessed();
     let a = encoding::encode_char("a", &w);
     let b = encoding::encode_char("a", &w);
-    assert_eq!(fragment::hash_fragment(&a), fragment::hash_fragment(&b));
+    assert_eq!(fragment::content_oid(&a), fragment::content_oid(&b));
 }
 
 #[test]
@@ -59,22 +59,18 @@ fn encode_char_multibyte() {
 }
 
 #[test]
-fn encode_char_different_chars_different_hash() {
+fn encode_char_different_chars_different_oid() {
     let w = test_witnessed();
     let a = encoding::encode_char("a", &w);
     let b = encoding::encode_char("b", &w);
-    assert_ne!(fragment::hash_fragment(&a), fragment::hash_fragment(&b));
+    assert_ne!(fragment::content_oid(&a), fragment::content_oid(&b));
 }
 
-// Cross-verification: encode_char hash matches Gleam
 #[test]
-fn encode_char_cross_verify() {
+fn encode_char_oid_is_blob_oid() {
     let w = test_witnessed();
     let a = encoding::encode_char("a", &w);
-    assert_eq!(
-        fragment::hash_fragment(&a),
-        "f6906badb67feb00c1ac8fd3adcb071bb7a9fa9ff5a9fe9b82715169a16de3ac"
-    );
+    assert_eq!(a.self_ref().sha.0, fragment::blob_oid("a"));
 }
 
 // ===========================================================================
@@ -127,15 +123,11 @@ fn decode_word_roundtrip() {
     assert_eq!(encoding::decode(&word), Ok("hi".to_string()));
 }
 
-// Cross-verification: encode_word hash matches Gleam
 #[test]
-fn encode_word_cross_verify() {
+fn encode_word_oid_matches_content_oid() {
     let w = test_witnessed();
     let word = encoding::encode_word("hi", &w);
-    assert_eq!(
-        fragment::hash_fragment(&word),
-        "6424331c2cfd9cefece429bedbac96f57c91d8f363b1a132e20c1d30bb029928"
-    );
+    assert_eq!(word.self_ref().sha.0, fragment::content_oid(&word));
 }
 
 // ===========================================================================
@@ -341,15 +333,11 @@ fn encode_empty_text() {
     assert_eq!(result.data(), "");
 }
 
-// Cross-verification: full document hash matches Gleam
 #[test]
-fn encode_document_cross_verify() {
+fn encode_document_oid_matches_content_oid() {
     let w = test_witnessed();
     let doc = encoding::encode("hello world", &w);
-    assert_eq!(
-        fragment::hash_fragment(&doc),
-        "c3c6a6eabd732acfe5178092c0571bc9ee6ead2472847e829d63c8fc28687af9"
-    );
+    assert_eq!(doc.self_ref().sha.0, fragment::content_oid(&doc));
 }
 
 // ===========================================================================

@@ -38,11 +38,3 @@ impl Witnessed {
         }
     }
 }
-
-/// Deterministic canonical serialization of a witness record.
-pub fn serialize_witnessed(w: &Witnessed) -> String {
-    format!(
-        "author:{}\ncommitter:{}\ntimestamp:{}\nmessage:{}",
-        w.author.0, w.committer.0, w.timestamp.0, w.message.0
-    )
-}

@@ -1,6 +1,5 @@
-use crate::ref_::{self, Ref};
-use crate::sha;
-use crate::witnessed::{self, Witnessed};
+use crate::ref_::Ref;
+use crate::witnessed::Witnessed;
 
 /// A node in the possibility space.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -86,49 +85,6 @@ impl Fragment {
     pub fn is_fragment(&self) -> bool {
         matches!(self, Fragment::Fragment { .. })
     }
-}
-
-/// Deterministic canonical serialization of a fragment.
-pub fn serialize(frag: &Fragment) -> String {
-    match frag {
-        Fragment::Shard {
-            ref_,
-            witnessed,
-            data,
-        } => {
-            format!(
-                "shard\n{}\n{}\ndata:{}",
-                ref_::serialize_ref(ref_),
-                witnessed::serialize_witnessed(witnessed),
-                data,
-            )
-        }
-        Fragment::Fragment {
-            ref_,
-            witnessed,
-            data,
-            fragments,
-        } => {
-            let children_str: String = fragments
-                .iter()
-                .map(serialize)
-                .collect::<Vec<_>>()
-                .join(",");
-            format!(
-                "fragment\n{}\n{}\ndata:{}\nfragments:[{}]",
-                ref_::serialize_ref(ref_),
-                witnessed::serialize_witnessed(witnessed),
-                data,
-                children_str,
-            )
-        }
-    }
-}
-
-/// Content-address a fragment: SHA-256 of its canonical serialization.
-pub fn hash_fragment(frag: &Fragment) -> String {
-    let serialized = serialize(frag);
-    sha::hash(&serialized).0
 }
 
 /// Compute a git-compatible content OID for a fragment.
