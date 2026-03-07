@@ -26,29 +26,123 @@ use crate::witnessed::Witnessed;
 /// Write a fragment tree to git objects. Returns the root OID.
 /// Shard → blob, Fragment → tree with .data + numbered children.
 #[cfg(feature = "git")]
-pub fn write_tree(_repo: &git2::Repository, _fragment: &Fragment) -> Result<git2::Oid, git2::Error> {
-    todo!()
+pub fn write_tree(repo: &git2::Repository, fragment: &Fragment) -> Result<git2::Oid, git2::Error> {
+    match fragment {
+        Fragment::Shard { data, .. } => repo.blob(data.as_bytes()),
+        Fragment::Fragment {
+            data, fragments, ..
+        } => {
+            let mut builder = repo.treebuilder(None)?;
+
+            // .data entry — the fragment's own data as a blob
+            let data_oid = repo.blob(data.as_bytes())?;
+            builder.insert(".data", data_oid, 0o100644)?;
+
+            // Children as numbered entries
+            for (i, child) in fragments.iter().enumerate() {
+                let child_oid = write_tree(repo, child)?;
+                let mode = if child.is_shard() { 0o100644 } else { 0o040000 };
+                builder.insert(format!("{:04}", i), child_oid, mode)?;
+            }
+
+            builder.write()
+        }
+    }
 }
 
 /// Write a fragment and commit it. Returns the commit OID.
 /// Witnessed fields map to git author/committer. Message is pass-through.
 #[cfg(feature = "git")]
 pub fn write_commit(
-    _repo: &git2::Repository,
-    _fragment: &Fragment,
-    _witnessed: &Witnessed,
-    _message: &str,
-    _parent: Option<&git2::Commit>,
+    repo: &git2::Repository,
+    fragment: &Fragment,
+    witnessed: &Witnessed,
+    message: &str,
+    parent: Option<&git2::Commit>,
 ) -> Result<git2::Oid, git2::Error> {
-    todo!()
+    // A git commit requires a tree root. If the fragment is a shard (blob),
+    // wrap it in a single-entry tree.
+    let tree_oid = match fragment {
+        Fragment::Shard { .. } => {
+            let blob_oid = write_tree(repo, fragment)?;
+            let mut builder = repo.treebuilder(None)?;
+            builder.insert(".data", blob_oid, 0o100644)?;
+            builder.write()?
+        }
+        Fragment::Fragment { .. } => write_tree(repo, fragment)?,
+    };
+    let tree = repo.find_tree(tree_oid)?;
+
+    let author = git2::Signature::now(
+        &witnessed.author.0,
+        &format!("{}@systemic.engineer", witnessed.author.0),
+    )?;
+    let committer = git2::Signature::now(
+        &witnessed.committer.0,
+        &format!("{}@systemic.engineer", witnessed.committer.0),
+    )?;
+
+    let parents: Vec<&git2::Commit> = parent.into_iter().collect();
+    repo.commit(None, &author, &committer, message, &tree, &parents)
 }
 
 /// Reconstruct a Fragment from git objects.
 /// Blob → Shard, Tree → Fragment. Witness is not recoverable (lives on commit).
 #[cfg(feature = "git")]
 pub fn read_tree(
-    _repo: &git2::Repository,
-    _oid: git2::Oid,
+    repo: &git2::Repository,
+    oid: git2::Oid,
 ) -> Result<Fragment, Box<dyn std::error::Error>> {
-    todo!()
+    use crate::ref_::Ref;
+    use crate::sha::Sha;
+    use crate::witnessed::{Author, Committer, Message, Timestamp};
+
+    let obj = repo.find_object(oid, None)?;
+    let placeholder_witnessed = Witnessed::new(
+        Author(String::new()),
+        Committer(String::new()),
+        Timestamp(String::new()),
+        Message(String::new()),
+    );
+
+    match obj.kind() {
+        Some(git2::ObjectType::Blob) => {
+            let blob = repo.find_blob(oid)?;
+            let data = std::str::from_utf8(blob.content())?.to_string();
+            let ref_ = Ref::new(Sha(oid.to_string()), "self");
+            Ok(Fragment::shard(ref_, placeholder_witnessed, data))
+        }
+        Some(git2::ObjectType::Tree) => {
+            let tree = repo.find_tree(oid)?;
+
+            // Read .data blob
+            let data_entry = tree.get_name(".data").ok_or("tree missing .data entry")?;
+            let data_blob = repo.find_blob(data_entry.id())?;
+            let data = std::str::from_utf8(data_blob.content())?.to_string();
+
+            // Read numbered children in order
+            let mut child_entries: Vec<(String, git2::Oid)> = Vec::new();
+            for entry in tree.iter() {
+                let name = entry.name().unwrap_or("").to_string();
+                if name != ".data" {
+                    child_entries.push((name, entry.id()));
+                }
+            }
+            child_entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+            let mut children = Vec::new();
+            for (_name, child_oid) in child_entries {
+                children.push(read_tree(repo, child_oid)?);
+            }
+
+            let ref_ = Ref::new(Sha(oid.to_string()), "self");
+            Ok(Fragment::new_fragment(
+                ref_,
+                placeholder_witnessed,
+                data,
+                children,
+            ))
+        }
+        _ => Err(format!("unexpected object type for oid {}", oid).into()),
+    }
 }

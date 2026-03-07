@@ -27,11 +27,7 @@ fn alt_witnessed() -> Witnessed {
 
 fn make_shard(data: &str) -> Fragment {
     let oid = fragment::blob_oid(data);
-    Fragment::shard(
-        Ref::new(sha::Sha(oid), "self"),
-        test_witnessed(),
-        data,
-    )
+    Fragment::shard(Ref::new(sha::Sha(oid), "self"), test_witnessed(), data)
 }
 
 fn make_fragment(label: &str, data: &str, children: Vec<Fragment>) -> Fragment {
