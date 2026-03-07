@@ -13,6 +13,9 @@
             pkgs.rustc pkgs.cargo pkgs.clippy pkgs.rustfmt
             pkgs.rust-analyzer pkgs.pkg-config
             pkgs.git pkgs.just
+            pkgs.openssl pkgs.zlib
+          ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
+            pkgs.libiconv
           ];
           shellHook = ''
             export LANG=en_US.UTF-8
