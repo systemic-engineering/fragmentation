@@ -13,11 +13,11 @@ jobs:
 
       - uses: systemic-engineering/ci/actions/nix-setup@main
 
-      - name: Download deps
-        run: nix develop -c gleam deps download
+      - name: Lint
+        run: nix develop -c cargo clippy -- -D warnings
 
       - name: Test
-        run: nix develop -c gleam test
+        run: nix develop -c cargo test
 
       - name: Format check
-        run: nix develop -c gleam format --check src test
+        run: nix develop -c cargo fmt -- --check

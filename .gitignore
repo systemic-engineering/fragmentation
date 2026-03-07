@@ -1,12 +1,3 @@
-*.beam
-*.ez
-/build
-erl_crash.dump
-
-# Gleam
-gleam/build/
-gleam/_gleam_artefacts/
-
-# Rust
-rust/target/
+target/
 .nix-cargo/
+.claude/

@@ -1,24 +1,18 @@
 # fragmentation
 
-check: check-gleam check-rust
+check: lint test format-check
 
-check-gleam:
-    cd gleam && nix develop ../ -c gleam test
-    cd gleam && nix develop ../ -c gleam format --check src test
+lint:
+    nix develop -c cargo clippy -- -D warnings
 
-check-rust:
-    nix develop -c cargo clippy --manifest-path rust/Cargo.toml -- -D warnings
-    nix develop -c cargo test --manifest-path rust/Cargo.toml
-    nix develop -c cargo fmt --manifest-path rust/Cargo.toml -- --check
+test:
+    nix develop -c cargo test
+
+format-check:
+    nix develop -c cargo fmt -- --check
 
 pre-commit: check
-
 pre-push: check
 
-format: format-gleam format-rust
-
-format-gleam:
-    cd gleam && nix develop ../ -c gleam format src test
-
-format-rust:
-    nix develop -c cargo fmt --manifest-path rust/Cargo.toml
+format:
+    nix develop -c cargo fmt

@@ -12,13 +12,10 @@ jobs:
 
       - uses: systemic-engineering/ci/actions/nix-setup@main
 
-      - name: Download deps
-        run: nix develop -c gleam deps download
-
       - name: Test
-        run: nix develop -c gleam test
+        run: nix develop -c cargo test
 
-      - name: Publish to Hex.pm
-        run: echo "I am not using semantic versioning" | nix develop -c gleam publish --yes
+      - name: Publish to crates.io
+        run: nix develop -c cargo publish
         env:
-          HEXPM_API_KEY: ${{ secrets.HEX_API_KEY }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
