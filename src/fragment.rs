@@ -6,7 +6,7 @@ pub enum Fragment {
     /// Terminal: self-addressed, carries data, stops.
     Shard { ref_: Ref, data: String },
     /// Self-similar: self-addressed, carries data, contains fragments.
-    Fragment {
+    Fractal {
         ref_: Ref,
         data: String,
         fragments: Vec<Fragment>,
@@ -22,9 +22,9 @@ impl Fragment {
         }
     }
 
-    /// Create a fragment. Self-similar, contains other fragments.
-    pub fn new_fragment(ref_: Ref, data: impl Into<String>, fragments: Vec<Fragment>) -> Self {
-        Fragment::Fragment {
+    /// Create a fractal. Self-similar, contains other fragments.
+    pub fn fractal(ref_: Ref, data: impl Into<String>, fragments: Vec<Fragment>) -> Self {
+        Fragment::Fractal {
             ref_,
             data: data.into(),
             fragments,
@@ -35,7 +35,7 @@ impl Fragment {
     pub fn self_ref(&self) -> &Ref {
         match self {
             Fragment::Shard { ref_, .. } => ref_,
-            Fragment::Fragment { ref_, .. } => ref_,
+            Fragment::Fractal { ref_, .. } => ref_,
         }
     }
 
@@ -43,7 +43,7 @@ impl Fragment {
     pub fn data(&self) -> &str {
         match self {
             Fragment::Shard { data, .. } => data,
-            Fragment::Fragment { data, .. } => data,
+            Fragment::Fractal { data, .. } => data,
         }
     }
 
@@ -51,7 +51,7 @@ impl Fragment {
     pub fn children(&self) -> &[Fragment] {
         match self {
             Fragment::Shard { .. } => &[],
-            Fragment::Fragment { fragments, .. } => fragments,
+            Fragment::Fractal { fragments, .. } => fragments,
         }
     }
 
@@ -60,9 +60,9 @@ impl Fragment {
         matches!(self, Fragment::Shard { .. })
     }
 
-    /// Check if a fragment is a fragment (non-terminal).
-    pub fn is_fragment(&self) -> bool {
-        matches!(self, Fragment::Fragment { .. })
+    /// Check if a fragment is a fractal (non-terminal).
+    pub fn is_fractal(&self) -> bool {
+        matches!(self, Fragment::Fractal { .. })
     }
 }
 
@@ -72,7 +72,7 @@ impl Fragment {
 pub fn content_oid(frag: &Fragment) -> String {
     match frag {
         Fragment::Shard { data, .. } => blob_oid(data),
-        Fragment::Fragment {
+        Fragment::Fractal {
             data, fragments, ..
         } => tree_oid(data, fragments),
     }

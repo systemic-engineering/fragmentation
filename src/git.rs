@@ -10,7 +10,7 @@ use crate::witnessed::Witnessed;
 pub fn write_tree(repo: &git2::Repository, fragment: &Fragment) -> Result<git2::Oid, git2::Error> {
     match fragment {
         Fragment::Shard { data, .. } => repo.blob(data.as_bytes()),
-        Fragment::Fragment {
+        Fragment::Fractal {
             data, fragments, ..
         } => {
             let mut builder = repo.treebuilder(None)?;
@@ -46,7 +46,7 @@ pub fn write_commit(
             builder.insert(".data", blob_oid, 0o100644)?;
             builder.write()?
         }
-        Fragment::Fragment { .. } => write_tree(repo, fragment)?,
+        Fragment::Fractal { .. } => write_tree(repo, fragment)?,
     };
     let tree = repo.find_tree(tree_oid)?;
 
@@ -104,7 +104,7 @@ pub fn read_tree(
             }
 
             let ref_ = Ref::new(Sha(oid.to_string()), "self");
-            Ok(Fragment::new_fragment(ref_, data, children))
+            Ok(Fragment::fractal(ref_, data, children))
         }
         _ => Err(format!("unexpected object type for oid {}", oid).into()),
     }

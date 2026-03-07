@@ -24,7 +24,7 @@ pub fn encode_word(word: &str) -> Fragment {
     let label = format!("token/{}", word);
     let s = sha::Sha(fragment::tree_oid(word, &chars));
     let r = Ref::new(s, label);
-    Fragment::new_fragment(r, word, chars)
+    Fragment::fractal(r, word, chars)
 }
 
 /// Encode a sentence as a Fragment of word Fragments.
@@ -36,7 +36,7 @@ pub fn encode_sentence(text: &str) -> Fragment {
         .collect();
     let s = sha::Sha(fragment::tree_oid(text, &words));
     let r = Ref::new(s, "sentence");
-    Fragment::new_fragment(r, text, words)
+    Fragment::fractal(r, text, words)
 }
 
 /// Encode a paragraph as a Fragment of sentence Fragments.
@@ -48,7 +48,7 @@ pub fn encode_paragraph(text: &str) -> Fragment {
         .collect();
     let s = sha::Sha(fragment::tree_oid(text, &sentences));
     let r = Ref::new(s, "paragraph");
-    Fragment::new_fragment(r, text, sentences)
+    Fragment::fractal(r, text, sentences)
 }
 
 /// Encode full text as a document Fragment.
@@ -61,7 +61,7 @@ pub fn encode(text: &str) -> Fragment {
         .collect();
     let s = sha::Sha(fragment::tree_oid(text, &paragraphs));
     let r = Ref::new(s, "document");
-    Fragment::new_fragment(r, text, paragraphs)
+    Fragment::fractal(r, text, paragraphs)
 }
 
 /// Encode and store, returning root Fragment + updated Store (deduped).
