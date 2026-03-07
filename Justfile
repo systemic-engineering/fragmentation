@@ -3,10 +3,10 @@
 check: lint test format-check
 
 lint:
-    nix develop -c cargo clippy -- -D warnings
+    nix develop -c cargo clippy --all-features -- -D warnings
 
 test:
-    nix develop -c cargo test
+    nix develop -c cargo test --all-features
 
 format-check:
     nix develop -c cargo fmt -- --check

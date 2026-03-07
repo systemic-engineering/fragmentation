@@ -327,6 +327,55 @@ mod ssh_tests {
         let decrypted: Fragment<Blob> = local.decrypt(&encrypted).unwrap();
         assert_eq!(decrypted.data(), &data);
     }
+
+    #[test]
+    fn ssh_encrypt_ciphertext_differs_from_plaintext() {
+        let key = test_ssh_key();
+        let local = Local::Ssh(Box::new(key));
+        let data = vec![1, 2, 3, 4, 5];
+        let shard = make_blob_shard(data.clone());
+        let encrypted = local.encrypt(shard).unwrap();
+        // Ciphertext must differ from plaintext
+        assert_ne!(encrypted.ciphertext(), &data[..]);
+        // ECIES envelope: 32 ephemeral_pub + 12 nonce + ciphertext + 16 tag
+        assert!(encrypted.ciphertext().len() >= 60 + data.len());
+    }
+
+    #[test]
+    fn ssh_encrypt_decrypt_roundtrip_string() {
+        let key = test_ssh_key();
+        let local = Local::Ssh(Box::new(key));
+        let shard = make_string_shard("hello fragmentation");
+        let encrypted = local.encrypt(shard).unwrap();
+        let decrypted: Fragment<String> = local.decrypt(&encrypted).unwrap();
+        assert_eq!(decrypted.data(), "hello fragmentation");
+    }
+
+    #[test]
+    fn ssh_wrong_key_cannot_decrypt() {
+        let key1 = test_ssh_key();
+        let key2 = test_ssh_key();
+        let local1 = Local::Ssh(Box::new(key1));
+        let local2 = Local::Ssh(Box::new(key2));
+        let shard = make_blob_shard(vec![42, 43, 44]);
+        let encrypted = local1.encrypt(shard).unwrap();
+        // Wrap ciphertext with key2's identity for decrypt dispatch
+        let mismatched =
+            fragmentation::keys::Encrypted::new(encrypted.ciphertext().to_vec(), local2.clone());
+        let result: Result<Fragment<Blob>, _> = local2.decrypt(&mismatched);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn ssh_encrypt_is_nondeterministic() {
+        let key = test_ssh_key();
+        let local = Local::Ssh(Box::new(key));
+        let shard = make_blob_shard(vec![1, 2, 3]);
+        let enc1 = local.encrypt(shard.clone()).unwrap();
+        let enc2 = local.encrypt(shard).unwrap();
+        // Ephemeral key + random nonce → different ciphertext each time
+        assert_ne!(enc1.ciphertext(), enc2.ciphertext());
+    }
 }
 
 // ===========================================================================
@@ -345,6 +394,62 @@ mod gpg_tests {
             .is_ok()
     }
 
+    /// Create an isolated GPG keyring with a test key. Returns None if gpg unavailable.
+    fn setup_gpg_keyring() -> Option<(GPG, tempfile::TempDir)> {
+        if !gpg_available() {
+            return None;
+        }
+        let td = tempfile::tempdir().ok()?;
+        let home = td.path();
+
+        // Generate an RSA-2048 test key with no passphrase
+        let batch_config = format!(
+            "%no-protection\nKey-Type: RSA\nKey-Length: 2048\nSubkey-Type: RSA\nSubkey-Length: 2048\nName-Real: Test\nName-Email: test@test\nExpire-Date: 0\n%commit\n"
+        );
+        let output = std::process::Command::new("gpg")
+            .env("GNUPGHOME", home)
+            .args(["--batch", "--generate-key"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .ok()
+            .and_then(|mut child| {
+                use std::io::Write;
+                child
+                    .stdin
+                    .take()
+                    .unwrap()
+                    .write_all(batch_config.as_bytes())
+                    .ok()?;
+                child.wait_with_output().ok()
+            })?;
+
+        if !output.status.success() {
+            eprintln!(
+                "gpg key generation failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return None;
+        }
+
+        // Get the key ID
+        let list_output = std::process::Command::new("gpg")
+            .env("GNUPGHOME", home)
+            .args(["--list-keys", "--with-colons", "--keyid-format", "long"])
+            .output()
+            .ok()?;
+
+        let list_str = String::from_utf8_lossy(&list_output.stdout);
+        let key_id = list_str
+            .lines()
+            .find(|l| l.starts_with("pub:"))
+            .and_then(|l| l.split(':').nth(4))
+            .map(|s| s.to_string())?;
+
+        Some((GPG::with_gnupghome(key_id, home), td))
+    }
+
     #[test]
     fn gpg_key_signed_carries_signer() {
         if !gpg_available() {
@@ -360,6 +465,33 @@ mod gpg_tests {
             Ok(signed) => assert_eq!(signed.signer(), &Local::Gpg(key)),
             Err(_) => eprintln!("gpg sign failed (expected without real key), skipping assertion"),
         }
+    }
+
+    #[test]
+    fn gpg_encrypt_decrypt_roundtrip() {
+        let Some((gpg, _td)) = setup_gpg_keyring() else {
+            eprintln!("gpg keyring setup failed, skipping");
+            return;
+        };
+        let local = Local::Gpg(gpg);
+        let data = vec![1, 2, 3, 4, 5];
+        let shard = make_blob_shard(data.clone());
+        let encrypted = local.encrypt(shard).unwrap();
+        let decrypted: Fragment<Blob> = local.decrypt(&encrypted).unwrap();
+        assert_eq!(decrypted.data(), &data);
+    }
+
+    #[test]
+    fn gpg_encrypt_ciphertext_differs() {
+        let Some((gpg, _td)) = setup_gpg_keyring() else {
+            eprintln!("gpg keyring setup failed, skipping");
+            return;
+        };
+        let local = Local::Gpg(gpg);
+        let data = vec![1, 2, 3, 4, 5];
+        let shard = make_blob_shard(data.clone());
+        let encrypted = local.encrypt(shard).unwrap();
+        assert_ne!(encrypted.ciphertext(), &data[..]);
     }
 }
 

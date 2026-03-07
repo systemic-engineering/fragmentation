@@ -171,15 +171,27 @@ impl Keys for Local {
     }
 
     fn encrypt<E: Encode>(&self, fragment: Fragment<E>) -> Result<Encrypted<Self>, Self::Error> {
-        // Pass-through for all variants this cycle.
-        Ok(Encrypted::new(fragment.data().encode(), self.clone()))
+        let plaintext = fragment.data().encode();
+        let ciphertext = match self {
+            Local::None => plaintext,
+            #[cfg(feature = "ssh")]
+            Local::Ssh(_) => todo!("SSH ECIES encryption"),
+            #[cfg(feature = "gpg")]
+            Local::Gpg(_) => todo!("GPG subprocess encryption"),
+        };
+        Ok(Encrypted::new(ciphertext, self.clone()))
     }
 
     fn decrypt<E: Decode>(&self, encrypted: &Encrypted<Self>) -> Result<Fragment<E>, Self::Error> {
-        // Pass-through for all variants this cycle.
-        let data =
-            E::decode(&encrypted.ciphertext).map_err(|e| LocalError::Decode(format!("{}", e)))?;
-        let sha = Sha(fragment::blob_oid_bytes(&encrypted.ciphertext));
+        let plaintext = match self {
+            Local::None => encrypted.ciphertext.clone(),
+            #[cfg(feature = "ssh")]
+            Local::Ssh(_) => todo!("SSH ECIES decryption"),
+            #[cfg(feature = "gpg")]
+            Local::Gpg(_) => todo!("GPG subprocess decryption"),
+        };
+        let data = E::decode(&plaintext).map_err(|e| LocalError::Decode(format!("{}", e)))?;
+        let sha = Sha(fragment::blob_oid_bytes(&plaintext));
         let ref_ = Ref::new(sha, "decrypted");
         Ok(Fragment::shard_typed(ref_, data))
     }
@@ -229,6 +241,26 @@ impl SSH {
             .map_err(|e| LocalError::Ssh(format!("{}", e)))?;
         Ok(pem.into_bytes())
     }
+
+    /// Derive X25519 static secret from Ed25519 seed.
+    fn x25519_secret(&self) -> Result<x25519_dalek::StaticSecret, LocalError> {
+        todo!("Ed25519 → X25519 conversion")
+    }
+
+    /// Derive X25519 public key from the static secret.
+    fn x25519_public(&self) -> Result<x25519_dalek::PublicKey, LocalError> {
+        todo!("X25519 public key derivation")
+    }
+
+    /// ECIES encrypt: ephemeral X25519 + HKDF-SHA256 + ChaCha20-Poly1305.
+    fn encrypt_bytes(&self, _plaintext: &[u8]) -> Result<Vec<u8>, LocalError> {
+        todo!("SSH ECIES encryption")
+    }
+
+    /// ECIES decrypt: parse wire format, ECDH with static secret, HKDF, AEAD decrypt.
+    fn decrypt_bytes(&self, _data: &[u8]) -> Result<Vec<u8>, LocalError> {
+        todo!("SSH ECIES decryption")
+    }
 }
 
 // ===========================================================================
@@ -239,6 +271,7 @@ impl SSH {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GPG {
     key_id: String,
+    gnupghome: Option<std::path::PathBuf>,
 }
 
 #[cfg(feature = "gpg")]
@@ -246,15 +279,37 @@ impl GPG {
     pub fn new(key_id: impl Into<String>) -> Self {
         GPG {
             key_id: key_id.into(),
+            gnupghome: None,
         }
+    }
+
+    /// Constructor with custom GNUPGHOME for test isolation.
+    pub fn with_gnupghome(
+        key_id: impl Into<String>,
+        gnupghome: impl Into<std::path::PathBuf>,
+    ) -> Self {
+        GPG {
+            key_id: key_id.into(),
+            gnupghome: Some(gnupghome.into()),
+        }
+    }
+
+    /// Build a gpg Command with optional GNUPGHOME.
+    fn gpg_command(&self) -> std::process::Command {
+        let mut cmd = std::process::Command::new("gpg");
+        if let Some(ref home) = self.gnupghome {
+            cmd.env("GNUPGHOME", home);
+        }
+        cmd
     }
 
     /// Sign raw bytes via gpg CLI, returning the detached signature.
     fn sign_bytes(&self, data: &[u8]) -> Result<Vec<u8>, LocalError> {
         use std::io::Write;
-        use std::process::{Command, Stdio};
+        use std::process::Stdio;
 
-        let mut child = Command::new("gpg")
+        let mut child = self
+            .gpg_command()
             .args([
                 "--detach-sign",
                 "--armor",
@@ -287,6 +342,16 @@ impl GPG {
         }
 
         Ok(output.stdout)
+    }
+
+    /// Encrypt raw bytes via gpg CLI subprocess.
+    fn encrypt_bytes(&self, _plaintext: &[u8]) -> Result<Vec<u8>, LocalError> {
+        todo!("GPG subprocess encryption")
+    }
+
+    /// Decrypt raw bytes via gpg CLI subprocess.
+    fn decrypt_bytes(&self, _ciphertext: &[u8]) -> Result<Vec<u8>, LocalError> {
+        todo!("GPG subprocess decryption")
     }
 }
 

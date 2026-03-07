@@ -7,7 +7,7 @@ description = "Content-addressed, arbitrary-depth, circular-reflexive trees"
 
 [features]
 git = ["dep:git2"]
-ssh = ["dep:ssh-key"]
+ssh = ["dep:ssh-key", "dep:x25519-dalek", "dep:chacha20poly1305", "dep:hkdf"]
 gpg = []
 
 [dependencies]
@@ -16,6 +16,9 @@ sha1 = "0.10"
 hex = "0.4"
 git2 = { version = "0.19", optional = true }
 ssh-key = { version = "0.6", features = ["std", "ed25519", "crypto"], optional = true }
+x25519-dalek = { version = "2", features = ["static_secrets"], optional = true }
+chacha20poly1305 = { version = "0.10", optional = true }
+hkdf = { version = "0.12", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
