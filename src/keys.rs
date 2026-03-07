@@ -144,9 +144,9 @@ impl fmt::Display for LocalKeysError {
 pub enum LocalKeys {
     Plain,
     #[cfg(feature = "ssh")]
-    Ssh(Box<SshKey>),
+    Ssh(Box<SSHKey>),
     #[cfg(feature = "gpg")]
-    Gpg(GpgKey),
+    Gpg(GPGKey),
 }
 
 impl Keys for LocalKeys {
@@ -191,16 +191,16 @@ impl Keys for LocalKeys {
 
 #[cfg(feature = "ssh")]
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SshKey {
+pub struct SSHKey {
     key: ssh_key::PrivateKey,
 }
 
 #[cfg(feature = "ssh")]
-impl SshKey {
+impl SSHKey {
     /// Load an SSH private key from a file path.
     pub fn from_path(path: impl AsRef<std::path::Path>) -> Result<Self, ssh_key::Error> {
         let key = ssh_key::PrivateKey::read_openssh_file(path.as_ref())?;
-        Ok(SshKey { key })
+        Ok(SSHKey { key })
     }
 
     /// Generate an Ed25519 key in memory (for testing).
@@ -209,7 +209,7 @@ impl SshKey {
             &mut ssh_key::rand_core::OsRng,
             ssh_key::Algorithm::Ed25519,
         )?;
-        Ok(SshKey { key })
+        Ok(SSHKey { key })
     }
 
     /// Write the private key to a file (for testing).
@@ -237,14 +237,14 @@ impl SshKey {
 
 #[cfg(feature = "gpg")]
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct GpgKey {
+pub struct GPGKey {
     key_id: String,
 }
 
 #[cfg(feature = "gpg")]
-impl GpgKey {
+impl GPGKey {
     pub fn new(key_id: impl Into<String>) -> Self {
-        GpgKey {
+        GPGKey {
             key_id: key_id.into(),
         }
     }
@@ -310,12 +310,12 @@ impl LocalKeys {
         match (format.as_str(), signing_key) {
             #[cfg(feature = "ssh")]
             ("ssh", Some(key_path)) => {
-                let ssh_key = SshKey::from_path(&key_path)
+                let ssh_key = SSHKey::from_path(&key_path)
                     .map_err(|e| LocalKeysError::Ssh(format!("{}", e)))?;
                 Ok(LocalKeys::Ssh(Box::new(ssh_key)))
             }
             #[cfg(feature = "gpg")]
-            ("openpgp" | "", Some(key_id)) => Ok(LocalKeys::Gpg(GpgKey::new(key_id))),
+            ("openpgp" | "", Some(key_id)) => Ok(LocalKeys::Gpg(GPGKey::new(key_id))),
             _ => Ok(LocalKeys::Plain),
         }
     }

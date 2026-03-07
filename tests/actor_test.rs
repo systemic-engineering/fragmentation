@@ -283,11 +283,11 @@ fn actor_encrypt_decrypt_returns_result() {
 #[cfg(feature = "ssh")]
 mod ssh_tests {
     use super::*;
-    use fragmentation::keys::SshKey;
+    use fragmentation::keys::SSHKey;
 
-    fn test_ssh_key() -> SshKey {
+    fn test_ssh_key() -> SSHKey {
         // Generate an Ed25519 key in memory for testing
-        SshKey::generate_ed25519().expect("generate test key")
+        SSHKey::generate_ed25519().expect("generate test key")
     }
 
     #[test]
@@ -336,7 +336,7 @@ mod ssh_tests {
 #[cfg(feature = "gpg")]
 mod gpg_tests {
     use super::*;
-    use fragmentation::keys::GpgKey;
+    use fragmentation::keys::GPGKey;
 
     fn gpg_available() -> bool {
         std::process::Command::new("gpg")
@@ -351,7 +351,7 @@ mod gpg_tests {
             eprintln!("gpg not available, skipping");
             return;
         }
-        let key = GpgKey::new("test-key-id");
+        let key = GPGKey::new("test-key-id");
         let local = LocalKeys::Gpg(key.clone());
         let shard = make_blob_shard(vec![42]);
         // Sign may fail if gpg key doesn't exist — that's expected in CI
@@ -386,7 +386,7 @@ mod from_repo_tests {
         let repo = git2::Repository::init(td.path()).unwrap();
 
         // Write a test SSH key to a temp file
-        let key = fragmentation::keys::SshKey::generate_ed25519().unwrap();
+        let key = fragmentation::keys::SSHKey::generate_ed25519().unwrap();
         let key_path = td.path().join("test_key");
         key.write_to_file(&key_path).unwrap();
 
