@@ -10,23 +10,14 @@ use fragmentation::witnessed::{Author, Committer, Message, Timestamp, Witnessed}
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn test_witnessed() -> Witnessed {
-    Witnessed::new(
-        Author("alex".into()),
-        Committer("reed".into()),
-        Timestamp("2026-03-01T00:00:00Z".into()),
-        Message("test".into()),
-    )
-}
-
 fn make_shard(data: &str) -> Fragment {
     let r = Ref::new(sha::Sha(fragment::blob_oid(data)), "self");
-    Fragment::shard(r, test_witnessed(), data)
+    Fragment::shard(r, data)
 }
 
 fn make_fragment(label: &str, children: Vec<Fragment>) -> Fragment {
     let r = Ref::new(sha::Sha(fragment::tree_oid(label, &children)), "self");
-    Fragment::new_fragment(r, test_witnessed(), label, children)
+    Fragment::new_fragment(r, label, children)
 }
 
 // ===========================================================================
@@ -59,7 +50,6 @@ fn hash_different_input_different_sha() {
     assert_ne!(h1, h2);
 }
 
-// Cross-verification: known SHA-256 values from Gleam
 #[test]
 fn hash_cross_verify_test() {
     assert_eq!(
@@ -89,7 +79,7 @@ fn ref_construction() {
 }
 
 // ===========================================================================
-// Witnessed value types
+// Witnessed value types (type stays, just not on Fragment)
 // ===========================================================================
 
 #[test]
@@ -116,10 +106,6 @@ fn message_construction() {
     assert_eq!(m.0, "commit msg");
 }
 
-// ===========================================================================
-// Witnessed
-// ===========================================================================
-
 #[test]
 fn witnessed_construction() {
     let w = Witnessed::new(
@@ -141,8 +127,7 @@ fn witnessed_construction() {
 #[test]
 fn shard_construction() {
     let r = Ref::new(sha::Sha(fragment::blob_oid("hello")), "self");
-    let w = test_witnessed();
-    let s = Fragment::shard(r.clone(), w.clone(), "hello");
+    let s = Fragment::shard(r.clone(), "hello");
     assert!(s.is_shard());
     assert_eq!(s.data(), "hello");
     assert_eq!(s.self_ref(), &r);
@@ -155,8 +140,7 @@ fn fragment_construction() {
         sha::Sha(fragment::tree_oid("root-data", &[leaf.clone()])),
         "self",
     );
-    let w = test_witnessed();
-    let f = Fragment::new_fragment(r.clone(), w, "root-data", vec![leaf.clone()]);
+    let f = Fragment::new_fragment(r.clone(), "root-data", vec![leaf.clone()]);
     assert!(f.is_fragment());
     assert_eq!(f.data(), "root-data");
     assert_eq!(f.children(), &[leaf]);
@@ -192,12 +176,6 @@ fn self_ref_fragment() {
     let f = make_fragment("node", vec![]);
     let r = f.self_ref();
     assert_eq!(r.sha, sha::Sha(fragment::tree_oid("node", &[])));
-}
-
-#[test]
-fn self_witnessed() {
-    let s = make_shard("x");
-    assert_eq!(s.self_witnessed(), &test_witnessed());
 }
 
 #[test]
@@ -246,27 +224,6 @@ fn content_oid_different_data() {
     let s1 = make_shard("hello");
     let s2 = make_shard("world");
     assert_ne!(fragment::content_oid(&s1), fragment::content_oid(&s2));
-}
-
-#[test]
-fn content_oid_witness_excluded() {
-    let r = Ref::new(sha::Sha("placeholder".into()), "self");
-    let w1 = Witnessed::new(
-        Author("alex".into()),
-        Committer("reed".into()),
-        Timestamp("2026-03-01".into()),
-        Message("first".into()),
-    );
-    let w2 = Witnessed::new(
-        Author("alex".into()),
-        Committer("reed".into()),
-        Timestamp("2026-03-01".into()),
-        Message("second".into()),
-    );
-    let s1 = Fragment::shard(r.clone(), w1, "same-data");
-    let s2 = Fragment::shard(r, w2, "same-data");
-    // Same content, different witness = same OID
-    assert_eq!(fragment::content_oid(&s1), fragment::content_oid(&s2));
 }
 
 // ===========================================================================
@@ -520,7 +477,7 @@ fn diff_summary_empty() {
 }
 
 // ===========================================================================
-// Witnessed reality (trace-as-branch)
+// Trace patterns
 // ===========================================================================
 
 #[test]
@@ -541,20 +498,4 @@ fn trace_chain() {
     assert_eq!(walk::depth(&t3), 3);
     let collected = walk::collect(&t3);
     assert_eq!(collected.len(), 4);
-}
-
-#[test]
-fn author_committer_split() {
-    let r = Ref::new(sha::Sha(fragment::blob_oid("decision:allow")), "self");
-    let w = Witnessed::new(
-        Author("alex".into()),
-        Committer("reed".into()),
-        Timestamp("2026-03-01T19:30:00Z".into()),
-        Message("bias execution trace".into()),
-    );
-    let traced = Fragment::shard(r, w, "decision:allow");
-    let witness = traced.self_witnessed();
-    assert_eq!(witness.author, Author("alex".into()));
-    assert_eq!(witness.committer, Committer("reed".into()));
-    assert_eq!(witness.message, Message("bias execution trace".into()));
 }

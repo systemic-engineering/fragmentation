@@ -1,43 +1,19 @@
 use fragmentation::fragment::{self, Fragment};
 use fragmentation::ref_::Ref;
 use fragmentation::sha;
-use fragmentation::witnessed::{Author, Committer, Message, Timestamp, Witnessed};
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn test_witnessed() -> Witnessed {
-    Witnessed::new(
-        Author("alex".into()),
-        Committer("reed".into()),
-        Timestamp("2026-03-01T00:00:00Z".into()),
-        Message("test".into()),
-    )
-}
-
-fn alt_witnessed() -> Witnessed {
-    Witnessed::new(
-        Author("mara".into()),
-        Committer("cairn".into()),
-        Timestamp("2026-03-07T00:00:00Z".into()),
-        Message("different observer".into()),
-    )
-}
-
 fn make_shard(data: &str) -> Fragment {
     let oid = fragment::blob_oid(data);
-    Fragment::shard(Ref::new(sha::Sha(oid), "self"), test_witnessed(), data)
+    Fragment::shard(Ref::new(sha::Sha(oid), "self"), data)
 }
 
 fn make_fragment(label: &str, data: &str, children: Vec<Fragment>) -> Fragment {
     let oid = fragment::tree_oid(data, &children);
-    Fragment::new_fragment(
-        Ref::new(sha::Sha(oid), label),
-        test_witnessed(),
-        data,
-        children,
-    )
+    Fragment::new_fragment(Ref::new(sha::Sha(oid), label), data, children)
 }
 
 // ===========================================================================
@@ -50,15 +26,6 @@ fn content_oid_shard_matches_git_blob() {
     let oid = fragment::content_oid(&shard);
     // Known: printf "hello" | git hash-object --stdin
     assert_eq!(oid, "b6fc4c620b67d95f953a5c1c1230aaab5db5a1b0");
-}
-
-#[test]
-fn content_oid_same_data_different_witness_same_oid() {
-    let r = Ref::new(sha::Sha("placeholder".into()), "self");
-    let s1 = Fragment::shard(r.clone(), test_witnessed(), "same-data");
-    let s2 = Fragment::shard(r, alt_witnessed(), "same-data");
-    // Core semantic change: witness does NOT affect content OID
-    assert_eq!(fragment::content_oid(&s1), fragment::content_oid(&s2));
 }
 
 #[test]
@@ -86,8 +53,6 @@ fn content_oid_shard_is_40_hex_chars() {
 
 #[test]
 fn content_oid_fragment_differs_from_shard_same_data() {
-    // A shard with data "a" (blob) must differ from a fragment with data "a" (tree)
-    // This is the structural collision prevention that replaces labeled_hash
     let shard = make_shard("a");
     let frag = make_fragment("test", "a", vec![]);
     assert_ne!(fragment::content_oid(&shard), fragment::content_oid(&frag));
@@ -144,11 +109,21 @@ fn tree_oid_children_order_matters() {
 mod git_native {
     use super::*;
     use fragmentation::git;
+    use fragmentation::witnessed::{Author, Committer, Message, Timestamp, Witnessed};
 
     fn init_repo() -> (tempfile::TempDir, git2::Repository) {
         let dir = tempfile::tempdir().unwrap();
         let repo = git2::Repository::init(dir.path()).unwrap();
         (dir, repo)
+    }
+
+    fn test_witnessed() -> Witnessed {
+        Witnessed::new(
+            Author("alex".into()),
+            Committer("reed".into()),
+            Timestamp("2026-03-01T00:00:00Z".into()),
+            Message("test".into()),
+        )
     }
 
     #[test]
@@ -177,7 +152,6 @@ mod git_native {
         let parent = make_fragment("root", "root-data", vec![child]);
         let oid = git::write_tree(&repo, &parent).unwrap();
         let tree = repo.find_tree(oid).unwrap();
-        // .data entry + one numbered child
         assert_eq!(tree.len(), 2);
         assert!(tree.get_name(".data").is_some());
         assert!(tree.get_name("0000").is_some());
