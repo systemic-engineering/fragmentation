@@ -3,40 +3,49 @@ use std::collections::HashMap;
 use crate::fragment::Fragment;
 use crate::sha::Sha;
 
+/// Content-addressed fragment store.
 #[derive(Clone, Debug)]
 pub struct Store {
     fragments: HashMap<String, Fragment>,
 }
 
 impl Store {
+    /// Create an empty store.
     pub fn new() -> Self {
         Store {
             fragments: HashMap::new(),
         }
     }
 
-    pub fn put(&mut self, _frag: Fragment) {
-        todo!("implement put")
+    /// Insert a fragment by its self-ref SHA.
+    pub fn put(&mut self, frag: Fragment) {
+        let key = frag.self_ref().sha.0.clone();
+        self.fragments.insert(key, frag);
     }
 
-    pub fn get(&self, _sha: &Sha) -> Option<&Fragment> {
-        todo!("implement get")
+    /// Look up a fragment by SHA.
+    pub fn get(&self, sha: &Sha) -> Option<&Fragment> {
+        self.fragments.get(&sha.0)
     }
 
-    pub fn has(&self, _sha: &Sha) -> bool {
-        todo!("implement has")
+    /// Check if a fragment exists.
+    pub fn has(&self, sha: &Sha) -> bool {
+        self.fragments.contains_key(&sha.0)
     }
 
+    /// Count fragments in the store.
     pub fn size(&self) -> usize {
         self.fragments.len()
     }
 
-    pub fn merge(&mut self, _other: Store) {
-        todo!("implement merge")
+    /// Merge another store into this one. Same SHA = same content.
+    pub fn merge(&mut self, other: Store) {
+        self.fragments.extend(other.fragments);
     }
 
+    /// List all SHAs in the store.
     pub fn keys(&self) -> Vec<Sha> {
-        todo!("implement keys")
+        self.fragments.keys().map(|k| Sha(k.clone())).collect()
     }
 }
 
