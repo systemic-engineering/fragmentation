@@ -14,11 +14,22 @@
         erlang   = pkgs.erlang_27;
         gleam    = pkgs.gleam;
         rebar3   = beamPkgs.rebar3;
+
+        rustTools = [
+          pkgs.rustc
+          pkgs.cargo
+          pkgs.clippy
+          pkgs.rustfmt
+          pkgs.rust-analyzer
+          pkgs.pkg-config
+        ];
       in {
         devShells.default = pkgs.mkShell {
-          buildInputs = [ gleam erlang rebar3 pkgs.git pkgs.just ];
+          buildInputs = [ gleam erlang rebar3 pkgs.git pkgs.just ] ++ rustTools;
           shellHook = ''
             export LANG=en_US.UTF-8
+            export CARGO_HOME=$PWD/.nix-cargo
+            export PATH=$CARGO_HOME/bin:$PATH
           '';
         };
       });
