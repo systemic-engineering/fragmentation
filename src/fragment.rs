@@ -1,19 +1,13 @@
 use crate::ref_::Ref;
-use crate::witnessed::Witnessed;
 
 /// A node in the possibility space.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Fragment {
-    /// Terminal: self-addressed, witnessed, carries data, stops.
-    Shard {
-        ref_: Ref,
-        witnessed: Witnessed,
-        data: String,
-    },
-    /// Self-similar: self-addressed, witnessed, carries data, contains fragments.
+    /// Terminal: self-addressed, carries data, stops.
+    Shard { ref_: Ref, data: String },
+    /// Self-similar: self-addressed, carries data, contains fragments.
     Fragment {
         ref_: Ref,
-        witnessed: Witnessed,
         data: String,
         fragments: Vec<Fragment>,
     },
@@ -21,24 +15,17 @@ pub enum Fragment {
 
 impl Fragment {
     /// Create a shard. Terminal fragment.
-    pub fn shard(ref_: Ref, witnessed: Witnessed, data: impl Into<String>) -> Self {
+    pub fn shard(ref_: Ref, data: impl Into<String>) -> Self {
         Fragment::Shard {
             ref_,
-            witnessed,
             data: data.into(),
         }
     }
 
     /// Create a fragment. Self-similar, contains other fragments.
-    pub fn new_fragment(
-        ref_: Ref,
-        witnessed: Witnessed,
-        data: impl Into<String>,
-        fragments: Vec<Fragment>,
-    ) -> Self {
+    pub fn new_fragment(ref_: Ref, data: impl Into<String>, fragments: Vec<Fragment>) -> Self {
         Fragment::Fragment {
             ref_,
-            witnessed,
             data: data.into(),
             fragments,
         }
@@ -49,14 +36,6 @@ impl Fragment {
         match self {
             Fragment::Shard { ref_, .. } => ref_,
             Fragment::Fragment { ref_, .. } => ref_,
-        }
-    }
-
-    /// Get the witness record of a fragment.
-    pub fn self_witnessed(&self) -> &Witnessed {
-        match self {
-            Fragment::Shard { witnessed, .. } => witnessed,
-            Fragment::Fragment { witnessed, .. } => witnessed,
         }
     }
 

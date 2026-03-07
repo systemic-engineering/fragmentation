@@ -3,7 +3,6 @@ use crate::ref_::Ref;
 use crate::sha;
 use crate::store::Store;
 use crate::walk;
-use crate::witnessed::Witnessed;
 
 /// Error type for decode failures.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -12,65 +11,62 @@ pub enum DecodeError {
 }
 
 /// Encode a single character as a Shard.
-pub fn encode_char(ch: &str, witness: &Witnessed) -> Fragment {
+pub fn encode_char(ch: &str) -> Fragment {
     let label = format!("utf8/{}", ch);
     let s = sha::Sha(fragment::blob_oid(ch));
     let r = Ref::new(s, label);
-    Fragment::shard(r, witness.clone(), ch)
+    Fragment::shard(r, ch)
 }
 
 /// Encode a word as a Fragment of character Shards.
-pub fn encode_word(word: &str, witness: &Witnessed) -> Fragment {
-    let chars: Vec<Fragment> = word
-        .chars()
-        .map(|c| encode_char(&c.to_string(), witness))
-        .collect();
+pub fn encode_word(word: &str) -> Fragment {
+    let chars: Vec<Fragment> = word.chars().map(|c| encode_char(&c.to_string())).collect();
     let label = format!("token/{}", word);
     let s = sha::Sha(fragment::tree_oid(word, &chars));
     let r = Ref::new(s, label);
-    Fragment::new_fragment(r, witness.clone(), word, chars)
+    Fragment::new_fragment(r, word, chars)
 }
 
 /// Encode a sentence as a Fragment of word Fragments.
-pub fn encode_sentence(text: &str, witness: &Witnessed) -> Fragment {
+pub fn encode_sentence(text: &str) -> Fragment {
     let words: Vec<Fragment> = text
         .split(' ')
         .filter(|w| !w.is_empty())
-        .map(|w| encode_word(w, witness))
+        .map(encode_word)
         .collect();
     let s = sha::Sha(fragment::tree_oid(text, &words));
     let r = Ref::new(s, "sentence");
-    Fragment::new_fragment(r, witness.clone(), text, words)
+    Fragment::new_fragment(r, text, words)
 }
 
 /// Encode a paragraph as a Fragment of sentence Fragments.
-pub fn encode_paragraph(text: &str, witness: &Witnessed) -> Fragment {
+pub fn encode_paragraph(text: &str) -> Fragment {
     let sentences: Vec<Fragment> = split_sentences(text)
         .into_iter()
         .filter(|s| !s.is_empty())
-        .map(|s| encode_sentence(&s, witness))
+        .map(|s| encode_sentence(&s))
         .collect();
     let s = sha::Sha(fragment::tree_oid(text, &sentences));
     let r = Ref::new(s, "paragraph");
-    Fragment::new_fragment(r, witness.clone(), text, sentences)
+    Fragment::new_fragment(r, text, sentences)
 }
 
 /// Encode full text as a document Fragment.
 /// Splits on double newlines into paragraphs.
-pub fn encode(text: &str, witness: &Witnessed) -> Fragment {
+pub fn encode(text: &str) -> Fragment {
     let paragraphs: Vec<Fragment> = text
         .split("\n\n")
         .filter(|p| !p.is_empty())
-        .map(|p| encode_paragraph(p, witness))
+        .map(encode_paragraph)
         .collect();
     let s = sha::Sha(fragment::tree_oid(text, &paragraphs));
     let r = Ref::new(s, "document");
-    Fragment::new_fragment(r, witness.clone(), text, paragraphs)
+    Fragment::new_fragment(r, text, paragraphs)
 }
 
 /// Encode and store, returning root Fragment + updated Store (deduped).
-pub fn ingest(text: &str, witness: &Witnessed, mut store: Store) -> (Fragment, Store) {
-    let root = encode(text, witness);
+pub fn ingest(text: &str, mut store: Store) -> (Fragment, Store) {
+    let root = encode(text);
     for frag in walk::collect(&root) {
         store.put(frag.clone());
     }
@@ -98,7 +94,7 @@ fn split_sentences(text: &str) -> Vec<String> {
             current.push(chars[i]);
             result.push(current);
             current = String::new();
-            i += 2; // skip the space
+            i += 2;
         } else {
             current.push(chars[i]);
             i += 1;

@@ -15,11 +15,9 @@ pub fn write_tree(repo: &git2::Repository, fragment: &Fragment) -> Result<git2::
         } => {
             let mut builder = repo.treebuilder(None)?;
 
-            // .data entry — the fragment's own data as a blob
             let data_oid = repo.blob(data.as_bytes())?;
             builder.insert(".data", data_oid, 0o100644)?;
 
-            // Children as numbered entries
             for (i, child) in fragments.iter().enumerate() {
                 let child_oid = write_tree(repo, child)?;
                 let mode = if child.is_shard() { 0o100644 } else { 0o040000 };
@@ -41,8 +39,6 @@ pub fn write_commit(
     message: &str,
     parent: Option<&git2::Commit>,
 ) -> Result<git2::Oid, git2::Error> {
-    // A git commit requires a tree root. If the fragment is a shard (blob),
-    // wrap it in a single-entry tree.
     let tree_oid = match fragment {
         Fragment::Shard { .. } => {
             let blob_oid = write_tree(repo, fragment)?;
@@ -68,7 +64,7 @@ pub fn write_commit(
 }
 
 /// Reconstruct a Fragment from git objects.
-/// Blob → Shard, Tree → Fragment. Witness is not recoverable (lives on commit).
+/// Blob → Shard, Tree → Fragment. Witness lives on the commit, not the tree.
 #[cfg(feature = "git")]
 pub fn read_tree(
     repo: &git2::Repository,
@@ -76,32 +72,23 @@ pub fn read_tree(
 ) -> Result<Fragment, Box<dyn std::error::Error>> {
     use crate::ref_::Ref;
     use crate::sha::Sha;
-    use crate::witnessed::{Author, Committer, Message, Timestamp};
 
     let obj = repo.find_object(oid, None)?;
-    let placeholder_witnessed = Witnessed::new(
-        Author(String::new()),
-        Committer(String::new()),
-        Timestamp(String::new()),
-        Message(String::new()),
-    );
 
     match obj.kind() {
         Some(git2::ObjectType::Blob) => {
             let blob = repo.find_blob(oid)?;
             let data = std::str::from_utf8(blob.content())?.to_string();
             let ref_ = Ref::new(Sha(oid.to_string()), "self");
-            Ok(Fragment::shard(ref_, placeholder_witnessed, data))
+            Ok(Fragment::shard(ref_, data))
         }
         Some(git2::ObjectType::Tree) => {
             let tree = repo.find_tree(oid)?;
 
-            // Read .data blob
             let data_entry = tree.get_name(".data").ok_or("tree missing .data entry")?;
             let data_blob = repo.find_blob(data_entry.id())?;
             let data = std::str::from_utf8(data_blob.content())?.to_string();
 
-            // Read numbered children in order
             let mut child_entries: Vec<(String, git2::Oid)> = Vec::new();
             for entry in tree.iter() {
                 let name = entry.name().unwrap_or("").to_string();
@@ -117,12 +104,7 @@ pub fn read_tree(
             }
 
             let ref_ = Ref::new(Sha(oid.to_string()), "self");
-            Ok(Fragment::new_fragment(
-                ref_,
-                placeholder_witnessed,
-                data,
-                children,
-            ))
+            Ok(Fragment::new_fragment(ref_, data, children))
         }
         _ => Err(format!("unexpected object type for oid {}", oid).into()),
     }
