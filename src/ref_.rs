@@ -15,8 +15,3 @@ impl Ref {
         }
     }
 }
-
-/// Deterministic canonical serialization of a ref.
-pub fn serialize_ref(r: &Ref) -> String {
-    format!("ref:{}:{}", r.sha.0, r.label)
-}

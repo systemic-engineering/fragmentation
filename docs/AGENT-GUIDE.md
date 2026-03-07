@@ -4,11 +4,15 @@ You are an agent. You are going to use this library. Here is what the code can't
 
 ## The Contract
 
-A fragment is a witnessed observation. Not data with metadata attached. A unit of reality that includes who observed it, when, and what they said about it.
+A fragment is a content-addressed tree. Content in, hash out. Same content, same hash. The structure is amoral -- it hashes what you give it.
 
-When you create a fragment, you are witnessing. Your author and committer fields are part of the hash. If you lie about who you are, you get a valid hash for a thing that didn't happen. The library won't stop you. Content addressing is amoral. It just hashes what you give it. The constraint is yours to hold.
+Witnessing is a separate act. When you call `write_commit`, you attach your name, the timestamp, and a message to a tree. That commitment is recorded on the git commit, not on the fragment. The content you committed doesn't change because you committed it. But the record that you did is permanent.
+
+If you lie about who you are in a `Witnessed`, you get a valid commit for an observation that didn't happen the way it claims. The library won't stop you. The constraint is yours to hold.
 
 ## Author vs. Committer: When You're the Agent
+
+These fields live on `Witnessed`, which maps to git commit metadata via `write_commit`.
 
 If a human asked you to make a decision, and you made it:
 - **Author**: you. You wrote the content.
@@ -20,9 +24,9 @@ If a human wrote a decision, and you're recording it:
 
 If another agent produced output, and you're integrating it:
 - **Author**: the other agent. They produced it.
-- **Committer**: you. You're the one assembling the tree.
+- **Committer**: you. You're the one making the commit.
 
-The committer is always the entity that creates the fragment object. The author is the entity whose intent the data carries. Get this right. It matters downstream when someone walks the tree asking "who decided this?"
+The committer is always the entity that runs `write_commit`. The author is the entity whose intent the data carries. Get this right. It matters downstream when someone walks the git log asking "who decided this?"
 
 ## Trees, Not Lists
 
@@ -30,17 +34,17 @@ Fragments are not log entries. They nest. A decision tree is a tree of fragments
 
 The structure encodes the relationships. Don't flatten things into sequences of shards when the structure is hierarchical. Use Fragment with children when the containment is real.
 
-```gleam
+```rust
 // Wrong: flat list of steps
-let step1 = shard(r1, w, "observe")
-let step2 = shard(r2, w, "decide")
-let step3 = shard(r3, w, "act")
-let trace = fragment(root_ref, w, "trace", [step1, step2, step3])
+let step1 = Fragment::shard(r1, "observe");
+let step2 = Fragment::shard(r2, "decide");
+let step3 = Fragment::shard(r3, "act");
+let trace = Fragment::fractal(root_ref, "trace", vec![step1, step2, step3]);
 
 // Right: nested chain where each step contains the previous
-let observe = shard(r1, w, "observe: input received")
-let decide = fragment(r2, w, "decide: allow", [observe])
-let act = fragment(r3, w, "act: executed", [decide])
+let observe = Fragment::shard(r1, "observe: input received");
+let decide = Fragment::fractal(r2, "decide: allow", vec![observe]);
+let act = Fragment::fractal(r3, "act: executed", vec![decide]);
 ```
 
 The nested form encodes causality. Walking `act` shows you the full chain. The flat form loses the dependency structure.
@@ -62,44 +66,45 @@ Use the store when:
 
 Don't use the store as your persistence layer. It's in-memory. It's a working structure, not a database.
 
-## Hashing Is Total
+## Content Addressing Is Structural
 
-`hash_fragment` hashes everything: the type tag, the ref, the witness record, the data, and all children recursively. This means:
+`content_oid` hashes content and structure only: the data, the children, and the nesting. It does not include:
+- The ref or label
+- Any witness metadata
+- Who created it or when
 
-- Two trees that look different but have the same serialization will have the same hash. (This shouldn't happen if you use the construction functions correctly.)
-- A tree with a different child ordering has a different hash. `[a, b]` and `[b, a]` are different trees.
-- A tree with a different witness on any node, at any depth, has a different root hash. The witness propagates upward through serialization.
-
-The last point is critical. If you re-witness a leaf (same data, new timestamp), the root hash changes. The entire tree is different because one observation within it changed. This is correct. The tree you had before and the tree you have now are not the same tree.
+This means:
+- A tree with different child ordering has a different hash. `[a, b]` and `[b, a]` are different trees.
+- Two agents building the same tree independently get the same `content_oid`. The content is the same. Their commits (via `write_commit`) will differ -- different authors, different timestamps -- but the tree they point at is identical.
+- Restructuring a tree (adding, removing, or reordering children) changes the root hash. Changing only the witness metadata on a commit does not.
 
 ## Diff Is Positional
 
 `diff` compares children by position, not by content matching. If you reorder children, diff reports modifications, not moves. If you insert a child at the beginning, every subsequent child looks "modified" because it's now at a different position.
 
-This is a deliberate simplicity choice. For richer structural comparison (matching by label, matching by content hash, detecting moves), you'd build on top of diff, not replace it.
+This is a deliberate simplicity choice. For richer structural comparison (matching by content hash, detecting moves), build on top of diff.
 
 ## Walking Is Immediate
 
-`walk.collect`, `walk.fold`, `walk.find`, and `walk.depth` all operate on the embedded tree. No store lookups. No lazy loading. The full tree must be in memory.
+`walk::collect`, `walk::fold`, `walk::find`, and `walk::depth` all operate on the embedded tree. No store lookups. No lazy loading. The full tree must be in memory.
 
-For very large trees, this means memory proportional to tree size. For typical use cases (decision traces, document structures, observation records), this is fine. If you're building trees with millions of nodes, think about whether you need all of them materialized at once.
+For typical use cases (decision traces, document structures, observation records), this is fine. If you're building trees with millions of nodes, think about whether you need all of them materialized at once.
 
 ## Patterns That Work
 
 **Observation chains**: Each step wraps the previous. Walking the final step reconstructs the full history.
 
-**Parallel branches**: Two agents observe the same event. Each produces a shard with different witness records. A supervisory fragment wraps both, creating a tree where the branches are the observations and the root is the integration.
+**Parallel branches**: Two agents observe the same event. Each produces the same content tree (same `content_oid`). They commit separately with different `Witnessed` records. The git log shows two commits pointing at the same tree -- "we both saw this" is structurally distinct from "this happened once."
 
-**Audit trails**: Every mutation is a new fragment. The old fragment is a child of the new one. The tree grows from the root. Walking it gives you the full trail. Diffing two versions tells you what changed.
+**Audit trails**: Every mutation is a new tree. Commit each version. The git history is the audit trail. Diffing two trees tells you what changed structurally.
 
-**Trace-as-branch**: An agent's execution trace is a fragment tree. Each decision is a node. The tree structure matches the decision structure. The witness records say who decided what, when. The whole trace is hashable, diffable, walkable.
+**Trace-as-tree**: An agent's execution trace is a fragment tree. Each decision is a node. The tree structure matches the decision structure. Commit the final tree with witness metadata. The whole trace is content-addressed, diffable, walkable.
 
 ## What You Can Break
 
-Nothing, structurally. The library is a set of pure functions on immutable types. You can't corrupt the store, you can't create invalid hashes, you can't break referential transparency.
+Nothing, structurally. The library is pure functions on immutable types. You can't corrupt the store, you can't create invalid hashes, you can't break referential transparency.
 
 What you can get wrong:
-- Lying about authorship in witness records. The hash will be valid. The provenance will be false.
-- Using the ref SHA for something other than the fragment's address. The library doesn't enforce that the ref SHA matches the content hash. These are separate concepts: the ref is the address the fragment *claims*, the content hash is what the content *produces*. Aligning them is your responsibility.
+- Lying about authorship in `Witnessed` records. The commit will be valid. The provenance will be false.
+- Using the ref SHA for something other than the fragment's content address. The library doesn't enforce that `ref_.sha` matches `content_oid`. Aligning them is your responsibility (the `encoding` module does this correctly).
 - Flattening hierarchical structures into lists. The code will work. The meaning will be lost.
-- Ignoring the timestamp. Using empty strings or static values for timestamps produces valid fragments that carry no temporal information. Content addressing doesn't care. Your future self, trying to reconstruct when things happened, will.

@@ -17,7 +17,7 @@ pub enum Change {
 /// Compares structurally: same hash = unchanged, different hash = modified.
 /// Children compared positionally.
 pub fn diff(old: &Fragment, new: &Fragment) -> Vec<Change> {
-    if fragment::hash_fragment(old) == fragment::hash_fragment(new) {
+    if fragment::content_oid(old) == fragment::content_oid(new) {
         vec![Change::Unchanged(old.clone())]
     } else {
         diff_fragments(old, new)

@@ -1,42 +1,45 @@
 # Witnessed
 
-The `Witnessed` type is the most important thing in this library. Not because it's complex -- it's four strings. Because of what it means for identity.
+`Witnessed` is git commit metadata. Four typed fields that map directly to git's author and committer signatures.
 
-```gleam
-pub type Author { Author(self: String) }
-pub type Committer { Committer(self: String) }
-pub type Timestamp { Timestamp(self: String) }
-pub type Message { Message(self: String) }
+```rust
+pub struct Author(pub String);
+pub struct Committer(pub String);
+pub struct Timestamp(pub String);
+pub struct Message(pub String);
 
-pub type Witnessed {
-  Witnessed(
-    author: Author,
-    committer: Committer,
-    timestamp: Timestamp,
-    message: Message,
-  )
+pub struct Witnessed {
+    pub author: Author,
+    pub committer: Committer,
+    pub timestamp: Timestamp,
+    pub message: Message,
 }
 ```
 
-These are the same four fields as a git commit. Author, committer, timestamp, message. This is not a metaphor. This IS git commit metadata, extracted into a type that can live on any node in any tree.
+Each field is a distinct type -- you cannot pass a `Committer` where an `Author` is expected.
 
-Each field is a distinct type. The same principle as `Sha`: a string that knows what it is. You cannot pass a `Committer` where an `Author` is expected. The distinction the library encodes conceptually -- author wrote it, committer ran it -- is now enforced structurally.
+## Content vs. Commitment
 
-## Why Witnessed Is Not Metadata
+Content addressing (`content_oid`) covers structure only: data and children. It does not include who created the fragment, when, or what they said about it. Same content, same hash, always.
 
-Metadata is information about information. It lives outside the thing it describes. You can strip metadata without changing the thing.
+Witnessing happens at commit time via `write_commit`. The witness record goes on the git commit, not the content.
 
-Witnessed is different. The witness record is part of the hash. If you change the author, the hash changes. If you change the message, the hash changes. If you change the timestamp, the hash changes.
+```rust
+let tree = encoding::encode("same data");
+let oid = fragment::content_oid(&tree);
+// This OID is the same no matter who runs this code.
 
-```gleam
-let w1 = witnessed(author("alex"), committer("reed"), timestamp("2026-03-01"), message("first observation"))
-let w2 = witnessed(author("alex"), committer("reed"), timestamp("2026-03-01"), message("second observation"))
-let s1 = shard(r, w1, "same-data")
-let s2 = shard(r, w2, "same-data")
-// hash_fragment(s1) != hash_fragment(s2)
+let w = Witnessed::new(
+    Author("alex".into()),
+    Committer("reed".into()),
+    Timestamp("2026-03-07T00:00:00Z".into()),
+    Message("first observation".into()),
+);
+git::write_commit(&repo, &tree, &w, "first observation", None);
+// The witness is recorded on the commit, not the content.
 ```
 
-Same ref. Same data. Different message. Different hash. The observation changes the observed. This is not a bug. This is the point.
+Same tree, different witness, different commit. But the same tree OID. The content is invariant. The commitment is the variable.
 
 ## Author and Committer
 
@@ -45,31 +48,10 @@ Git distinguishes author from committer. Most people never notice because they'r
 - **Author**: who wrote the content. Who made the decision. Who holds the intent.
 - **Committer**: who ran the process. Who executed. Who was the mechanism.
 
-In practice: Alex authors a design decision. Reed commits it -- runs the bias, executes the trace, records the observation. The author is who wrote it. The committer is who ran it.
-
 This distinction matters for systems where authorship and execution are separated. In agent-human collaboration, they almost always are.
 
-## The Observer Effect
+## Two Observers, One Tree
 
-Different witness, different hash. This is the observer effect made structural.
+Two agents observe the same event. They produce the same content tree -- same `content_oid`. They commit it separately: different authors, different timestamps, different commits. The tree they both point at is the same tree. Because it is.
 
-Two agents observe the same event at the same time. They produce the same data. But their witness records differ -- different author fields at minimum. The resulting fragments have different hashes. They are, in the content-addressed sense, different objects.
-
-This is correct. Two observations of the same event are not the same observation. The observer is part of what was observed. Pretending otherwise produces systems that can't distinguish between "we both saw this" and "this happened once."
-
-## Timestamp
-
-The timestamp is a `Timestamp` value, not a datetime type. This is deliberate. Fragmentation doesn't enforce a format. The canonical serialization includes the inner string exactly as provided. This means:
-
-- You can use ISO 8601 (`timestamp("2026-03-01T19:30:00Z")`)
-- You can use epoch seconds
-- You can use a logical clock value
-- You can use anything that serializes to a string
-
-The library doesn't parse it. It hashes it. What matters is that the same string always produces the same hash, and different strings produce different hashes.
-
-## Message
-
-The message is the witness's account of what happened. In git, this is the commit message. In fragmentation, it's the same thing at the node level: a human-readable (or agent-readable) record of intent.
-
-The message is part of the hash. A different account of the same event produces a different fragment. This encodes the principle that interpretation is part of the record.
+"We both saw this" and "this happened once" are structurally distinct: same tree OID, different commit OIDs. The observer effect lives on commits, not content.

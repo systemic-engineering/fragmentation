@@ -2,20 +2,6 @@ use fragmentation::diff;
 use fragmentation::encoding;
 use fragmentation::fragment;
 use fragmentation::store::Store;
-use fragmentation::witnessed::{Author, Committer, Message, Timestamp, Witnessed};
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-fn test_witnessed() -> Witnessed {
-    Witnessed::new(
-        Author("alex".into()),
-        Committer("reed".into()),
-        Timestamp("2026-03-01T00:00:00Z".into()),
-        Message("test".into()),
-    )
-}
 
 // ===========================================================================
 // Round 1: Character -> Shard
@@ -23,58 +9,47 @@ fn test_witnessed() -> Witnessed {
 
 #[test]
 fn encode_char_is_shard() {
-    let w = test_witnessed();
-    let result = encoding::encode_char("a", &w);
+    let result = encoding::encode_char("a");
     assert!(result.is_shard());
 }
 
 #[test]
 fn encode_char_data() {
-    let w = test_witnessed();
-    let result = encoding::encode_char("a", &w);
+    let result = encoding::encode_char("a");
     assert_eq!(result.data(), "a");
 }
 
 #[test]
 fn encode_char_label() {
-    let w = test_witnessed();
-    let result = encoding::encode_char("a", &w);
+    let result = encoding::encode_char("a");
     assert_eq!(result.self_ref().label, "utf8/a");
 }
 
 #[test]
 fn encode_char_deterministic() {
-    let w = test_witnessed();
-    let a = encoding::encode_char("a", &w);
-    let b = encoding::encode_char("a", &w);
-    assert_eq!(fragment::hash_fragment(&a), fragment::hash_fragment(&b));
+    let a = encoding::encode_char("a");
+    let b = encoding::encode_char("a");
+    assert_eq!(fragment::content_oid(&a), fragment::content_oid(&b));
 }
 
 #[test]
 fn encode_char_multibyte() {
-    let w = test_witnessed();
-    let result = encoding::encode_char("é", &w);
+    let result = encoding::encode_char("é");
     assert_eq!(result.data(), "é");
     assert_eq!(result.self_ref().label, "utf8/é");
 }
 
 #[test]
-fn encode_char_different_chars_different_hash() {
-    let w = test_witnessed();
-    let a = encoding::encode_char("a", &w);
-    let b = encoding::encode_char("b", &w);
-    assert_ne!(fragment::hash_fragment(&a), fragment::hash_fragment(&b));
+fn encode_char_different_chars_different_oid() {
+    let a = encoding::encode_char("a");
+    let b = encoding::encode_char("b");
+    assert_ne!(fragment::content_oid(&a), fragment::content_oid(&b));
 }
 
-// Cross-verification: encode_char hash matches Gleam
 #[test]
-fn encode_char_cross_verify() {
-    let w = test_witnessed();
-    let a = encoding::encode_char("a", &w);
-    assert_eq!(
-        fragment::hash_fragment(&a),
-        "f6906badb67feb00c1ac8fd3adcb071bb7a9fa9ff5a9fe9b82715169a16de3ac"
-    );
+fn encode_char_oid_is_blob_oid() {
+    let a = encoding::encode_char("a");
+    assert_eq!(a.self_ref().sha.0, fragment::blob_oid("a"));
 }
 
 // ===========================================================================
@@ -82,30 +57,26 @@ fn encode_char_cross_verify() {
 // ===========================================================================
 
 #[test]
-fn encode_word_is_fragment() {
-    let w = test_witnessed();
-    let result = encoding::encode_word("hi", &w);
-    assert!(result.is_fragment());
+fn encode_word_is_fractal() {
+    let result = encoding::encode_word("hi");
+    assert!(result.is_fractal());
 }
 
 #[test]
 fn encode_word_data() {
-    let w = test_witnessed();
-    let result = encoding::encode_word("hi", &w);
+    let result = encoding::encode_word("hi");
     assert_eq!(result.data(), "hi");
 }
 
 #[test]
 fn encode_word_label() {
-    let w = test_witnessed();
-    let result = encoding::encode_word("hi", &w);
+    let result = encoding::encode_word("hi");
     assert_eq!(result.self_ref().label, "token/hi");
 }
 
 #[test]
 fn encode_word_children_are_char_shards() {
-    let w = test_witnessed();
-    let result = encoding::encode_word("hi", &w);
+    let result = encoding::encode_word("hi");
     let children = result.children();
     assert_eq!(children.len(), 2);
     assert!(children.iter().all(|c| c.is_shard()));
@@ -113,8 +84,7 @@ fn encode_word_children_are_char_shards() {
 
 #[test]
 fn encode_word_children_data() {
-    let w = test_witnessed();
-    let result = encoding::encode_word("hi", &w);
+    let result = encoding::encode_word("hi");
     let children = result.children();
     let data: Vec<&str> = children.iter().map(|c| c.data()).collect();
     assert_eq!(data, vec!["h", "i"]);
@@ -122,20 +92,14 @@ fn encode_word_children_data() {
 
 #[test]
 fn decode_word_roundtrip() {
-    let w = test_witnessed();
-    let word = encoding::encode_word("hi", &w);
+    let word = encoding::encode_word("hi");
     assert_eq!(encoding::decode(&word), Ok("hi".to_string()));
 }
 
-// Cross-verification: encode_word hash matches Gleam
 #[test]
-fn encode_word_cross_verify() {
-    let w = test_witnessed();
-    let word = encoding::encode_word("hi", &w);
-    assert_eq!(
-        fragment::hash_fragment(&word),
-        "6424331c2cfd9cefece429bedbac96f57c91d8f363b1a132e20c1d30bb029928"
-    );
+fn encode_word_oid_matches_content_oid() {
+    let word = encoding::encode_word("hi");
+    assert_eq!(word.self_ref().sha.0, fragment::content_oid(&word));
 }
 
 // ===========================================================================
@@ -143,32 +107,28 @@ fn encode_word_cross_verify() {
 // ===========================================================================
 
 #[test]
-fn encode_paragraph_is_fragment() {
-    let w = test_witnessed();
-    let result = encoding::encode_paragraph("hi reed", &w);
-    assert!(result.is_fragment());
+fn encode_paragraph_is_fractal() {
+    let result = encoding::encode_paragraph("hi reed");
+    assert!(result.is_fractal());
 }
 
 #[test]
 fn encode_paragraph_label() {
-    let w = test_witnessed();
-    let result = encoding::encode_paragraph("hi reed", &w);
+    let result = encoding::encode_paragraph("hi reed");
     assert_eq!(result.self_ref().label, "paragraph");
 }
 
 #[test]
 fn encode_paragraph_children_are_sentences() {
-    let w = test_witnessed();
-    let result = encoding::encode_paragraph("hi reed", &w);
+    let result = encoding::encode_paragraph("hi reed");
     let children = result.children();
     assert_eq!(children.len(), 1);
-    assert!(children.iter().all(|c| c.is_fragment()));
+    assert!(children.iter().all(|c| c.is_fractal()));
 }
 
 #[test]
 fn encode_paragraph_sentence_labels() {
-    let w = test_witnessed();
-    let result = encoding::encode_paragraph("hi reed", &w);
+    let result = encoding::encode_paragraph("hi reed");
     let labels: Vec<&str> = result
         .children()
         .iter()
@@ -179,15 +139,13 @@ fn encode_paragraph_sentence_labels() {
 
 #[test]
 fn decode_paragraph_roundtrip() {
-    let w = test_witnessed();
-    let para = encoding::encode_paragraph("hi reed", &w);
+    let para = encoding::encode_paragraph("hi reed");
     assert_eq!(encoding::decode(&para), Ok("hi reed".to_string()));
 }
 
 #[test]
 fn encode_paragraph_filters_empty_words() {
-    let w = test_witnessed();
-    let result = encoding::encode_paragraph("hi  reed", &w);
+    let result = encoding::encode_paragraph("hi  reed");
     let sentences = result.children();
     assert_eq!(sentences.len(), 1);
     let words = sentences[0].children();
@@ -199,30 +157,26 @@ fn encode_paragraph_filters_empty_words() {
 // ===========================================================================
 
 #[test]
-fn encode_sentence_is_fragment() {
-    let w = test_witnessed();
-    let result = encoding::encode_sentence("hello world", &w);
-    assert!(result.is_fragment());
+fn encode_sentence_is_fractal() {
+    let result = encoding::encode_sentence("hello world");
+    assert!(result.is_fractal());
 }
 
 #[test]
 fn encode_sentence_label() {
-    let w = test_witnessed();
-    let result = encoding::encode_sentence("hello world", &w);
+    let result = encoding::encode_sentence("hello world");
     assert_eq!(result.self_ref().label, "sentence");
 }
 
 #[test]
 fn encode_sentence_data() {
-    let w = test_witnessed();
-    let result = encoding::encode_sentence("hello world", &w);
+    let result = encoding::encode_sentence("hello world");
     assert_eq!(result.data(), "hello world");
 }
 
 #[test]
 fn encode_sentence_children_are_words() {
-    let w = test_witnessed();
-    let result = encoding::encode_sentence("hello world", &w);
+    let result = encoding::encode_sentence("hello world");
     let children = result.children();
     assert_eq!(children.len(), 2);
     let labels: Vec<&str> = children
@@ -234,15 +188,13 @@ fn encode_sentence_children_are_words() {
 
 #[test]
 fn decode_sentence_roundtrip() {
-    let w = test_witnessed();
-    let s = encoding::encode_sentence("hello world", &w);
+    let s = encoding::encode_sentence("hello world");
     assert_eq!(encoding::decode(&s), Ok("hello world".to_string()));
 }
 
 #[test]
 fn encode_paragraph_splits_sentences() {
-    let w = test_witnessed();
-    let result = encoding::encode_paragraph("Hello world. How are you?", &w);
+    let result = encoding::encode_paragraph("Hello world. How are you?");
     let sentences = result.children();
     assert_eq!(sentences.len(), 2);
     assert_eq!(sentences[0].data(), "Hello world.");
@@ -250,15 +202,13 @@ fn encode_paragraph_splits_sentences() {
 
 #[test]
 fn encode_paragraph_single_sentence() {
-    let w = test_witnessed();
-    let result = encoding::encode_paragraph("no punctuation here", &w);
+    let result = encoding::encode_paragraph("no punctuation here");
     assert_eq!(result.children().len(), 1);
 }
 
 #[test]
 fn encode_paragraph_exclamation_split() {
-    let w = test_witnessed();
-    let result = encoding::encode_paragraph("Wow! That works.", &w);
+    let result = encoding::encode_paragraph("Wow! That works.");
     let sentences = result.children();
     assert_eq!(sentences.len(), 2);
     assert_eq!(sentences[0].data(), "Wow!");
@@ -266,15 +216,13 @@ fn encode_paragraph_exclamation_split() {
 
 #[test]
 fn encode_paragraph_question_split() {
-    let w = test_witnessed();
-    let result = encoding::encode_paragraph("Really? Yes.", &w);
+    let result = encoding::encode_paragraph("Really? Yes.");
     assert_eq!(result.children().len(), 2);
 }
 
 #[test]
 fn encode_paragraph_sentence_has_words() {
-    let w = test_witnessed();
-    let result = encoding::encode_paragraph("Hi Reed. Bye Reed.", &w);
+    let result = encoding::encode_paragraph("Hi Reed. Bye Reed.");
     let sentences = result.children();
     let first = &sentences[0];
     let words = first.children();
@@ -288,30 +236,26 @@ fn encode_paragraph_sentence_has_words() {
 // ===========================================================================
 
 #[test]
-fn encode_is_fragment() {
-    let w = test_witnessed();
-    let result = encoding::encode("Hi Reed.\n\nHow are you?", &w);
-    assert!(result.is_fragment());
+fn encode_is_fractal() {
+    let result = encoding::encode("Hi Reed.\n\nHow are you?");
+    assert!(result.is_fractal());
 }
 
 #[test]
 fn encode_label_is_document() {
-    let w = test_witnessed();
-    let result = encoding::encode("Hi Reed.\n\nHow are you?", &w);
+    let result = encoding::encode("Hi Reed.\n\nHow are you?");
     assert_eq!(result.self_ref().label, "document");
 }
 
 #[test]
 fn encode_two_paragraphs() {
-    let w = test_witnessed();
-    let result = encoding::encode("Hi Reed.\n\nHow are you?", &w);
+    let result = encoding::encode("Hi Reed.\n\nHow are you?");
     assert_eq!(result.children().len(), 2);
 }
 
 #[test]
 fn encode_paragraph_labels() {
-    let w = test_witnessed();
-    let result = encoding::encode("Hi Reed.\n\nHow are you?", &w);
+    let result = encoding::encode("Hi Reed.\n\nHow are you?");
     assert!(result
         .children()
         .iter()
@@ -320,36 +264,28 @@ fn encode_paragraph_labels() {
 
 #[test]
 fn decode_full_roundtrip() {
-    let w = test_witnessed();
     let text = "Hi Reed.\n\nHow are you?";
-    let doc = encoding::encode(text, &w);
+    let doc = encoding::encode(text);
     assert_eq!(encoding::decode(&doc), Ok(text.to_string()));
 }
 
 #[test]
 fn encode_single_paragraph() {
-    let w = test_witnessed();
-    let result = encoding::encode("just one", &w);
+    let result = encoding::encode("just one");
     assert_eq!(result.children().len(), 1);
 }
 
 #[test]
 fn encode_empty_text() {
-    let w = test_witnessed();
-    let result = encoding::encode("", &w);
+    let result = encoding::encode("");
     assert!(result.children().is_empty());
     assert_eq!(result.data(), "");
 }
 
-// Cross-verification: full document hash matches Gleam
 #[test]
-fn encode_document_cross_verify() {
-    let w = test_witnessed();
-    let doc = encoding::encode("hello world", &w);
-    assert_eq!(
-        fragment::hash_fragment(&doc),
-        "c3c6a6eabd732acfe5178092c0571bc9ee6ead2472847e829d63c8fc28687af9"
-    );
+fn encode_document_oid_matches_content_oid() {
+    let doc = encoding::encode("hello world");
+    assert_eq!(doc.self_ref().sha.0, fragment::content_oid(&doc));
 }
 
 // ===========================================================================
@@ -358,40 +294,31 @@ fn encode_document_cross_verify() {
 
 #[test]
 fn ingest_returns_root_and_store() {
-    let w = test_witnessed();
     let s = Store::new();
-    let (root, updated) = encoding::ingest("hello", &w, s);
-    assert!(root.is_fragment());
+    let (root, updated) = encoding::ingest("hello", s);
+    assert!(root.is_fractal());
     assert!(updated.size() > 0);
 }
 
 #[test]
 fn ingest_deduplicates_repeated_words() {
-    let w = test_witnessed();
     let s = Store::new();
-    let (_root, updated) = encoding::ingest("the the the", &w, s);
-    // 3 unique chars (t, h, e) + 1 word ("the") + 1 sentence + 1 paragraph + 1 document = 7
+    let (_root, updated) = encoding::ingest("the the the", s);
     assert_eq!(updated.size(), 7);
 }
 
 #[test]
 fn ingest_all_unique_words() {
-    let w = test_witnessed();
     let s = Store::new();
-    let (_root, updated) = encoding::ingest("a b", &w, s);
-    // chars: a, b = 2, words: "a", "b" = 2, sentence = 1, paragraph = 1, document = 1 = 7
+    let (_root, updated) = encoding::ingest("a b", s);
     assert_eq!(updated.size(), 7);
 }
 
 #[test]
 fn ingest_preserves_existing_store() {
-    let w = test_witnessed();
     let s = Store::new();
-    let (_r1, s1) = encoding::ingest("hi", &w, s);
-    let (_r2, s2) = encoding::ingest("hi there", &w, s1);
-    // First: h, i = 2 chars + "hi" word + sentence + paragraph + document = 6
-    // Second: t, e, r = 3 new chars + "there" word + sentence + paragraph + document = 7 new
-    // Total: 13
+    let (_r1, s1) = encoding::ingest("hi", s);
+    let (_r2, s2) = encoding::ingest("hi there", s1);
     assert_eq!(s2.size(), 13);
 }
 
@@ -401,17 +328,15 @@ fn ingest_preserves_existing_store() {
 
 #[test]
 fn diff_same_document_unchanged() {
-    let w = test_witnessed();
-    let doc = encoding::encode("hello world", &w);
+    let doc = encoding::encode("hello world");
     let changes = diff::diff(&doc, &doc);
     assert_eq!(changes, vec![diff::Change::Unchanged(doc)]);
 }
 
 #[test]
 fn diff_modified_word() {
-    let w = test_witnessed();
-    let doc_a = encoding::encode("hello world", &w);
-    let doc_b = encoding::encode("hello reed", &w);
+    let doc_a = encoding::encode("hello world");
+    let doc_b = encoding::encode("hello reed");
     let changes = diff::diff(&doc_a, &doc_b);
     let (_, _, modified, unchanged) = diff::summary(&changes);
     assert!(unchanged > 0);
@@ -420,9 +345,8 @@ fn diff_modified_word() {
 
 #[test]
 fn diff_first_word_unchanged() {
-    let w = test_witnessed();
-    let doc_a = encoding::encode("hello world", &w);
-    let doc_b = encoding::encode("hello reed", &w);
+    let doc_a = encoding::encode("hello world");
+    let doc_b = encoding::encode("hello reed");
     let changes = diff::diff(&doc_a, &doc_b);
     let has_hello_unchanged = changes.iter().any(|c| match c {
         diff::Change::Unchanged(f) => f.data() == "hello",
@@ -433,9 +357,8 @@ fn diff_first_word_unchanged() {
 
 #[test]
 fn diff_added_paragraph() {
-    let w = test_witnessed();
-    let doc_a = encoding::encode("hello", &w);
-    let doc_b = encoding::encode("hello\n\nworld", &w);
+    let doc_a = encoding::encode("hello");
+    let doc_b = encoding::encode("hello\n\nworld");
     let changes = diff::diff(&doc_a, &doc_b);
     assert!(changes.iter().any(|c| matches!(c, diff::Change::Added(_))));
 }
