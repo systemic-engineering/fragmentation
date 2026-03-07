@@ -171,15 +171,27 @@ impl Keys for Local {
     }
 
     fn encrypt<E: Encode>(&self, fragment: Fragment<E>) -> Result<Encrypted<Self>, Self::Error> {
-        // Pass-through for all variants this cycle.
-        Ok(Encrypted::new(fragment.data().encode(), self.clone()))
+        let plaintext = fragment.data().encode();
+        let ciphertext = match self {
+            Local::None => plaintext,
+            #[cfg(feature = "ssh")]
+            Local::Ssh(ssh) => ssh.encrypt_bytes(&plaintext)?,
+            #[cfg(feature = "gpg")]
+            Local::Gpg(gpg) => gpg.encrypt_bytes(&plaintext)?,
+        };
+        Ok(Encrypted::new(ciphertext, self.clone()))
     }
 
     fn decrypt<E: Decode>(&self, encrypted: &Encrypted<Self>) -> Result<Fragment<E>, Self::Error> {
-        // Pass-through for all variants this cycle.
-        let data =
-            E::decode(&encrypted.ciphertext).map_err(|e| LocalError::Decode(format!("{}", e)))?;
-        let sha = Sha(fragment::blob_oid_bytes(&encrypted.ciphertext));
+        let plaintext = match self {
+            Local::None => encrypted.ciphertext.clone(),
+            #[cfg(feature = "ssh")]
+            Local::Ssh(ssh) => ssh.decrypt_bytes(&encrypted.ciphertext)?,
+            #[cfg(feature = "gpg")]
+            Local::Gpg(gpg) => gpg.decrypt_bytes(&encrypted.ciphertext)?,
+        };
+        let data = E::decode(&plaintext).map_err(|e| LocalError::Decode(format!("{}", e)))?;
+        let sha = Sha(fragment::blob_oid_bytes(&plaintext));
         let ref_ = Ref::new(sha, "decrypted");
         Ok(Fragment::shard_typed(ref_, data))
     }
@@ -229,6 +241,108 @@ impl SSH {
             .map_err(|e| LocalError::Ssh(format!("{}", e)))?;
         Ok(pem.into_bytes())
     }
+
+    /// Derive X25519 static secret from Ed25519 seed.
+    /// Standard conversion: SHA-512 of seed, first 32 bytes, clamped.
+    fn x25519_secret(&self) -> Result<x25519_dalek::StaticSecret, LocalError> {
+        use sha2::{Digest, Sha512};
+
+        let ed25519 = self
+            .key
+            .key_data()
+            .ed25519()
+            .ok_or_else(|| LocalError::Ssh("not an Ed25519 key".into()))?;
+        let seed: &[u8; 32] = ed25519.private.as_ref();
+
+        let hash = Sha512::digest(seed);
+        let mut secret_bytes = [0u8; 32];
+        secret_bytes.copy_from_slice(&hash[..32]);
+        // Clamp per RFC 7748
+        secret_bytes[0] &= 248;
+        secret_bytes[31] &= 127;
+        secret_bytes[31] |= 64;
+
+        Ok(x25519_dalek::StaticSecret::from(secret_bytes))
+    }
+
+    /// Derive X25519 public key from the static secret.
+    fn x25519_public(&self) -> Result<x25519_dalek::PublicKey, LocalError> {
+        let secret = self.x25519_secret()?;
+        Ok(x25519_dalek::PublicKey::from(&secret))
+    }
+
+    /// ECIES encrypt: ephemeral X25519 + HKDF-SHA256 + ChaCha20-Poly1305.
+    /// Wire format: [32 ephemeral_pub | 12 nonce | ciphertext + 16 tag]
+    fn encrypt_bytes(&self, plaintext: &[u8]) -> Result<Vec<u8>, LocalError> {
+        use chacha20poly1305::{
+            aead::{Aead, OsRng},
+            AeadCore, ChaCha20Poly1305, KeyInit,
+        };
+        use hkdf::Hkdf;
+        use sha2::Sha256;
+
+        let recipient_public = self.x25519_public()?;
+        let ephemeral_secret = x25519_dalek::EphemeralSecret::random_from_rng(OsRng);
+        let ephemeral_public = x25519_dalek::PublicKey::from(&ephemeral_secret);
+        let shared_secret = ephemeral_secret.diffie_hellman(&recipient_public);
+
+        let hkdf = Hkdf::<Sha256>::new(None, shared_secret.as_bytes());
+        let mut key_bytes = [0u8; 32];
+        hkdf.expand(b"fragmentation-ecies", &mut key_bytes)
+            .map_err(|e| LocalError::Ssh(format!("HKDF expand failed: {}", e)))?;
+
+        let cipher = ChaCha20Poly1305::new_from_slice(&key_bytes)
+            .map_err(|e| LocalError::Ssh(format!("cipher init failed: {}", e)))?;
+        let nonce = ChaCha20Poly1305::generate_nonce(OsRng);
+        let ciphertext = cipher
+            .encrypt(&nonce, plaintext)
+            .map_err(|e| LocalError::Ssh(format!("encryption failed: {}", e)))?;
+
+        let mut output = Vec::with_capacity(32 + 12 + ciphertext.len());
+        output.extend_from_slice(ephemeral_public.as_bytes());
+        output.extend_from_slice(&nonce);
+        output.extend_from_slice(&ciphertext);
+        Ok(output)
+    }
+
+    /// ECIES decrypt: parse wire format, ECDH with static secret, HKDF, AEAD decrypt.
+    fn decrypt_bytes(&self, data: &[u8]) -> Result<Vec<u8>, LocalError> {
+        use chacha20poly1305::{aead::Aead, ChaCha20Poly1305, KeyInit, Nonce};
+        use hkdf::Hkdf;
+        use sha2::Sha256;
+
+        if data.len() < 60 {
+            return Err(LocalError::Ssh(
+                "ciphertext too short for ECIES envelope".into(),
+            ));
+        }
+
+        let ephemeral_pub_bytes: [u8; 32] = data[..32]
+            .try_into()
+            .map_err(|_| LocalError::Ssh("invalid ephemeral public key".into()))?;
+        let ephemeral_public = x25519_dalek::PublicKey::from(ephemeral_pub_bytes);
+
+        let nonce_bytes: [u8; 12] = data[32..44]
+            .try_into()
+            .map_err(|_| LocalError::Ssh("invalid nonce".into()))?;
+        let nonce = Nonce::from(nonce_bytes);
+
+        let ciphertext = &data[44..];
+
+        let static_secret = self.x25519_secret()?;
+        let shared_secret = static_secret.diffie_hellman(&ephemeral_public);
+
+        let hkdf = Hkdf::<Sha256>::new(None, shared_secret.as_bytes());
+        let mut key_bytes = [0u8; 32];
+        hkdf.expand(b"fragmentation-ecies", &mut key_bytes)
+            .map_err(|e| LocalError::Ssh(format!("HKDF expand failed: {}", e)))?;
+
+        let cipher = ChaCha20Poly1305::new_from_slice(&key_bytes)
+            .map_err(|e| LocalError::Ssh(format!("cipher init failed: {}", e)))?;
+        cipher
+            .decrypt(&nonce, ciphertext)
+            .map_err(|e| LocalError::Ssh(format!("decryption failed: {}", e)))
+    }
 }
 
 // ===========================================================================
@@ -239,6 +353,7 @@ impl SSH {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GPG {
     key_id: String,
+    gnupghome: Option<std::path::PathBuf>,
 }
 
 #[cfg(feature = "gpg")]
@@ -246,15 +361,37 @@ impl GPG {
     pub fn new(key_id: impl Into<String>) -> Self {
         GPG {
             key_id: key_id.into(),
+            gnupghome: None,
         }
+    }
+
+    /// Constructor with custom GNUPGHOME for test isolation.
+    pub fn with_gnupghome(
+        key_id: impl Into<String>,
+        gnupghome: impl Into<std::path::PathBuf>,
+    ) -> Self {
+        GPG {
+            key_id: key_id.into(),
+            gnupghome: Some(gnupghome.into()),
+        }
+    }
+
+    /// Build a gpg Command with optional GNUPGHOME.
+    fn gpg_command(&self) -> std::process::Command {
+        let mut cmd = std::process::Command::new("gpg");
+        if let Some(ref home) = self.gnupghome {
+            cmd.env("GNUPGHOME", home);
+        }
+        cmd
     }
 
     /// Sign raw bytes via gpg CLI, returning the detached signature.
     fn sign_bytes(&self, data: &[u8]) -> Result<Vec<u8>, LocalError> {
         use std::io::Write;
-        use std::process::{Command, Stdio};
+        use std::process::Stdio;
 
-        let mut child = Command::new("gpg")
+        let mut child = self
+            .gpg_command()
             .args([
                 "--detach-sign",
                 "--armor",
@@ -274,6 +411,82 @@ impl GPG {
             .take()
             .unwrap()
             .write_all(data)
+            .map_err(|e| LocalError::Gpg(format!("failed to write to gpg stdin: {}", e)))?;
+
+        let output = child
+            .wait_with_output()
+            .map_err(|e| LocalError::Gpg(format!("gpg failed: {}", e)))?;
+
+        if !output.status.success() {
+            return Err(LocalError::Gpg(
+                String::from_utf8_lossy(&output.stderr).to_string(),
+            ));
+        }
+
+        Ok(output.stdout)
+    }
+
+    /// Encrypt raw bytes via gpg CLI subprocess.
+    fn encrypt_bytes(&self, plaintext: &[u8]) -> Result<Vec<u8>, LocalError> {
+        use std::io::Write;
+        use std::process::Stdio;
+
+        let mut child = self
+            .gpg_command()
+            .args([
+                "--encrypt",
+                "--recipient",
+                &self.key_id,
+                "--batch",
+                "--yes",
+                "--trust-model",
+                "always",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| LocalError::Gpg(format!("failed to spawn gpg: {}", e)))?;
+
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(plaintext)
+            .map_err(|e| LocalError::Gpg(format!("failed to write to gpg stdin: {}", e)))?;
+
+        let output = child
+            .wait_with_output()
+            .map_err(|e| LocalError::Gpg(format!("gpg failed: {}", e)))?;
+
+        if !output.status.success() {
+            return Err(LocalError::Gpg(
+                String::from_utf8_lossy(&output.stderr).to_string(),
+            ));
+        }
+
+        Ok(output.stdout)
+    }
+
+    /// Decrypt raw bytes via gpg CLI subprocess.
+    fn decrypt_bytes(&self, ciphertext: &[u8]) -> Result<Vec<u8>, LocalError> {
+        use std::io::Write;
+        use std::process::Stdio;
+
+        let mut child = self
+            .gpg_command()
+            .args(["--decrypt", "--batch", "--yes"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| LocalError::Gpg(format!("failed to spawn gpg: {}", e)))?;
+
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(ciphertext)
             .map_err(|e| LocalError::Gpg(format!("failed to write to gpg stdin: {}", e)))?;
 
         let output = child
