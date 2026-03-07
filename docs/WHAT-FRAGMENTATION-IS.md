@@ -4,7 +4,7 @@ Fragmentation is a content-addressed tree library. That sentence is true but ins
 
 Git stores blobs, trees, commits, and tags. Four object types. Every object is addressed by the SHA of its content. Same content, same address. This is what makes git work -- not branches, not the staging area, not the porcelain. The content-addressing.
 
-Fragmentation takes that principle and makes it the only principle. Two types of node: `Shard` (terminal) and `Fragment` (contains other fragments). Trees all the way down, arbitrary depth, every node carrying its own content address.
+Fragmentation takes that principle and makes it the only principle. Two types of node: `Shard` (terminal) and `Fractal` (contains other fragments). Trees all the way down, arbitrary depth, every node carrying its own content address.
 
 ## The Types
 
@@ -12,13 +12,13 @@ Fragmentation takes that principle and makes it the only principle. Two types of
 pub struct Sha(pub String);
 pub struct Ref { pub sha: Sha, pub label: String }
 
-pub enum Fragment {
+pub enum Fractal {
     Shard { ref_: Ref, data: String },
-    Fragment { ref_: Ref, data: String, fragments: Vec<Fragment> },
+    Fractal { ref_: Ref, data: String, fragments: Vec<Fragment> },
 }
 ```
 
-Three types. `Sha` is a content-addressed hash. `Ref` is an address with a label -- a named pointer. `Fragment` is a node that is either terminal (Shard) or recursive (Fragment).
+Three types. `Sha` is a content-addressed hash. `Ref` is an address with a label -- a named pointer. `Fragment` is a node that is either terminal (Shard) or recursive (Fractal).
 
 Witness metadata -- who observed, when, what they said -- lives on git commits. Not on fragment nodes. Content is content. Witnessing is a different act. See [Witnessed](WITNESSED.md).
 

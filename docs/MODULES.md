@@ -20,9 +20,9 @@ Source: `src/fragment.rs`
 
 The core type and content addressing.
 
-**Type**: `Fragment` with variants `Shard` (terminal) and `Fragment` (recursive). Both carry a `Ref` (self-address) and `data` (string). `Fragment` additionally carries `fragments: Vec<Fragment>`.
+**Type**: `Fragment` with variants `Shard` (terminal) and `Fractal` (recursive). Both carry a `Ref` (self-address) and `data` (string). `Fragment` additionally carries `fragments: Vec<Fragment>`.
 
-**Construction**: `Fragment::shard(ref_, data)` and `Fragment::new_fragment(ref_, data, children)`. No witness parameter. No validation. What you give is what you get.
+**Construction**: `Fragment::shard(ref_, data)` and `Fragment::fractal(ref_, data, children)`. No witness parameter. No validation. What you give is what you get.
 
 **Content addressing**: `content_oid` computes a git-compatible SHA-1 for any fragment. Shards produce blob OIDs, fragments produce tree OIDs. The computation is byte-identical to git's own object hashing.
 
@@ -37,7 +37,7 @@ let oid = fragment::tree_oid("data", &children);
 let oid = fragment::content_oid(&my_fragment);
 ```
 
-**Queries**: `self_ref`, `data`, `children`, `is_shard`, `is_fragment`. Accessors that work on both variants.
+**Queries**: `self_ref`, `data`, `children`, `is_shard`, `is_fractal`. Accessors that work on both variants.
 
 ## ref_
 
@@ -170,7 +170,7 @@ let commit_oid = git::write_commit(&repo, &tree, &w, "observation", None)?;
 
 ## How They Compose
 
-1. **Construct** fragments with `fragment::shard` and `fragment::new_fragment`.
+1. **Construct** fragments with `fragment::shard` and `fragment::fractal`.
 2. **Address** them with `fragment::content_oid`.
 3. **Store** them for deduplication and lookup.
 4. **Walk** trees to traverse, search, or aggregate.

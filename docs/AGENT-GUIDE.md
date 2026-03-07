@@ -39,12 +39,12 @@ The structure encodes the relationships. Don't flatten things into sequences of 
 let step1 = Fragment::shard(r1, "observe");
 let step2 = Fragment::shard(r2, "decide");
 let step3 = Fragment::shard(r3, "act");
-let trace = Fragment::new_fragment(root_ref, "trace", vec![step1, step2, step3]);
+let trace = Fragment::fractal(root_ref, "trace", vec![step1, step2, step3]);
 
 // Right: nested chain where each step contains the previous
 let observe = Fragment::shard(r1, "observe: input received");
-let decide = Fragment::new_fragment(r2, "decide: allow", vec![observe]);
-let act = Fragment::new_fragment(r3, "act: executed", vec![decide]);
+let decide = Fragment::fractal(r2, "decide: allow", vec![observe]);
+let act = Fragment::fractal(r3, "act: executed", vec![decide]);
 ```
 
 The nested form encodes causality. Walking `act` shows you the full chain. The flat form loses the dependency structure.
