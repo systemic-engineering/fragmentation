@@ -20,66 +20,81 @@ pub struct Actor<A = Blob, B = Blob, K: Keys = PlainKeys> {
 
 impl Actor {
     /// Default actor: bytes-to-bytes identity, plain keys.
-    pub fn identity(_name: impl Into<String>, _email: impl Into<String>) -> Self {
-        todo!()
+    pub fn identity(name: impl Into<String>, email: impl Into<String>) -> Self {
+        fn id(f: &Fragment<Blob>) -> Fragment<Blob> {
+            f.clone()
+        }
+        Actor {
+            name: name.into(),
+            email: email.into(),
+            encoder: id,
+            decoder: id,
+            keys: PlainKeys,
+        }
     }
 }
 
 impl<A, B, K: Keys> Actor<A, B, K> {
     /// Full constructor with custom encoder, decoder, and keys.
     pub fn new(
-        _name: impl Into<String>,
-        _email: impl Into<String>,
-        _encoder: fn(&Fragment<A>) -> Fragment<B>,
-        _decoder: fn(&Fragment<B>) -> Fragment<A>,
-        _keys: K,
+        name: impl Into<String>,
+        email: impl Into<String>,
+        encoder: fn(&Fragment<A>) -> Fragment<B>,
+        decoder: fn(&Fragment<B>) -> Fragment<A>,
+        keys: K,
     ) -> Self {
-        todo!()
+        Actor {
+            name: name.into(),
+            email: email.into(),
+            encoder,
+            decoder,
+            keys,
+        }
     }
 
     /// Actor's name.
     pub fn name(&self) -> &str {
-        todo!()
+        &self.name
     }
 
     /// Actor's email.
     pub fn email(&self) -> &str {
-        todo!()
+        &self.email
     }
 
     /// Actor's keys.
     pub fn keys(&self) -> &K {
-        todo!()
+        &self.keys
     }
 
     /// Encode a fragment from A to B.
-    pub fn encode(&self, _fragment: &Fragment<A>) -> Fragment<B> {
-        todo!()
+    pub fn encode(&self, fragment: &Fragment<A>) -> Fragment<B> {
+        (self.encoder)(fragment)
     }
 
     /// Decode a fragment from B to A.
-    pub fn decode(&self, _fragment: &Fragment<B>) -> Fragment<A> {
-        todo!()
+    pub fn decode(&self, fragment: &Fragment<B>) -> Fragment<A> {
+        (self.decoder)(fragment)
     }
 
     /// Sign an encoded fragment.
-    pub fn sign(&self, _fragment: Fragment<B>) -> Signed<K, Fragment<B>> {
-        todo!()
+    pub fn sign(&self, fragment: Fragment<B>) -> Signed<K, Fragment<B>> {
+        self.keys.sign(fragment)
     }
 
     /// Encrypt an encoded fragment.
-    pub fn encrypt(&self, _fragment: Fragment<B>) -> Encrypted<K>
+    pub fn encrypt(&self, fragment: Fragment<B>) -> Encrypted<K>
     where
         B: Encode,
     {
-        todo!()
+        self.keys.encrypt(fragment)
     }
 
     /// Decrypt to an encoded fragment.
-    pub fn decrypt(&self, _encrypted: &Encrypted<K>) -> Fragment<B>
+    pub fn decrypt(&self, encrypted: &Encrypted<K>) -> Fragment<B>
     where
         B: Decode,
     {
-        todo!()
+        self.keys.decrypt(encrypted)
     }
 }

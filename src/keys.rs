@@ -1,5 +1,7 @@
 use crate::encoding::{Decode, Encode};
-use crate::fragment::Fragment;
+use crate::fragment::{self, Fragment};
+use crate::ref_::Ref;
+use crate::sha::Sha;
 
 /// Signed content: the inner value, the proof, and who signed it.
 /// No PhantomData. Every field is real.
@@ -22,22 +24,22 @@ impl<K, T> Signed<K, T> {
 
     /// Access the signed content.
     pub fn inner(&self) -> &T {
-        todo!()
+        &self.inner
     }
 
     /// Access the signature bytes.
     pub fn signature(&self) -> &[u8] {
-        todo!()
+        &self.signature
     }
 
     /// Access the signer.
     pub fn signer(&self) -> &K {
-        todo!()
+        &self.signer
     }
 
     /// Consume the wrapper, returning the inner value.
     pub fn into_inner(self) -> T {
-        todo!()
+        self.inner
     }
 }
 
@@ -57,12 +59,12 @@ impl<K> Encrypted<K> {
 
     /// Access the ciphertext bytes.
     pub fn ciphertext(&self) -> &[u8] {
-        todo!()
+        &self.ciphertext
     }
 
     /// Access the key (who it's encrypted for).
     pub fn key(&self) -> &K {
-        todo!()
+        &self.key
     }
 }
 
@@ -86,15 +88,18 @@ pub trait Keys: Sized + Clone {
 pub struct PlainKeys;
 
 impl Keys for PlainKeys {
-    fn sign<E>(&self, _fragment: Fragment<E>) -> Signed<Self, Fragment<E>> {
-        todo!()
+    fn sign<E>(&self, fragment: Fragment<E>) -> Signed<Self, Fragment<E>> {
+        Signed::new(fragment, vec![], PlainKeys)
     }
 
-    fn encrypt<E: Encode>(&self, _fragment: Fragment<E>) -> Encrypted<Self> {
-        todo!()
+    fn encrypt<E: Encode>(&self, fragment: Fragment<E>) -> Encrypted<Self> {
+        Encrypted::new(fragment.data().encode(), PlainKeys)
     }
 
-    fn decrypt<E: Decode>(&self, _encrypted: &Encrypted<Self>) -> Fragment<E> {
-        todo!()
+    fn decrypt<E: Decode>(&self, encrypted: &Encrypted<Self>) -> Fragment<E> {
+        let data = E::decode(&encrypted.ciphertext).expect("PlainKeys: invalid data");
+        let sha = Sha(fragment::blob_oid_bytes(&encrypted.ciphertext));
+        let ref_ = Ref::new(sha, "decrypted");
+        Fragment::shard_typed(ref_, data)
     }
 }
