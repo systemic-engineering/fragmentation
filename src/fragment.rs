@@ -130,3 +130,21 @@ pub fn hash_fragment(frag: &Fragment) -> String {
     let serialized = serialize(frag);
     sha::hash(&serialized).0
 }
+
+/// Compute a git-compatible content OID for a fragment.
+/// Shard → blob OID, Fragment → tree OID.
+/// Witness metadata is NOT included — same content = same OID.
+pub fn content_oid(_frag: &Fragment) -> String {
+    todo!()
+}
+
+/// Compute the git blob OID for raw data.
+/// SHA-1("blob {len}\0{data}") — matches `git hash-object --stdin`.
+pub fn blob_oid(_data: &str) -> String {
+    todo!()
+}
+
+/// Compute the git tree OID for a fragment with data and children.
+pub fn tree_oid(_data: &str, _children: &[Fragment]) -> String {
+    todo!()
+}
