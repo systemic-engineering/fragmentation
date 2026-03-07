@@ -1,6 +1,6 @@
 use crate::encoding::{Decode, Encode};
 use crate::fragment::{Blob, Fragment};
-use crate::keys::{Encrypted, Keys, LocalKeys, Signed};
+use crate::keys::{Encrypted, Keys, Local, Signed};
 
 /// Witness identity with encoding boundary.
 ///
@@ -10,7 +10,7 @@ use crate::keys::{Encrypted, Keys, LocalKeys, Signed};
 ///
 /// fn pointers, not closures — simple, cloneable, deterministic.
 #[derive(Clone)]
-pub struct Actor<A = Blob, B = Blob, K: Keys = LocalKeys> {
+pub struct Actor<A = Blob, B = Blob, K: Keys = Local> {
     name: String,
     email: String,
     encoder: fn(&Fragment<A>) -> Fragment<B>,
@@ -29,7 +29,7 @@ impl Actor {
             email: email.into(),
             encoder: id,
             decoder: id,
-            keys: LocalKeys::Plain,
+            keys: Local::None,
         }
     }
 }

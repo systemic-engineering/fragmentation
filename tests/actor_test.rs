@@ -1,7 +1,7 @@
 use fragmentation::actor::Actor;
 use fragmentation::encoding::{Decode, Encode};
 use fragmentation::fragment::{self, Blob, Fragment};
-use fragmentation::keys::{Keys, LocalKeys, PlainKeys, Signed};
+use fragmentation::keys::{Keys, Local, PlainKeys, Signed};
 use fragmentation::ref_::Ref;
 use fragmentation::sha;
 
@@ -20,7 +20,7 @@ fn make_string_shard(data: &str) -> Fragment<String> {
 }
 
 // ===========================================================================
-// Identity actor (Blob -> Blob, LocalKeys)
+// Identity actor (Blob -> Blob, Local)
 // ===========================================================================
 
 #[test]
@@ -63,7 +63,7 @@ fn identity_actor_roundtrip() {
 #[test]
 fn identity_actor_local_keys() {
     let actor = Actor::identity("test", "test@test");
-    assert_eq!(actor.keys(), &LocalKeys::Plain);
+    assert_eq!(actor.keys(), &Local::None);
 }
 
 // ===========================================================================
@@ -108,36 +108,36 @@ fn encrypted_carries_key() {
 }
 
 // ===========================================================================
-// LocalKeys::Plain sign/encrypt/decrypt
+// Local::None sign/encrypt/decrypt
 // ===========================================================================
 
 #[test]
 fn local_keys_plain_sign_empty_signature() {
     let shard = make_blob_shard(vec![1, 2, 3]);
-    let signed = LocalKeys::Plain.sign(shard).unwrap();
+    let signed = Local::None.sign(shard).unwrap();
     assert!(signed.signature().is_empty());
 }
 
 #[test]
 fn local_keys_plain_sign_preserves_content() {
     let shard = make_blob_shard(vec![1, 2, 3]);
-    let signed = LocalKeys::Plain.sign(shard.clone()).unwrap();
+    let signed = Local::None.sign(shard.clone()).unwrap();
     assert_eq!(signed.into_inner().data(), shard.data());
 }
 
 #[test]
 fn local_keys_plain_signed_carries_signer() {
     let shard = make_blob_shard(vec![42]);
-    let signed = LocalKeys::Plain.sign(shard).unwrap();
-    assert_eq!(signed.signer(), &LocalKeys::Plain);
+    let signed = Local::None.sign(shard).unwrap();
+    assert_eq!(signed.signer(), &Local::None);
 }
 
 #[test]
 fn local_keys_plain_encrypt_decrypt_roundtrip() {
     let data = vec![1, 2, 3];
     let shard = make_blob_shard(data.clone());
-    let encrypted = LocalKeys::Plain.encrypt(shard).unwrap();
-    let decrypted: Fragment<Blob> = LocalKeys::Plain.decrypt(&encrypted).unwrap();
+    let encrypted = Local::None.encrypt(shard).unwrap();
+    let decrypted: Fragment<Blob> = Local::None.decrypt(&encrypted).unwrap();
     assert_eq!(decrypted.data(), &data);
 }
 
@@ -283,17 +283,17 @@ fn actor_encrypt_decrypt_returns_result() {
 #[cfg(feature = "ssh")]
 mod ssh_tests {
     use super::*;
-    use fragmentation::keys::SSHKey;
+    use fragmentation::keys::SSH;
 
-    fn test_ssh_key() -> SSHKey {
+    fn test_ssh_key() -> SSH {
         // Generate an Ed25519 key in memory for testing
-        SSHKey::generate_ed25519().expect("generate test key")
+        SSH::generate_ed25519().expect("generate test key")
     }
 
     #[test]
     fn ssh_key_sign_produces_signature() {
         let key = test_ssh_key();
-        let local = LocalKeys::Ssh(Box::new(key));
+        let local = Local::Ssh(Box::new(key));
         let shard = make_blob_shard(vec![1, 2, 3]);
         let signed = local.sign(shard).unwrap();
         assert!(!signed.signature().is_empty());
@@ -302,7 +302,7 @@ mod ssh_tests {
     #[test]
     fn ssh_key_sign_preserves_content() {
         let key = test_ssh_key();
-        let local = LocalKeys::Ssh(Box::new(key));
+        let local = Local::Ssh(Box::new(key));
         let shard = make_blob_shard(vec![1, 2, 3]);
         let signed = local.sign(shard.clone()).unwrap();
         assert_eq!(signed.into_inner().data(), shard.data());
@@ -311,16 +311,16 @@ mod ssh_tests {
     #[test]
     fn ssh_key_signed_carries_signer() {
         let key = test_ssh_key();
-        let local = LocalKeys::Ssh(Box::new(key.clone()));
+        let local = Local::Ssh(Box::new(key.clone()));
         let shard = make_blob_shard(vec![42]);
         let signed = local.sign(shard).unwrap();
-        assert_eq!(signed.signer(), &LocalKeys::Ssh(Box::new(key)));
+        assert_eq!(signed.signer(), &Local::Ssh(Box::new(key)));
     }
 
     #[test]
     fn ssh_key_encrypt_decrypt_roundtrip() {
         let key = test_ssh_key();
-        let local = LocalKeys::Ssh(Box::new(key));
+        let local = Local::Ssh(Box::new(key));
         let data = vec![1, 2, 3];
         let shard = make_blob_shard(data.clone());
         let encrypted = local.encrypt(shard).unwrap();
@@ -336,7 +336,7 @@ mod ssh_tests {
 #[cfg(feature = "gpg")]
 mod gpg_tests {
     use super::*;
-    use fragmentation::keys::GPGKey;
+    use fragmentation::keys::GPG;
 
     fn gpg_available() -> bool {
         std::process::Command::new("gpg")
@@ -351,13 +351,13 @@ mod gpg_tests {
             eprintln!("gpg not available, skipping");
             return;
         }
-        let key = GPGKey::new("test-key-id");
-        let local = LocalKeys::Gpg(key.clone());
+        let key = GPG::new("test-key-id");
+        let local = Local::Gpg(key.clone());
         let shard = make_blob_shard(vec![42]);
         // Sign may fail if gpg key doesn't exist — that's expected in CI
         // Just verify the signer is carried when it does work
         match local.sign(shard) {
-            Ok(signed) => assert_eq!(signed.signer(), &LocalKeys::Gpg(key)),
+            Ok(signed) => assert_eq!(signed.signer(), &Local::Gpg(key)),
             Err(_) => eprintln!("gpg sign failed (expected without real key), skipping assertion"),
         }
     }
@@ -375,8 +375,8 @@ mod from_repo_tests {
     fn from_repo_no_config_returns_plain() {
         let td = tempfile::tempdir().unwrap();
         let repo = git2::Repository::init(td.path()).unwrap();
-        let keys = LocalKeys::from_repo(&repo).unwrap();
-        assert_eq!(keys, LocalKeys::Plain);
+        let keys = Local::from_repo(&repo).unwrap();
+        assert_eq!(keys, Local::None);
     }
 
     #[cfg(feature = "ssh")]
@@ -386,7 +386,7 @@ mod from_repo_tests {
         let repo = git2::Repository::init(td.path()).unwrap();
 
         // Write a test SSH key to a temp file
-        let key = fragmentation::keys::SSHKey::generate_ed25519().unwrap();
+        let key = fragmentation::keys::SSH::generate_ed25519().unwrap();
         let key_path = td.path().join("test_key");
         key.write_to_file(&key_path).unwrap();
 
@@ -397,8 +397,8 @@ mod from_repo_tests {
             .set_str("user.signingkey", key_path.to_str().unwrap())
             .unwrap();
 
-        let keys = LocalKeys::from_repo(&repo).unwrap();
-        assert!(matches!(keys, LocalKeys::Ssh(_)));
+        let keys = Local::from_repo(&repo).unwrap();
+        assert!(matches!(keys, Local::Ssh(_)));
     }
 
     #[cfg(feature = "gpg")]
@@ -411,7 +411,7 @@ mod from_repo_tests {
         config.set_str("gpg.format", "openpgp").unwrap();
         config.set_str("user.signingkey", "ABCDEF1234").unwrap();
 
-        let keys = LocalKeys::from_repo(&repo).unwrap();
-        assert!(matches!(keys, LocalKeys::Gpg(_)));
+        let keys = Local::from_repo(&repo).unwrap();
+        assert!(matches!(keys, Local::Gpg(_)));
     }
 }
