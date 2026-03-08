@@ -11,20 +11,32 @@ use crate::witnessed::Witnessed;
 /// Works on any git commit, not just fragmentation-written ones.
 #[cfg(feature = "git")]
 pub fn read_commit(
-    _repo: &git2::Repository,
-    _oid: git2::Oid,
+    repo: &git2::Repository,
+    oid: git2::Oid,
 ) -> Result<(Witnessed, git2::Oid), Box<dyn std::error::Error>> {
-    todo!()
+    use crate::witnessed::{Author, Committer, Message, Timestamp};
+
+    let commit = repo.find_commit(oid)?;
+    let author = Author(commit.author().name().unwrap_or("").to_string());
+    let committer = Committer(commit.committer().name().unwrap_or("").to_string());
+    let timestamp = Timestamp(commit.time().seconds().to_string());
+    let message = Message(commit.message().unwrap_or("").to_string());
+    let witnessed = Witnessed::new(author, committer, timestamp, message);
+    Ok((witnessed, commit.tree_id()))
 }
 
 /// Extract the signature from a signed commit, if present.
 /// Returns None for unsigned commits.
 #[cfg(feature = "git")]
 pub fn commit_signature(
-    _repo: &git2::Repository,
-    _oid: git2::Oid,
+    repo: &git2::Repository,
+    oid: git2::Oid,
 ) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
-    todo!()
+    match repo.extract_signature(&oid, None) {
+        Ok((sig, _signed_data)) => Ok(Some(sig.to_vec())),
+        Err(e) if e.code() == git2::ErrorCode::NotFound => Ok(None),
+        Err(e) => Err(e.into()),
+    }
 }
 
 /// Write a fragment tree to git objects. Returns the root OID.
