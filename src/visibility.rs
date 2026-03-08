@@ -1,6 +1,6 @@
 use crate::encoding::{Decode, Encode};
 use crate::fragment::{Fractal, Fragment};
-use crate::keys::Keys;
+use crate::keys::{Encrypted, Keys};
 use crate::ref_::Ref;
 
 /// Transparent visibility. Content accessible. Key is provenance.
@@ -11,20 +11,20 @@ pub struct Public<K, T> {
 }
 
 impl<K, T> Public<K, T> {
-    pub fn new(_inner: T, _key: K) -> Self {
-        todo!()
+    pub fn new(inner: T, key: K) -> Self {
+        Public { inner, key }
     }
 
     pub fn inner(&self) -> &T {
-        todo!()
+        &self.inner
     }
 
     pub fn into_inner(self) -> T {
-        todo!()
+        self.inner
     }
 
     pub fn key(&self) -> &K {
-        todo!()
+        &self.key
     }
 }
 
@@ -32,15 +32,15 @@ impl<K, T: Fragment> Fragment for Public<K, T> {
     type Data = T::Data;
 
     fn self_ref(&self) -> &Ref {
-        todo!()
+        self.inner.self_ref()
     }
 
     fn data(&self) -> &T::Data {
-        todo!()
+        self.inner.data()
     }
 
     fn children(&self) -> &[Self] {
-        todo!()
+        &[]
     }
 }
 
@@ -53,26 +53,37 @@ pub struct Protected<K> {
 }
 
 impl<K> Protected<K> {
-    pub fn new(_ref_: Ref, _ciphertext: Vec<u8>, _key: K) -> Self {
-        todo!()
+    pub fn new(ref_: Ref, ciphertext: Vec<u8>, key: K) -> Self {
+        Protected {
+            ref_,
+            ciphertext,
+            key,
+        }
     }
 
     pub fn ciphertext(&self) -> &[u8] {
-        todo!()
+        &self.ciphertext
     }
 
     pub fn key(&self) -> &K {
-        todo!()
+        &self.key
     }
 }
 
 impl<K: Keys> Protected<K> {
-    pub fn wrap<E: Encode>(_fragment: Fractal<E>, _key: K) -> Result<Self, K::Error> {
-        todo!()
+    pub fn wrap<E: Encode>(fragment: Fractal<E>, key: K) -> Result<Self, K::Error> {
+        let ref_ = fragment.self_ref().clone();
+        let encrypted = key.encrypt(fragment)?;
+        Ok(Protected {
+            ref_,
+            ciphertext: encrypted.ciphertext().to_vec(),
+            key,
+        })
     }
 
     pub fn unlock<E: Decode>(&self) -> Result<Fractal<E>, K::Error> {
-        todo!()
+        let encrypted = Encrypted::new(self.ciphertext.clone(), self.key.clone());
+        self.key.decrypt(&encrypted)
     }
 }
 
@@ -80,15 +91,15 @@ impl<K> Fragment for Protected<K> {
     type Data = Vec<u8>;
 
     fn self_ref(&self) -> &Ref {
-        todo!()
+        &self.ref_
     }
 
     fn data(&self) -> &Vec<u8> {
-        todo!()
+        &self.ciphertext
     }
 
     fn children(&self) -> &[Self] {
-        todo!()
+        &[]
     }
 }
 
@@ -100,16 +111,19 @@ pub struct Private<K> {
 }
 
 impl<K> Private<K> {
-    pub fn new(_ref_: Ref, _key: K) -> Self {
-        todo!()
+    pub fn new(ref_: Ref, key: K) -> Self {
+        Private { ref_, key }
     }
 
     pub fn key(&self) -> &K {
-        todo!()
+        &self.key
     }
 
-    pub fn seal<T: Fragment>(_fragment: &T, _key: K) -> Self {
-        todo!()
+    pub fn seal<T: Fragment>(fragment: &T, key: K) -> Self {
+        Private {
+            ref_: fragment.self_ref().clone(),
+            key,
+        }
     }
 }
 
@@ -117,14 +131,14 @@ impl<K> Fragment for Private<K> {
     type Data = ();
 
     fn self_ref(&self) -> &Ref {
-        todo!()
+        &self.ref_
     }
 
     fn data(&self) -> &() {
-        todo!()
+        &()
     }
 
     fn children(&self) -> &[Self] {
-        todo!()
+        &[]
     }
 }
