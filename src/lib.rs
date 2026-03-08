@@ -7,5 +7,6 @@ pub mod keys;
 pub mod ref_;
 pub mod sha;
 pub mod store;
+pub mod visibility;
 pub mod walk;
 pub mod witnessed;
