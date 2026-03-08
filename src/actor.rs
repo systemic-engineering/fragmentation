@@ -100,27 +100,15 @@ impl<A, B, K: Keys> Actor<A, B, K> {
         self.keys.decrypt(encrypted)
     }
 
-    /// Stamp this actor as the Author of a commit.
-    /// Sets author name, email, and timestamp to now.
-    pub fn author<E>(&self, commit: Commit<E>) -> Commit<E> {
-        use crate::witnessed::{Author, Timestamp};
-        use std::time::{SystemTime, UNIX_EPOCH};
-
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock before UNIX epoch")
-            .as_secs();
-
-        commit.with_author(
-            Author::new(&self.name, &self.email),
-            Timestamp(now.to_string()),
-        )
-    }
-
-    /// Stamp this actor as the Committer of a commit.
-    /// Sets committer name and email.
-    pub fn commit<E>(&self, commit: Commit<E>) -> Commit<E> {
-        use crate::witnessed::Committer;
-        commit.with_committer(Committer::new(&self.name, &self.email))
+    /// Write a commit to a git repository as this actor.
+    /// If no author is set, actor becomes both author and committer.
+    /// If authored, actor becomes committer only.
+    #[cfg(feature = "git")]
+    pub fn commit<E: crate::encoding::Encode>(
+        &self,
+        _commit: Commit<E>,
+        _repo: &git2::Repository,
+    ) -> Result<Commit<E>, git2::Error> {
+        todo!()
     }
 }

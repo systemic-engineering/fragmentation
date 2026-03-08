@@ -45,7 +45,11 @@ pub fn read_commit(
     let fractal = read_tree(repo, tree_oid)?;
     let parent = git_commit.parent_id(0).ok().map(|id| Sha(id.to_string()));
     Ok(crate::commit::Commit::full(
-        fractal, witnessed, message, parent,
+        fractal,
+        witnessed,
+        message,
+        parent,
+        Sha(oid.to_string()),
     ))
 }
 

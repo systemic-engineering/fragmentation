@@ -560,9 +560,7 @@ fn public_commit_type_expressible() {
     use fragmentation::commit::Commit;
     let actor = Actor::identity("mara", "mara@systemic.engineer");
     let shard = make_blob_shard(vec![1, 2, 3]);
-    let commit = Commit::root(shard, "signed observation");
-    let commit = actor.author(commit);
-    let commit = actor.commit(commit);
+    let commit = Commit::root("signed observation", shard);
     let public: Public<Local, Commit<Blob>> = Public::new(commit, vec![], actor.keys().clone());
     assert_eq!(public.key(), &Local::None);
 }
