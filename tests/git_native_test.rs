@@ -251,4 +251,70 @@ mod git_native {
             .collect();
         assert_eq!(data, vec!["alpha", "beta", "gamma"]);
     }
+
+    // =====================================================================
+    // read_commit — extract Witnessed from git commits
+    // =====================================================================
+
+    #[test]
+    fn read_commit_from_real_repo() {
+        // Open THIS repo and read HEAD of main
+        let repo = git2::Repository::open("/Users/alexwolf/dev/projects/fragmentation").unwrap();
+        let main_ref = repo.find_branch("main", git2::BranchType::Local).unwrap();
+        let commit_oid = main_ref.get().target().unwrap();
+
+        let (witnessed, tree_oid) = git::read_commit(&repo, commit_oid).unwrap();
+
+        // Main has real commits with real authors
+        assert!(!witnessed.author.0.is_empty());
+        assert!(!witnessed.committer.0.is_empty());
+        assert!(!witnessed.message.0.is_empty());
+        assert!(!witnessed.timestamp.0.is_empty());
+
+        // Tree OID should be valid
+        let _tree = repo.find_tree(tree_oid).unwrap();
+    }
+
+    #[test]
+    fn read_commit_witnessed_matches_git2() {
+        // Verify our Witnessed extraction matches what git2 reports
+        let repo = git2::Repository::open("/Users/alexwolf/dev/projects/fragmentation").unwrap();
+        let main_ref = repo.find_branch("main", git2::BranchType::Local).unwrap();
+        let commit_oid = main_ref.get().target().unwrap();
+
+        let commit = repo.find_commit(commit_oid).unwrap();
+        let (witnessed, _) = git::read_commit(&repo, commit_oid).unwrap();
+
+        assert_eq!(witnessed.author.0, commit.author().name().unwrap());
+        assert_eq!(witnessed.committer.0, commit.committer().name().unwrap());
+    }
+
+    #[test]
+    fn read_commit_roundtrip() {
+        // Write a commit with write_commit, read it back with read_commit
+        let (_dir, repo) = init_repo();
+        let shard = make_shard("roundtrip-commit");
+        let w = test_witnessed();
+        let oid = git::write_commit(&repo, &shard, &w, "roundtrip test", None).unwrap();
+
+        let (recovered, tree_oid) = git::read_commit(&repo, oid).unwrap();
+        assert_eq!(recovered.author.0, "alex");
+        assert_eq!(recovered.committer.0, "reed");
+        assert!(recovered.message.0.contains("roundtrip test"));
+
+        // Tree OID should be valid
+        let _tree = repo.find_tree(tree_oid).unwrap();
+    }
+
+    #[test]
+    fn commit_signature_unsigned() {
+        // Commits in test repos are unsigned
+        let (_dir, repo) = init_repo();
+        let shard = make_shard("unsigned");
+        let w = test_witnessed();
+        let oid = git::write_commit(&repo, &shard, &w, "unsigned commit", None).unwrap();
+
+        let sig = git::commit_signature(&repo, oid).unwrap();
+        assert!(sig.is_none());
+    }
 }

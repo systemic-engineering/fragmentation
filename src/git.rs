@@ -7,6 +7,26 @@ use crate::fragment::{Fractal, Fragment};
 #[cfg(feature = "git")]
 use crate::witnessed::Witnessed;
 
+/// Read a git commit into its components: Witnessed metadata + tree OID.
+/// Works on any git commit, not just fragmentation-written ones.
+#[cfg(feature = "git")]
+pub fn read_commit(
+    _repo: &git2::Repository,
+    _oid: git2::Oid,
+) -> Result<(Witnessed, git2::Oid), Box<dyn std::error::Error>> {
+    todo!()
+}
+
+/// Extract the signature from a signed commit, if present.
+/// Returns None for unsigned commits.
+#[cfg(feature = "git")]
+pub fn commit_signature(
+    _repo: &git2::Repository,
+    _oid: git2::Oid,
+) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
+    todo!()
+}
+
 /// Write a fragment tree to git objects. Returns the root OID.
 /// Shard -> blob, Fractal -> tree with .data + numbered children.
 #[cfg(feature = "git")]
