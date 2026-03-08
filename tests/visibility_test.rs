@@ -255,7 +255,25 @@ fn sha_accessible_from_all_three() {
 /// The SHA from the original fragment is accessible from all three wrappers.
 #[test]
 fn mixed_visibility_children_preserve_sha() {
-    todo!("SHA accessible from Public, Protected, Private wrappers")
+    let child_a = make_shard("alpha");
+    let child_b = make_shard("beta");
+    let child_c = make_shard("gamma");
+    let parent = make_fractal(
+        "parent",
+        vec![child_a.clone(), child_b.clone(), child_c.clone()],
+    );
+
+    let pub_a = Public::new(child_a.clone(), PlainKeys);
+    let prot_b = Protected::wrap(child_b.clone(), PlainKeys).unwrap();
+    let priv_c = Private::seal(&child_c, PlainKeys);
+
+    // All three wrappers expose the original SHA
+    assert_eq!(pub_a.self_ref().sha, child_a.self_ref().sha);
+    assert_eq!(prot_b.self_ref().sha, child_b.self_ref().sha);
+    assert_eq!(priv_c.self_ref().sha, child_c.self_ref().sha);
+
+    // Parent still knows about its children
+    assert_eq!(parent.children().len(), 3);
 }
 
 /// Merkle property: wrapping children in different visibility levels doesn't
@@ -263,7 +281,38 @@ fn mixed_visibility_children_preserve_sha() {
 /// The parent's SHA incorporates child SHAs directly.
 #[test]
 fn merkle_stability_across_visibility_boundaries() {
-    todo!("child SHAs unchanged by wrapping; parent SHA stable")
+    let child_a = make_shard("one");
+    let child_b = make_shard("two");
+    let child_c = make_shard("three");
+
+    // Capture original child SHAs
+    let sha_a = child_a.self_ref().sha.clone();
+    let sha_b = child_b.self_ref().sha.clone();
+    let sha_c = child_c.self_ref().sha.clone();
+
+    // Build the parent from unwrapped children
+    let parent = make_fractal(
+        "root",
+        vec![child_a.clone(), child_b.clone(), child_c.clone()],
+    );
+    let parent_sha = parent.self_ref().sha.clone();
+
+    // Wrap each child differently
+    let pub_a = Public::new(child_a, PlainKeys);
+    let prot_b = Protected::wrap(child_b, PlainKeys).unwrap();
+    let priv_c = Private::seal(&child_c, PlainKeys);
+
+    // Child SHAs are unchanged by wrapping
+    assert_eq!(pub_a.self_ref().sha, sha_a);
+    assert_eq!(prot_b.self_ref().sha, sha_b);
+    assert_eq!(priv_c.self_ref().sha, sha_c);
+
+    // Parent SHA is deterministic and stable (rebuilding yields same hash)
+    let parent_rebuilt = make_fractal(
+        "root",
+        vec![make_shard("one"), make_shard("two"), make_shard("three")],
+    );
+    assert_eq!(parent_rebuilt.self_ref().sha, parent_sha);
 }
 
 /// walk::collect on each visibility wrapper returns exactly 1 (terminal),
@@ -271,7 +320,26 @@ fn merkle_stability_across_visibility_boundaries() {
 /// fragment has children.
 #[test]
 fn walk_collect_stops_at_visibility_boundary() {
-    todo!("visibility wrappers are terminal — walk stops")
+    let deep = make_fractal(
+        "deep",
+        vec![
+            make_shard("leaf-1"),
+            make_fractal("mid", vec![make_shard("leaf-2")]),
+        ],
+    );
+
+    // Unwrapped: 4 nodes (deep -> leaf-1, mid -> leaf-2)
+    assert_eq!(walk::collect(&deep).len(), 4);
+
+    // Each visibility wrapper is terminal
+    let pub_deep = Public::new(deep.clone(), PlainKeys);
+    assert_eq!(walk::collect(&pub_deep).len(), 1);
+
+    let prot_deep = Protected::wrap(deep.clone(), PlainKeys).unwrap();
+    assert_eq!(walk::collect(&prot_deep).len(), 1);
+
+    let priv_deep = Private::seal(&deep, PlainKeys);
+    assert_eq!(walk::collect(&priv_deep).len(), 1);
 }
 
 /// Protected::wrap preserves the original ref on the wrapper.
@@ -279,12 +347,52 @@ fn walk_collect_stops_at_visibility_boundary() {
 /// matches the original fragment's ref throughout.
 #[test]
 fn protected_wrap_unlock_roundtrip_preserves_ref_and_data() {
-    todo!("Protected wrap/unlock round-trip preserves ref and data")
+    let original = make_fractal("parent", vec![make_shard("child-a"), make_shard("child-b")]);
+    let original_ref = original.self_ref().clone();
+    let original_data = original.data().clone();
+
+    let protected = Protected::wrap(original, PlainKeys).unwrap();
+
+    // The protected wrapper preserves the original ref
+    assert_eq!(protected.self_ref(), &original_ref);
+
+    // Unlock recovers the data content
+    let recovered: Fractal<String> = protected.unlock().unwrap();
+    assert_eq!(recovered.data(), &original_data);
 }
 
 /// A "mixed bag": refs collected from Public, Protected, Private wrappers
 /// all match the original children's refs.
 #[test]
 fn mixed_bag_refs_match_originals() {
-    todo!("mixed bag of visibility wrappers all preserve original refs")
+    let children: Vec<Fractal<String>> = vec![
+        make_shard("public-data"),
+        make_shard("protected-data"),
+        make_shard("private-data"),
+    ];
+
+    // Collect original refs
+    let original_refs: Vec<Ref> = children.iter().map(|c| c.self_ref().clone()).collect();
+
+    // Wrap each child with a different visibility level
+    let pub_wrap = Public::new(children[0].clone(), PlainKeys);
+    let prot_wrap = Protected::wrap(children[1].clone(), PlainKeys).unwrap();
+    let priv_wrap = Private::seal(&children[2], PlainKeys);
+
+    // Collect refs from wrappers
+    let wrapped_refs: Vec<&Ref> = vec![
+        pub_wrap.self_ref(),
+        prot_wrap.self_ref(),
+        priv_wrap.self_ref(),
+    ];
+
+    // Every wrapped ref matches its original
+    for (original, wrapped) in original_refs.iter().zip(wrapped_refs.iter()) {
+        assert_eq!(original.sha, wrapped.sha);
+    }
+
+    // The refs are all distinct from each other (different content = different SHA)
+    assert_ne!(wrapped_refs[0].sha, wrapped_refs[1].sha);
+    assert_ne!(wrapped_refs[1].sha, wrapped_refs[2].sha);
+    assert_ne!(wrapped_refs[0].sha, wrapped_refs[2].sha);
 }
