@@ -49,11 +49,19 @@ pub struct Witnessed {
 
 impl Witnessed {
     pub fn new(author: Author, committer: Committer, timestamp: Timestamp) -> Self {
-        todo!()
+        Witnessed {
+            author,
+            committer,
+            timestamp,
+        }
     }
 
     /// Empty witness — to be filled by actor.author() and actor.commit().
     pub fn empty() -> Self {
-        todo!()
+        Witnessed {
+            author: Author::new("", ""),
+            committer: Committer::new("", ""),
+            timestamp: Timestamp(String::new()),
+        }
     }
 }

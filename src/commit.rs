@@ -18,42 +18,55 @@ pub struct Commit<E> {
 impl<E> Commit<E> {
     /// Create a commit with a parent.
     pub fn new(fractal: Fractal<E>, message: impl Into<String>, parent: Sha) -> Self {
-        todo!()
+        Commit {
+            fractal,
+            witnessed: Witnessed::empty(),
+            message: Message(message.into()),
+            parent: Some(parent),
+        }
     }
 
     /// Create a root commit (no parent).
     pub fn root(fractal: Fractal<E>, message: impl Into<String>) -> Self {
-        todo!()
+        Commit {
+            fractal,
+            witnessed: Witnessed::empty(),
+            message: Message(message.into()),
+            parent: None,
+        }
     }
 
     /// The fractal tree this commit captures.
     pub fn fractal(&self) -> &Fractal<E> {
-        todo!()
+        &self.fractal
     }
 
     /// Witness metadata: author, committer, timestamp.
     pub fn witnessed(&self) -> &Witnessed {
-        todo!()
+        &self.witnessed
     }
 
     /// The commit message.
     pub fn message(&self) -> &Message {
-        todo!()
+        &self.message
     }
 
     /// Parent commit SHA, if any.
     pub fn parent(&self) -> Option<&Sha> {
-        todo!()
+        self.parent.as_ref()
     }
 
     /// Stamp the Author and timestamp.
-    pub(crate) fn with_author(self, author: Author, timestamp: Timestamp) -> Self {
-        todo!()
+    pub(crate) fn with_author(mut self, author: Author, timestamp: Timestamp) -> Self {
+        self.witnessed.author = author;
+        self.witnessed.timestamp = timestamp;
+        self
     }
 
     /// Stamp the Committer.
-    pub(crate) fn with_committer(self, committer: Committer) -> Self {
-        todo!()
+    pub(crate) fn with_committer(mut self, committer: Committer) -> Self {
+        self.witnessed.committer = committer;
+        self
     }
 
     /// Construct with full metadata (used by read_commit).
@@ -63,6 +76,11 @@ impl<E> Commit<E> {
         message: Message,
         parent: Option<Sha>,
     ) -> Self {
-        todo!()
+        Commit {
+            fractal,
+            witnessed,
+            message,
+            parent,
+        }
     }
 }
