@@ -106,9 +106,15 @@ impl<A, B, K: Keys> Actor<A, B, K> {
     #[cfg(feature = "git")]
     pub fn commit<E: crate::encoding::Encode>(
         &self,
-        _commit: Commit<E>,
-        _repo: &git2::Repository,
+        commit: Commit<E>,
+        repo: &git2::Repository,
     ) -> Result<Commit<E>, git2::Error> {
-        todo!()
+        use crate::witnessed::{Author, Committer};
+        let c = if commit.witnessed().author.name.is_empty() {
+            commit.authored(Author::new(&self.name, &self.email))
+        } else {
+            commit
+        };
+        c.write(repo, Committer::new(&self.name, &self.email))
     }
 }
