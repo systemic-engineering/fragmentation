@@ -1,6 +1,6 @@
 use fragmentation::diff;
 use fragmentation::encoding::{Decode, Encode};
-use fragmentation::fragment::{self, Fragment};
+use fragmentation::fragment::{self, Fractal, Fragment};
 use fragmentation::ref_::Ref;
 use fragmentation::sha;
 use fragmentation::store::Store;
@@ -10,14 +10,14 @@ use fragmentation::walk;
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn make_bytes_shard(data: Vec<u8>) -> Fragment<Vec<u8>> {
+fn make_bytes_shard(data: Vec<u8>) -> Fractal<Vec<u8>> {
     let r = Ref::new(sha::Sha(fragment::blob_oid_bytes(&data)), "self");
-    Fragment::shard_typed(r, data)
+    Fractal::shard_typed(r, data)
 }
 
-fn make_bytes_fractal(label: &[u8], children: Vec<Fragment<Vec<u8>>>) -> Fragment<Vec<u8>> {
+fn make_bytes_fractal(label: &[u8], children: Vec<Fractal<Vec<u8>>>) -> Fractal<Vec<u8>> {
     let r = Ref::new(sha::Sha(fragment::tree_oid_bytes(label, &children)), "self");
-    Fragment::fractal_typed(r, label.to_vec(), children)
+    Fractal::new_typed(r, label.to_vec(), children)
 }
 
 // ===========================================================================
@@ -59,7 +59,7 @@ fn decode_string_invalid_utf8() {
 }
 
 // ===========================================================================
-// Fragment<Vec<u8>> construction
+// Fractal<Vec<u8>> construction
 // ===========================================================================
 
 #[test]
@@ -105,7 +105,7 @@ fn bytes_fractal_multiple_children() {
 }
 
 // ===========================================================================
-// content_oid with Fragment<Vec<u8>>
+// content_oid with Fractal<Vec<u8>>
 // ===========================================================================
 
 #[test]
@@ -139,7 +139,7 @@ fn bytes_content_oid_shard_vs_fractal() {
 }
 
 // ===========================================================================
-// Walk with Fragment<Vec<u8>>
+// Walk with Fractal<Vec<u8>>
 // ===========================================================================
 
 #[test]
@@ -185,7 +185,7 @@ fn walk_bytes_find() {
 }
 
 // ===========================================================================
-// Store with Fragment<Vec<u8>>
+// Store with Fractal<Vec<u8>>
 // ===========================================================================
 
 #[test]
@@ -207,7 +207,7 @@ fn store_bytes_dedup() {
 }
 
 // ===========================================================================
-// Diff with Fragment<Vec<u8>>
+// Diff with Fractal<Vec<u8>>
 // ===========================================================================
 
 #[test]
@@ -237,23 +237,23 @@ fn diff_bytes_added_child() {
 }
 
 // ===========================================================================
-// Blob default (Fragment without type parameter is Fragment<Blob>)
+// Blob default (Fractal without type parameter is Fractal<Blob>)
 // ===========================================================================
 
 #[test]
 fn default_type_parameter_is_blob() {
-    // Fragment without type parameter should be Fragment<Blob>
+    // Fractal without type parameter should be Fractal<Blob>
     use fragmentation::fragment::Blob;
     let data: Blob = vec![0xCA, 0xFE];
     let r = Ref::new(sha::Sha(fragment::blob_oid_bytes(&data)), "self");
-    let s: Fragment = Fragment::shard_typed(r, data.clone());
+    let s: Fractal = Fractal::shard_typed(r, data.clone());
     assert_eq!(s.data(), &data);
 }
 
 #[test]
 fn string_fragment_still_works() {
-    // Fragment<String> still works with convenience constructors
+    // Fractal<String> still works with convenience constructors
     let r = Ref::new(sha::Sha(fragment::blob_oid("hello")), "self");
-    let s: Fragment<String> = Fragment::shard(r, "hello");
+    let s: Fractal<String> = Fractal::shard(r, "hello");
     assert_eq!(s.data(), "hello");
 }

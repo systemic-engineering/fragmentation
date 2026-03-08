@@ -1,5 +1,5 @@
 use fragmentation::diff::{self, Change};
-use fragmentation::fragment::{self, Fragment};
+use fragmentation::fragment::{self, Fractal, Fragment};
 use fragmentation::ref_::Ref;
 use fragmentation::sha;
 use fragmentation::store::Store;
@@ -10,14 +10,14 @@ use fragmentation::witnessed::{Author, Committer, Message, Timestamp, Witnessed}
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn make_shard(data: &str) -> Fragment<String> {
+fn make_shard(data: &str) -> Fractal<String> {
     let r = Ref::new(sha::Sha(fragment::blob_oid(data)), "self");
-    Fragment::shard(r, data)
+    Fractal::shard(r, data)
 }
 
-fn make_fractal(label: &str, children: Vec<Fragment<String>>) -> Fragment<String> {
+fn make_fractal(label: &str, children: Vec<Fractal<String>>) -> Fractal<String> {
     let r = Ref::new(sha::Sha(fragment::tree_oid(label, &children)), "self");
-    Fragment::fractal(r, label, children)
+    Fractal::new(r, label, children)
 }
 
 // ===========================================================================
@@ -127,7 +127,7 @@ fn witnessed_construction() {
 #[test]
 fn shard_construction() {
     let r = Ref::new(sha::Sha(fragment::blob_oid("hello")), "self");
-    let s = Fragment::shard(r.clone(), "hello");
+    let s = Fractal::shard(r.clone(), "hello");
     assert!(s.is_shard());
     assert_eq!(s.data(), "hello");
     assert_eq!(s.self_ref(), &r);
@@ -140,7 +140,7 @@ fn fragment_construction() {
         sha::Sha(fragment::tree_oid("root-data", &[leaf.clone()])),
         "self",
     );
-    let f = Fragment::fractal(r.clone(), "root-data", vec![leaf.clone()]);
+    let f = Fractal::new(r.clone(), "root-data", vec![leaf.clone()]);
     assert!(f.is_fractal());
     assert_eq!(f.data(), "root-data");
     assert_eq!(f.children(), &[leaf]);

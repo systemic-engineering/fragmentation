@@ -1,11 +1,11 @@
 use crate::encoding::{Decode, Encode};
-use crate::fragment::{Blob, Fragment};
+use crate::fragment::{Blob, Fractal};
 use crate::keys::{Encrypted, Keys, Local, Signed};
 
 /// Witness identity with encoding boundary.
 ///
 /// An actor doesn't tag the encoding — it does the encoding.
-/// `encoder` transforms `Fragment<A>` to `Fragment<B>`,
+/// `encoder` transforms `Fractal<A>` to `Fractal<B>`,
 /// `decoder` reverses. Keys handle visibility layers.
 ///
 /// fn pointers, not closures — simple, cloneable, deterministic.
@@ -13,15 +13,15 @@ use crate::keys::{Encrypted, Keys, Local, Signed};
 pub struct Actor<A = Blob, B = Blob, K: Keys = Local> {
     name: String,
     email: String,
-    encoder: fn(&Fragment<A>) -> Fragment<B>,
-    decoder: fn(&Fragment<B>) -> Fragment<A>,
+    encoder: fn(&Fractal<A>) -> Fractal<B>,
+    decoder: fn(&Fractal<B>) -> Fractal<A>,
     keys: K,
 }
 
 impl Actor {
     /// Default actor: bytes-to-bytes identity, local keys (plain).
     pub fn identity(name: impl Into<String>, email: impl Into<String>) -> Self {
-        fn id(f: &Fragment<Blob>) -> Fragment<Blob> {
+        fn id(f: &Fractal<Blob>) -> Fractal<Blob> {
             f.clone()
         }
         Actor {
@@ -39,8 +39,8 @@ impl<A, B, K: Keys> Actor<A, B, K> {
     pub fn new(
         name: impl Into<String>,
         email: impl Into<String>,
-        encoder: fn(&Fragment<A>) -> Fragment<B>,
-        decoder: fn(&Fragment<B>) -> Fragment<A>,
+        encoder: fn(&Fractal<A>) -> Fractal<B>,
+        decoder: fn(&Fractal<B>) -> Fractal<A>,
         keys: K,
     ) -> Self {
         Actor {
@@ -68,22 +68,22 @@ impl<A, B, K: Keys> Actor<A, B, K> {
     }
 
     /// Encode a fragment from A to B.
-    pub fn encode(&self, fragment: &Fragment<A>) -> Fragment<B> {
+    pub fn encode(&self, fragment: &Fractal<A>) -> Fractal<B> {
         (self.encoder)(fragment)
     }
 
     /// Decode a fragment from B to A.
-    pub fn decode(&self, fragment: &Fragment<B>) -> Fragment<A> {
+    pub fn decode(&self, fragment: &Fractal<B>) -> Fractal<A> {
         (self.decoder)(fragment)
     }
 
     /// Sign an encoded fragment.
-    pub fn sign(&self, fragment: Fragment<B>) -> Result<Signed<K, Fragment<B>>, K::Error> {
+    pub fn sign(&self, fragment: Fractal<B>) -> Result<Signed<K, Fractal<B>>, K::Error> {
         self.keys.sign(fragment)
     }
 
     /// Encrypt an encoded fragment.
-    pub fn encrypt(&self, fragment: Fragment<B>) -> Result<Encrypted<K>, K::Error>
+    pub fn encrypt(&self, fragment: Fractal<B>) -> Result<Encrypted<K>, K::Error>
     where
         B: Encode,
     {
@@ -91,7 +91,7 @@ impl<A, B, K: Keys> Actor<A, B, K> {
     }
 
     /// Decrypt to an encoded fragment.
-    pub fn decrypt(&self, encrypted: &Encrypted<K>) -> Result<Fragment<B>, K::Error>
+    pub fn decrypt(&self, encrypted: &Encrypted<K>) -> Result<Fractal<B>, K::Error>
     where
         B: Decode,
     {

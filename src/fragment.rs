@@ -5,97 +5,117 @@ use crate::ref_::Ref;
 /// String is a lens an actor applies.
 pub type Blob = Vec<u8>;
 
+/// The interface for anything content-addressed and self-similar.
+/// Turtles all the way down: your children are yourself.
+pub trait Fragment {
+    type Data;
+    fn self_ref(&self) -> &Ref;
+    fn data(&self) -> &Self::Data;
+    fn children(&self) -> &[Self]
+    where
+        Self: Sized;
+    fn is_shard(&self) -> bool
+    where
+        Self: Sized,
+    {
+        self.children().is_empty()
+    }
+    fn is_fractal(&self) -> bool
+    where
+        Self: Sized,
+    {
+        !self.children().is_empty()
+    }
+}
+
 /// A node in the possibility space.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Fragment<E = Blob> {
+pub enum Fractal<E = Blob> {
     /// Terminal: self-addressed, carries data, stops.
     Shard { ref_: Ref, data: E },
-    /// Self-similar: self-addressed, carries data, contains fragments.
+    /// Self-similar: self-addressed, carries data, contains fractal children.
     Fractal {
         ref_: Ref,
         data: E,
-        fragments: Vec<Fragment<E>>,
+        fractal: Vec<Fractal<E>>,
     },
 }
 
-impl Fragment<String> {
+impl Fractal<String> {
     /// Create a shard from string-like data. Terminal fragment.
     pub fn shard(ref_: Ref, data: impl Into<String>) -> Self {
-        Fragment::Shard {
+        Fractal::Shard {
             ref_,
             data: data.into(),
         }
     }
 
     /// Create a fractal from string-like data. Self-similar, contains other fragments.
-    pub fn fractal(ref_: Ref, data: impl Into<String>, fragments: Vec<Fragment<String>>) -> Self {
-        Fragment::Fractal {
+    pub fn new(ref_: Ref, data: impl Into<String>, fractal: Vec<Fractal<String>>) -> Self {
+        Fractal::Fractal {
             ref_,
             data: data.into(),
-            fragments,
+            fractal,
         }
     }
 }
 
-impl<E> Fragment<E> {
+impl<E> Fractal<E> {
     /// Create a shard with typed data. Terminal fragment.
     pub fn shard_typed(ref_: Ref, data: E) -> Self {
-        Fragment::Shard { ref_, data }
+        Fractal::Shard { ref_, data }
     }
 
     /// Create a fractal with typed data. Self-similar, contains other fragments.
-    pub fn fractal_typed(ref_: Ref, data: E, fragments: Vec<Fragment<E>>) -> Self {
-        Fragment::Fractal {
+    pub fn new_typed(ref_: Ref, data: E, fractal: Vec<Fractal<E>>) -> Self {
+        Fractal::Fractal {
             ref_,
             data,
-            fragments,
+            fractal,
         }
     }
+}
 
-    /// Get the ref (self-address) of a fragment.
-    pub fn self_ref(&self) -> &Ref {
+impl<E> Fragment for Fractal<E> {
+    type Data = E;
+
+    fn self_ref(&self) -> &Ref {
         match self {
-            Fragment::Shard { ref_, .. } => ref_,
-            Fragment::Fractal { ref_, .. } => ref_,
+            Fractal::Shard { ref_, .. } => ref_,
+            Fractal::Fractal { ref_, .. } => ref_,
         }
     }
 
-    /// Get the data from a fragment.
-    pub fn data(&self) -> &E {
+    fn data(&self) -> &E {
         match self {
-            Fragment::Shard { data, .. } => data,
-            Fragment::Fractal { data, .. } => data,
+            Fractal::Shard { data, .. } => data,
+            Fractal::Fractal { data, .. } => data,
         }
     }
 
-    /// Get child fragments. Shards have none.
-    pub fn children(&self) -> &[Fragment<E>] {
+    fn children(&self) -> &[Fractal<E>] {
         match self {
-            Fragment::Shard { .. } => &[],
-            Fragment::Fractal { fragments, .. } => fragments,
+            Fractal::Shard { .. } => &[],
+            Fractal::Fractal { fractal, .. } => fractal,
         }
     }
 
-    /// Check if a fragment is a shard.
-    pub fn is_shard(&self) -> bool {
-        matches!(self, Fragment::Shard { .. })
+    fn is_shard(&self) -> bool {
+        matches!(self, Fractal::Shard { .. })
     }
 
-    /// Check if a fragment is a fractal (non-terminal).
-    pub fn is_fractal(&self) -> bool {
-        matches!(self, Fragment::Fractal { .. })
+    fn is_fractal(&self) -> bool {
+        matches!(self, Fractal::Fractal { .. })
     }
 }
 
 /// Compute a git-compatible content OID for a fragment.
-/// Shard -> blob OID, Fragment -> tree OID.
+/// Shard -> blob OID, Fractal -> tree OID.
 /// Witness metadata is NOT included -- same content = same OID.
-pub fn content_oid<E: Encode>(frag: &Fragment<E>) -> String {
+pub fn content_oid<E: Encode>(frag: &Fractal<E>) -> String {
     match frag {
-        Fragment::Shard { data, .. } => blob_oid_bytes(&data.encode()),
-        Fragment::Fractal {
-            data, fragments, ..
-        } => tree_oid_bytes(&data.encode(), fragments),
+        Fractal::Shard { data, .. } => blob_oid_bytes(&data.encode()),
+        Fractal::Fractal { data, fractal, .. } => tree_oid_bytes(&data.encode(), fractal),
     }
 }
 
@@ -118,12 +138,12 @@ pub fn blob_oid_bytes(data: &[u8]) -> String {
 
 /// Compute the git tree OID for a fragment with data and children.
 /// Builds the same binary tree object that git would, then SHA-1 hashes it.
-pub fn tree_oid<E: Encode>(data: &str, children: &[Fragment<E>]) -> String {
+pub fn tree_oid<E: Encode>(data: &str, children: &[Fractal<E>]) -> String {
     tree_oid_bytes(data.as_bytes(), children)
 }
 
 /// Compute the git tree OID for a fragment with byte data and children.
-pub fn tree_oid_bytes<E: Encode>(data: &[u8], children: &[Fragment<E>]) -> String {
+pub fn tree_oid_bytes<E: Encode>(data: &[u8], children: &[Fractal<E>]) -> String {
     use sha1::{Digest, Sha1};
 
     let tree_bytes = build_tree_bytes(data, children);
@@ -137,7 +157,7 @@ pub fn tree_oid_bytes<E: Encode>(data: &[u8], children: &[Fragment<E>]) -> Strin
 /// Build the raw bytes of a git tree object (without header).
 /// Entries: ".data" blob + "0000", "0001", ... numbered children.
 /// Each entry: "{mode} {name}\0{20-byte SHA-1}"
-fn build_tree_bytes<E: Encode>(data: &[u8], children: &[Fragment<E>]) -> Vec<u8> {
+fn build_tree_bytes<E: Encode>(data: &[u8], children: &[Fractal<E>]) -> Vec<u8> {
     let mut entries: Vec<(String, u32, [u8; 20])> = Vec::new();
 
     // .data entry -- the fragment's own data as a blob

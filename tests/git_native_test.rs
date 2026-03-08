@@ -1,4 +1,4 @@
-use fragmentation::fragment::{self, Fragment};
+use fragmentation::fragment::{self, Fractal, Fragment};
 use fragmentation::ref_::Ref;
 use fragmentation::sha;
 
@@ -6,14 +6,14 @@ use fragmentation::sha;
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn make_shard(data: &str) -> Fragment<String> {
+fn make_shard(data: &str) -> Fractal<String> {
     let oid = fragment::blob_oid(data);
-    Fragment::shard(Ref::new(sha::Sha(oid), "self"), data)
+    Fractal::shard(Ref::new(sha::Sha(oid), "self"), data)
 }
 
-fn make_fractal(label: &str, data: &str, children: Vec<Fragment<String>>) -> Fragment<String> {
+fn make_fractal(label: &str, data: &str, children: Vec<Fractal<String>>) -> Fractal<String> {
     let oid = fragment::tree_oid(data, &children);
-    Fragment::fractal(Ref::new(sha::Sha(oid), label), data, children)
+    Fractal::new(Ref::new(sha::Sha(oid), label), data, children)
 }
 
 // ===========================================================================

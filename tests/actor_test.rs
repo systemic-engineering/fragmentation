@@ -1,6 +1,6 @@
 use fragmentation::actor::Actor;
 use fragmentation::encoding::{Decode, Encode};
-use fragmentation::fragment::{self, Blob, Fragment};
+use fragmentation::fragment::{self, Blob, Fractal, Fragment};
 use fragmentation::keys::{Keys, Local, PlainKeys, Signed};
 use fragmentation::ref_::Ref;
 use fragmentation::sha;
@@ -9,14 +9,14 @@ use fragmentation::sha;
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn make_blob_shard(data: Vec<u8>) -> Fragment<Blob> {
+fn make_blob_shard(data: Vec<u8>) -> Fractal<Blob> {
     let r = Ref::new(sha::Sha(fragment::blob_oid_bytes(&data)), "self");
-    Fragment::shard_typed(r, data)
+    Fractal::shard_typed(r, data)
 }
 
-fn make_string_shard(data: &str) -> Fragment<String> {
+fn make_string_shard(data: &str) -> Fractal<String> {
     let r = Ref::new(sha::Sha(fragment::blob_oid(data)), "self");
-    Fragment::shard(r, data)
+    Fractal::shard(r, data)
 }
 
 // ===========================================================================
@@ -82,7 +82,7 @@ fn plain_keys_encrypt_decrypt_roundtrip() {
     let data = vec![1, 2, 3];
     let shard = make_blob_shard(data.clone());
     let encrypted = PlainKeys.encrypt(shard).unwrap();
-    let decrypted: Fragment<Blob> = PlainKeys.decrypt(&encrypted).unwrap();
+    let decrypted: Fractal<Blob> = PlainKeys.decrypt(&encrypted).unwrap();
     assert_eq!(decrypted.data(), &data);
 }
 
@@ -137,7 +137,7 @@ fn local_keys_plain_encrypt_decrypt_roundtrip() {
     let data = vec![1, 2, 3];
     let shard = make_blob_shard(data.clone());
     let encrypted = Local::None.encrypt(shard).unwrap();
-    let decrypted: Fragment<Blob> = Local::None.decrypt(&encrypted).unwrap();
+    let decrypted: Fractal<Blob> = Local::None.decrypt(&encrypted).unwrap();
     assert_eq!(decrypted.data(), &data);
 }
 
@@ -145,14 +145,14 @@ fn local_keys_plain_encrypt_decrypt_roundtrip() {
 // Custom actor (String -> Blob transformation)
 // ===========================================================================
 
-fn string_to_blob(f: &Fragment<String>) -> Fragment<Blob> {
+fn string_to_blob(f: &Fractal<String>) -> Fractal<Blob> {
     let ref_ = f.self_ref().clone();
-    Fragment::shard_typed(ref_, f.data().as_bytes().to_vec())
+    Fractal::shard_typed(ref_, f.data().as_bytes().to_vec())
 }
 
-fn blob_to_string(f: &Fragment<Blob>) -> Fragment<String> {
+fn blob_to_string(f: &Fractal<Blob>) -> Fractal<String> {
     let ref_ = f.self_ref().clone();
-    Fragment::shard(ref_, String::from_utf8(f.data().clone()).unwrap())
+    Fractal::shard(ref_, String::from_utf8(f.data().clone()).unwrap())
 }
 
 #[test]
@@ -196,13 +196,13 @@ struct TestKeys {
 impl Keys for TestKeys {
     type Error = std::convert::Infallible;
 
-    fn sign<E>(&self, fragment: Fragment<E>) -> Result<Signed<Self, Fragment<E>>, Self::Error> {
+    fn sign<E>(&self, fragment: Fractal<E>) -> Result<Signed<Self, Fractal<E>>, Self::Error> {
         Ok(Signed::new(fragment, b"test-sig".to_vec(), self.clone()))
     }
 
     fn encrypt<E: Encode>(
         &self,
-        fragment: Fragment<E>,
+        fragment: Fractal<E>,
     ) -> Result<fragmentation::keys::Encrypted<Self>, Self::Error> {
         Ok(fragmentation::keys::Encrypted::new(
             fragment.data().encode(),
@@ -213,11 +213,11 @@ impl Keys for TestKeys {
     fn decrypt<E: Decode>(
         &self,
         encrypted: &fragmentation::keys::Encrypted<Self>,
-    ) -> Result<Fragment<E>, Self::Error> {
+    ) -> Result<Fractal<E>, Self::Error> {
         let data = E::decode(encrypted.ciphertext()).expect("test decrypt");
         let sha_str = fragment::blob_oid_bytes(encrypted.ciphertext());
         let ref_ = Ref::new(sha::Sha(sha_str), "decrypted");
-        Ok(Fragment::shard_typed(ref_, data))
+        Ok(Fractal::shard_typed(ref_, data))
     }
 }
 
@@ -272,7 +272,7 @@ fn actor_encrypt_decrypt_returns_result() {
     let actor = Actor::identity("test", "test@test");
     let shard = make_blob_shard(vec![1, 2, 3]);
     let encrypted = actor.encrypt(shard.clone()).unwrap();
-    let decrypted: Fragment<Blob> = actor.decrypt(&encrypted).unwrap();
+    let decrypted: Fractal<Blob> = actor.decrypt(&encrypted).unwrap();
     assert_eq!(decrypted.data(), shard.data());
 }
 
@@ -324,7 +324,7 @@ mod ssh_tests {
         let data = vec![1, 2, 3];
         let shard = make_blob_shard(data.clone());
         let encrypted = local.encrypt(shard).unwrap();
-        let decrypted: Fragment<Blob> = local.decrypt(&encrypted).unwrap();
+        let decrypted: Fractal<Blob> = local.decrypt(&encrypted).unwrap();
         assert_eq!(decrypted.data(), &data);
     }
 
@@ -347,7 +347,7 @@ mod ssh_tests {
         let local = Local::Ssh(Box::new(key));
         let shard = make_string_shard("hello fragmentation");
         let encrypted = local.encrypt(shard).unwrap();
-        let decrypted: Fragment<String> = local.decrypt(&encrypted).unwrap();
+        let decrypted: Fractal<String> = local.decrypt(&encrypted).unwrap();
         assert_eq!(decrypted.data(), "hello fragmentation");
     }
 
@@ -362,7 +362,7 @@ mod ssh_tests {
         // Wrap ciphertext with key2's identity for decrypt dispatch
         let mismatched =
             fragmentation::keys::Encrypted::new(encrypted.ciphertext().to_vec(), local2.clone());
-        let result: Result<Fragment<Blob>, _> = local2.decrypt(&mismatched);
+        let result: Result<Fractal<Blob>, _> = local2.decrypt(&mismatched);
         assert!(result.is_err());
     }
 
@@ -477,7 +477,7 @@ mod gpg_tests {
         let data = vec![1, 2, 3, 4, 5];
         let shard = make_blob_shard(data.clone());
         let encrypted = local.encrypt(shard).unwrap();
-        let decrypted: Fragment<Blob> = local.decrypt(&encrypted).unwrap();
+        let decrypted: Fractal<Blob> = local.decrypt(&encrypted).unwrap();
         assert_eq!(decrypted.data(), &data);
     }
 

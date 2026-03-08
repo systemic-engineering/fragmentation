@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
-use crate::fragment::{Blob, Fragment};
+use crate::fragment::{Blob, Fractal, Fragment};
 use crate::sha::Sha;
 
 /// Content-addressed fragment store.
 #[derive(Clone, Debug)]
 pub struct Store<E = Blob> {
-    fragments: HashMap<String, Fragment<E>>,
+    fragments: HashMap<String, Fractal<E>>,
 }
 
 impl<E> Store<E> {
@@ -18,13 +18,13 @@ impl<E> Store<E> {
     }
 
     /// Insert a fragment by its self-ref SHA.
-    pub fn put(&mut self, frag: Fragment<E>) {
+    pub fn put(&mut self, frag: Fractal<E>) {
         let key = frag.self_ref().sha.0.clone();
         self.fragments.insert(key, frag);
     }
 
     /// Look up a fragment by SHA.
-    pub fn get(&self, sha: &Sha) -> Option<&Fragment<E>> {
+    pub fn get(&self, sha: &Sha) -> Option<&Fractal<E>> {
         self.fragments.get(&sha.0)
     }
 
