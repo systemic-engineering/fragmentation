@@ -1,72 +1,67 @@
 # fragmentation
 
-Content-addressed, arbitrary-depth, circular-reflexive trees. Reality for git.
+Content-addressed, arbitrary-depth, circular-reflexive trees.
 
-[![Package Version](https://img.shields.io/hexpm/v/fragmentation)](https://hex.pm/packages/fragmentation)
-[![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)](https://hexdocs.pm/fragmentation/)
 [![CI](https://github.com/systemic-engineering/fragmentation/actions/workflows/test.yml/badge.svg)](https://github.com/systemic-engineering/fragmentation/actions/workflows/test.yml)
 
-```sh
-gleam add fragmentation@1
+```toml
+[dependencies]
+fragmentation = { git = "https://github.com/systemic-engineering/fragmentation" }
 ```
 
 ## What This Is
 
-A Gleam library for building trees where every node knows its own address, carries a witness record of who observed it, and contains its children directly. Two node types: `Shard` (terminal) and `Fragment` (recursive). Four fields on every witness: author, committer, timestamp, message -- the same four fields as a git commit.
+A Rust library for building trees where every node is identified by its content. Two node types: `Shard` (terminal) and `Fractal` (recursive). Git-compatible SHA-1 hashing. The observer is part of the commit, not the hash.
 
-Different witness, different hash. The observation is part of the content.
+```rust
+use fragmentation::fragment::{Fragment, blob_oid};
 
-```gleam
-import fragmentation
+// Shard -- terminal node
+let leaf = Fragment::shard("hello");
 
-let witness = fragmentation.witnessed(
-  fragmentation.author("alex"),
-  fragmentation.committer("reed"),
-  fragmentation.timestamp("2026-03-01T00:00:00Z"),
-  fragmentation.message("initial"),
-)
-let leaf = fragmentation.shard(
-  fragmentation.ref(fragmentation.hash("leaf-data"), "self"),
-  witness,
-  "leaf-data",
-)
-let root = fragmentation.fragment(
-  fragmentation.ref(fragmentation.hash("root"), "self"),
-  witness,
-  "root",
-  [leaf],
-)
+// Fractal -- recursive node
+let tree = Fragment::fractal("root", vec![leaf]);
 
 // Content-addressed: same content = same hash
-fragmentation.hash_fragment(root)
+let oid = tree.content_oid();
 ```
+
+Different witness, different commit. Same content, same tree. The observer changes the record without changing the content.
+
+## Features
+
+| Feature | What it enables |
+|---------|----------------|
+| `git`   | Read/write fragment trees as native git objects |
+| `ssh`   | Ed25519 signing + ECIES encryption (X25519, ChaCha20-Poly1305) |
+| `gpg`   | GPG signing + encryption via subprocess |
 
 ## Modules
 
 | Module | Purpose |
 |--------|---------|
-| `fragmentation` | Core types, construction, hashing, queries |
-| `fragmentation/store` | Content-addressed in-memory storage (Sha -> Fragment) |
-| `fragmentation/walk` | Depth-first traversal, fold, find, depth |
-| `fragmentation/diff` | Structural comparison between trees |
-| `fragmentation/encoding` | Text as content-addressed trees (document/paragraph/sentence/word/char) |
-| `fragmentation/git` | Content-addressed fragment persistence to disk |
+| `fragment` | `Fragment<E>`, construction, content addressing |
+| `ref_` | `Ref` -- content address (SHA + label) |
+| `sha` | `Sha` -- SHA-1 and SHA-256 |
+| `store` | Content-addressed in-memory storage |
+| `walk` | Depth-first traversal, fold, find, depth |
+| `diff` | Positional structural comparison |
+| `encoding` | Text as five-level fragment trees |
+| `witnessed` | Commit metadata -- author, committer, timestamp, message |
+| `git` | Fragment persistence to git repositories |
+| `keys` | Sign, encrypt, decrypt (SSH, GPG, plain) |
+| `actor` | Witness identity with encoding boundary and keys |
 
 ## Documentation
 
-See [`docs/`](docs/INDEX.md) for the full documentation, including:
-- What fragmentation is and why these types
-- Why the witness record changes the hash
-- How the modules compose
-- A guide for agents building on this library
+See [`docs/`](docs/INDEX.md).
 
 ## Development
 
 ```sh
-gleam test  # 110 tests
+cargo test --all-features  # 185 tests
 ```
 
 ## Licence
 
-`LICENSE.md` contains the Apache-2.0 licence required by Hex. The actual
-governing terms are the [Systemic Engineering License v1.0](REAL_LICENSE.md).
+[systemic.engineering License v1.0](LICENSE.md)
