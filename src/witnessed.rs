@@ -34,31 +34,26 @@ impl Committer {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Timestamp(pub String);
 
-/// The witness's account of what happened.
+/// The commit message. What happened.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Message(pub String);
 
 /// Git commit metadata. Who was here when this happened.
+/// Message lives on Commit, not here.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Witnessed {
     pub author: Author,
     pub committer: Committer,
     pub timestamp: Timestamp,
-    pub message: Message,
 }
 
 impl Witnessed {
-    pub fn new(
-        author: Author,
-        committer: Committer,
-        timestamp: Timestamp,
-        message: Message,
-    ) -> Self {
-        Witnessed {
-            author,
-            committer,
-            timestamp,
-            message,
-        }
+    pub fn new(author: Author, committer: Committer, timestamp: Timestamp) -> Self {
+        todo!()
+    }
+
+    /// Empty witness — to be filled by actor.author() and actor.commit().
+    pub fn empty() -> Self {
+        todo!()
     }
 }

@@ -108,22 +108,14 @@ fn tree_oid_children_order_matters() {
 #[cfg(feature = "git")]
 mod git_native {
     use super::*;
+    use fragmentation::actor::Actor;
+    use fragmentation::commit::Commit;
     use fragmentation::git;
-    use fragmentation::witnessed::{Author, Committer, Message, Timestamp, Witnessed};
 
     fn init_repo() -> (tempfile::TempDir, git2::Repository) {
         let dir = tempfile::tempdir().unwrap();
         let repo = git2::Repository::init(dir.path()).unwrap();
         (dir, repo)
-    }
-
-    fn test_witnessed() -> Witnessed {
-        Witnessed::new(
-            Author::new("alex", "alex@systemic.engineer"),
-            Committer::new("reed", "reed@systemic.engineer"),
-            Timestamp("2026-03-01T00:00:00Z".into()),
-            Message("test".into()),
-        )
     }
 
     #[test]
@@ -189,27 +181,39 @@ mod git_native {
     #[test]
     fn write_commit_carries_witness_metadata() {
         let (_dir, repo) = init_repo();
+        let alex = Actor::identity("alex", "alex@systemic.engineer");
+        let reed = Actor::identity("reed", "reed@systemic.engineer");
         let shard = make_shard("committed");
-        let w = test_witnessed();
-        let oid = git::write_commit(&repo, &shard, &w, "test commit", None).unwrap();
-        let commit = repo.find_commit(oid).unwrap();
-        assert_eq!(commit.author().name(), Some("alex"));
-        assert!(commit.message().unwrap().contains("test commit"));
+        let c = Commit::root(shard, "test commit");
+        let c = alex.author(c);
+        let c = reed.commit(c);
+        let oid = git::write_commit(&repo, &c).unwrap();
+        let git_commit = repo.find_commit(oid).unwrap();
+        assert_eq!(git_commit.author().name(), Some("alex"));
+        assert_eq!(git_commit.committer().name(), Some("reed"));
+        assert!(git_commit.message().unwrap().contains("test commit"));
     }
 
     #[test]
     fn write_commit_parent_chain() {
         let (_dir, repo) = init_repo();
+        let actor = Actor::identity("test", "test@test");
+
         let s1 = make_shard("first");
-        let w = test_witnessed();
-        let oid1 = git::write_commit(&repo, &s1, &w, "first commit", None).unwrap();
-        let commit1 = repo.find_commit(oid1).unwrap();
+        let c1 = Commit::root(s1, "first commit");
+        let c1 = actor.author(c1);
+        let c1 = actor.commit(c1);
+        let oid1 = git::write_commit(&repo, &c1).unwrap();
 
         let s2 = make_shard("second");
-        let oid2 = git::write_commit(&repo, &s2, &w, "second commit", Some(&commit1)).unwrap();
-        let commit2 = repo.find_commit(oid2).unwrap();
-        assert_eq!(commit2.parent_count(), 1);
-        assert_eq!(commit2.parent_id(0).unwrap(), oid1);
+        let c2 = Commit::new(s2, "second commit", sha::Sha(oid1.to_string()));
+        let c2 = actor.author(c2);
+        let c2 = actor.commit(c2);
+        let oid2 = git::write_commit(&repo, &c2).unwrap();
+
+        let git_commit2 = repo.find_commit(oid2).unwrap();
+        assert_eq!(git_commit2.parent_count(), 1);
+        assert_eq!(git_commit2.parent_id(0).unwrap(), oid1);
     }
 
     #[test]
@@ -253,37 +257,33 @@ mod git_native {
     }
 
     // =====================================================================
-    // read_commit — extract Witnessed from git commits
+    // read_witnessed — extract metadata from any git commit
     // =====================================================================
 
     #[test]
-    fn read_commit_from_real_repo() {
-        // Open THIS repo and read HEAD of main
+    fn read_witnessed_from_real_repo() {
         let repo = git2::Repository::open("/Users/alexwolf/dev/projects/fragmentation").unwrap();
         let main_ref = repo.find_branch("main", git2::BranchType::Local).unwrap();
         let commit_oid = main_ref.get().target().unwrap();
 
-        let (witnessed, tree_oid) = git::read_commit(&repo, commit_oid).unwrap();
+        let (witnessed, message, tree_oid) = git::read_witnessed(&repo, commit_oid).unwrap();
 
-        // Main has real commits with real authors
         assert!(!witnessed.author.name.is_empty());
         assert!(!witnessed.committer.name.is_empty());
-        assert!(!witnessed.message.0.is_empty());
+        assert!(!message.0.is_empty());
         assert!(!witnessed.timestamp.0.is_empty());
 
-        // Tree OID should be valid
         let _tree = repo.find_tree(tree_oid).unwrap();
     }
 
     #[test]
-    fn read_commit_witnessed_matches_git2() {
-        // Verify our Witnessed extraction matches what git2 reports
+    fn read_witnessed_matches_git2() {
         let repo = git2::Repository::open("/Users/alexwolf/dev/projects/fragmentation").unwrap();
         let main_ref = repo.find_branch("main", git2::BranchType::Local).unwrap();
         let commit_oid = main_ref.get().target().unwrap();
 
         let commit = repo.find_commit(commit_oid).unwrap();
-        let (witnessed, _) = git::read_commit(&repo, commit_oid).unwrap();
+        let (witnessed, _, _) = git::read_witnessed(&repo, commit_oid).unwrap();
 
         assert_eq!(witnessed.author.name, commit.author().name().unwrap());
         assert_eq!(witnessed.committer.name, commit.committer().name().unwrap());
@@ -294,85 +294,117 @@ mod git_native {
         );
     }
 
+    // =====================================================================
+    // read_commit — full roundtrip for fragmentation commits
+    // =====================================================================
+
     #[test]
     fn read_commit_roundtrip() {
-        // Write a commit with write_commit, read it back with read_commit
         let (_dir, repo) = init_repo();
+        let actor = Actor::identity("mara", "mara@systemic.engineer");
         let shard = make_shard("roundtrip-commit");
-        let w = test_witnessed();
-        let oid = git::write_commit(&repo, &shard, &w, "roundtrip test", None).unwrap();
+        let c = Commit::root(shard, "roundtrip test");
+        let c = actor.author(c);
+        let c = actor.commit(c);
+        let oid = git::write_commit(&repo, &c).unwrap();
 
-        let (recovered, tree_oid) = git::read_commit(&repo, oid).unwrap();
-        assert_eq!(recovered.author.name, "alex");
-        assert_eq!(recovered.author.email, "alex@systemic.engineer");
-        assert_eq!(recovered.committer.name, "reed");
-        assert_eq!(recovered.committer.email, "reed@systemic.engineer");
-        assert!(recovered.message.0.contains("roundtrip test"));
-
-        // Tree OID should be valid
-        let _tree = repo.find_tree(tree_oid).unwrap();
+        let recovered = git::read_commit(&repo, oid).unwrap();
+        assert_eq!(recovered.witnessed().author.name, "mara");
+        assert_eq!(recovered.witnessed().author.email, "mara@systemic.engineer");
+        assert_eq!(recovered.witnessed().committer.name, "mara");
+        assert_eq!(
+            recovered.witnessed().committer.email,
+            "mara@systemic.engineer"
+        );
+        assert!(recovered.message().0.contains("roundtrip test"));
+        assert_eq!(recovered.fractal().data(), "roundtrip-commit");
+        assert!(recovered.parent().is_none());
     }
 
     #[test]
-    fn write_commit_uses_email_from_witnessed() {
+    fn read_commit_parent_chain_roundtrip() {
         let (_dir, repo) = init_repo();
+        let actor = Actor::identity("test", "test@test");
+
+        let c1 = Commit::root(make_shard("first"), "first");
+        let c1 = actor.author(c1);
+        let c1 = actor.commit(c1);
+        let oid1 = git::write_commit(&repo, &c1).unwrap();
+
+        let c2 = Commit::new(make_shard("second"), "second", sha::Sha(oid1.to_string()));
+        let c2 = actor.author(c2);
+        let c2 = actor.commit(c2);
+        let oid2 = git::write_commit(&repo, &c2).unwrap();
+
+        let recovered = git::read_commit(&repo, oid2).unwrap();
+        assert_eq!(recovered.parent(), Some(&sha::Sha(oid1.to_string())));
+        assert_eq!(recovered.fractal().data(), "second");
+    }
+
+    #[test]
+    fn write_commit_uses_email() {
+        let (_dir, repo) = init_repo();
+        let mara = Actor::identity("mara", "mara@systemic.engineer");
         let shard = make_shard("email-test");
-        let w = Witnessed::new(
-            Author::new("mara", "mara@systemic.engineer"),
-            Committer::new("mara", "mara@systemic.engineer"),
-            Timestamp("2026-03-08T00:00:00Z".into()),
-            Message("email test".into()),
+        let c = Commit::root(shard, "email commit");
+        let c = mara.author(c);
+        let c = mara.commit(c);
+        let oid = git::write_commit(&repo, &c).unwrap();
+        let git_commit = repo.find_commit(oid).unwrap();
+        assert_eq!(git_commit.author().email(), Some("mara@systemic.engineer"));
+        assert_eq!(
+            git_commit.committer().email(),
+            Some("mara@systemic.engineer")
         );
-        let oid = git::write_commit(&repo, &shard, &w, "email commit", None).unwrap();
-        let commit = repo.find_commit(oid).unwrap();
-        assert_eq!(commit.author().email(), Some("mara@systemic.engineer"));
-        assert_eq!(commit.committer().email(), Some("mara@systemic.engineer"));
     }
 
     #[test]
-    fn write_commit_different_author_committer_email() {
+    fn write_commit_different_author_committer() {
         let (_dir, repo) = init_repo();
+        let alex = Actor::identity("alex", "alex@example.com");
+        let reed = Actor::identity("reed", "reed@example.com");
         let shard = make_shard("split-identity");
-        let w = Witnessed::new(
-            Author::new("alex", "alex@example.com"),
-            Committer::new("reed", "reed@example.com"),
-            Timestamp("2026-03-08T00:00:00Z".into()),
-            Message("split".into()),
-        );
-        let oid = git::write_commit(&repo, &shard, &w, "split commit", None).unwrap();
-        let commit = repo.find_commit(oid).unwrap();
-        assert_eq!(commit.author().name(), Some("alex"));
-        assert_eq!(commit.author().email(), Some("alex@example.com"));
-        assert_eq!(commit.committer().name(), Some("reed"));
-        assert_eq!(commit.committer().email(), Some("reed@example.com"));
+        let c = Commit::root(shard, "split commit");
+        let c = alex.author(c);
+        let c = reed.commit(c);
+        let oid = git::write_commit(&repo, &c).unwrap();
+        let git_commit = repo.find_commit(oid).unwrap();
+        assert_eq!(git_commit.author().name(), Some("alex"));
+        assert_eq!(git_commit.author().email(), Some("alex@example.com"));
+        assert_eq!(git_commit.committer().name(), Some("reed"));
+        assert_eq!(git_commit.committer().email(), Some("reed@example.com"));
     }
 
     #[test]
     fn read_commit_captures_email() {
         let (_dir, repo) = init_repo();
+        let mara = Actor::identity("mara", "mara@systemic.engineer");
+        let cairn = Actor::identity("cairn", "cairn@systemic.engineer");
         let shard = make_shard("email-roundtrip");
-        let w = Witnessed::new(
-            Author::new("mara", "mara@systemic.engineer"),
-            Committer::new("cairn", "cairn@systemic.engineer"),
-            Timestamp("2026-03-08T00:00:00Z".into()),
-            Message("email roundtrip".into()),
-        );
-        let oid = git::write_commit(&repo, &shard, &w, "email roundtrip test", None).unwrap();
+        let c = Commit::root(shard, "email roundtrip test");
+        let c = mara.author(c);
+        let c = cairn.commit(c);
+        let oid = git::write_commit(&repo, &c).unwrap();
 
-        let (recovered, _tree_oid) = git::read_commit(&repo, oid).unwrap();
-        assert_eq!(recovered.author.name, "mara");
-        assert_eq!(recovered.author.email, "mara@systemic.engineer");
-        assert_eq!(recovered.committer.name, "cairn");
-        assert_eq!(recovered.committer.email, "cairn@systemic.engineer");
+        let recovered = git::read_commit(&repo, oid).unwrap();
+        assert_eq!(recovered.witnessed().author.name, "mara");
+        assert_eq!(recovered.witnessed().author.email, "mara@systemic.engineer");
+        assert_eq!(recovered.witnessed().committer.name, "cairn");
+        assert_eq!(
+            recovered.witnessed().committer.email,
+            "cairn@systemic.engineer"
+        );
     }
 
     #[test]
     fn commit_signature_unsigned() {
-        // Commits in test repos are unsigned
         let (_dir, repo) = init_repo();
+        let actor = Actor::identity("test", "test@test");
         let shard = make_shard("unsigned");
-        let w = test_witnessed();
-        let oid = git::write_commit(&repo, &shard, &w, "unsigned commit", None).unwrap();
+        let c = Commit::root(shard, "unsigned commit");
+        let c = actor.author(c);
+        let c = actor.commit(c);
+        let oid = git::write_commit(&repo, &c).unwrap();
 
         let sig = git::commit_signature(&repo, oid).unwrap();
         assert!(sig.is_none());

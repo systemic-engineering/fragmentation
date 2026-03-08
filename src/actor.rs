@@ -1,8 +1,8 @@
+use crate::commit::Commit;
 use crate::encoding::{Decode, Encode};
 use crate::fragment::{Blob, Fractal};
 use crate::keys::{Encrypted, Keys, Local};
 use crate::visibility::Public;
-use crate::witnessed::Witnessed;
 
 /// Witness identity with encoding boundary.
 ///
@@ -100,23 +100,15 @@ impl<A, B, K: Keys> Actor<A, B, K> {
         self.keys.decrypt(encrypted)
     }
 
-    /// Produce a Witnessed record from this actor.
-    /// Author and Committer carry the actor's name and email.
-    /// Timestamp is current epoch seconds.
-    pub fn witness(&self, message: impl Into<String>) -> Witnessed {
-        use crate::witnessed::{Author, Committer, Message, Timestamp};
-        use std::time::{SystemTime, UNIX_EPOCH};
+    /// Stamp this actor as the Author of a commit.
+    /// Sets author name, email, and timestamp to now.
+    pub fn author<E>(&self, commit: Commit<E>) -> Commit<E> {
+        todo!()
+    }
 
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock before UNIX epoch")
-            .as_secs();
-
-        Witnessed::new(
-            Author::new(&self.name, &self.email),
-            Committer::new(&self.name, &self.email),
-            Timestamp(now.to_string()),
-            Message(message.into()),
-        )
+    /// Stamp this actor as the Committer of a commit.
+    /// Sets committer name and email.
+    pub fn commit<E>(&self, commit: Commit<E>) -> Commit<E> {
+        todo!()
     }
 }
