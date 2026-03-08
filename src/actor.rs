@@ -108,6 +108,12 @@ impl<A, B, K: Keys> Actor<A, B, K> {
         draft: crate::commit::Draft<E>,
         repo: &git2::Repository,
     ) -> Result<crate::commit::Commit<E>, git2::Error> {
-        todo!()
+        use crate::witnessed::{Author, Committer};
+        let d = if draft.author().is_none() {
+            draft.authored(Author::new(&self.name, &self.email))
+        } else {
+            draft
+        };
+        d.write(repo, Committer::new(&self.name, &self.email))
     }
 }

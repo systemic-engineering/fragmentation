@@ -41,7 +41,23 @@ pub fn read_commit(
     use crate::commit::Parent;
     use crate::sha::Sha;
 
-    todo!()
+    let git_commit = repo.find_commit(oid)?;
+    let (witnessed, message, tree_oid) = read_witnessed(repo, oid)?;
+    let fractal = read_tree(repo, tree_oid)?;
+    let sha = Sha(oid.to_string());
+
+    match git_commit.parent_id(0).ok() {
+        None => Ok(crate::commit::Commit::full_root(
+            fractal, witnessed, message, sha,
+        )),
+        Some(parent_oid) => Ok(crate::commit::Commit::full_child(
+            fractal,
+            witnessed,
+            message,
+            Parent(Sha(parent_oid.to_string())),
+            sha,
+        )),
+    }
 }
 
 /// Extract the signature from a signed commit, if present.
@@ -94,7 +110,30 @@ pub(crate) fn write_commit<E: Encode>(
     message: &str,
     parent: Option<&crate::sha::Sha>,
 ) -> Result<git2::Oid, git2::Error> {
-    todo!()
+    let tree_oid = match fractal {
+        Fractal::Shard { .. } => {
+            let blob_oid = write_tree(repo, fractal)?;
+            let mut builder = repo.treebuilder(None)?;
+            builder.insert(".data", blob_oid, 0o100644)?;
+            builder.write()?
+        }
+        Fractal::Fractal { .. } => write_tree(repo, fractal)?,
+    };
+    let tree = repo.find_tree(tree_oid)?;
+
+    let git_author = git2::Signature::now(&author.name, &author.email)?;
+    let git_committer = git2::Signature::now(&committer.name, &committer.email)?;
+
+    let parent_commit;
+    let parents: Vec<&git2::Commit> = if let Some(parent_sha) = parent {
+        let parent_oid = git2::Oid::from_str(&parent_sha.0)?;
+        parent_commit = repo.find_commit(parent_oid)?;
+        vec![&parent_commit]
+    } else {
+        vec![]
+    };
+
+    repo.commit(None, &git_author, &git_committer, message, &tree, &parents)
 }
 
 /// Reconstruct a Fractal<String> from git objects.

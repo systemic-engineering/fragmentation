@@ -140,15 +140,15 @@ impl<K, T: crate::commit::Draftable> crate::commit::Draftable for Public<K, T> {
     type Element = T::Element;
 
     fn fractal(&self) -> &Fractal<Self::Element> {
-        todo!()
+        self.inner.fractal()
     }
 
     fn message(&self) -> &crate::witnessed::Message {
-        todo!()
+        self.inner.message()
     }
 
     fn parent(&self) -> Option<&crate::commit::Parent> {
-        todo!()
+        self.inner.parent()
     }
 }
 

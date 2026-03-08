@@ -49,22 +49,33 @@ pub enum Commit<E> {
 impl<E> Draft<E> {
     /// Create a root draft (no parent).
     pub fn root(message: impl Into<String>, fractal: Fractal<E>) -> Self {
-        todo!()
+        Draft {
+            fractal,
+            message: Message(message.into()),
+            parent: None,
+            author: None,
+        }
     }
 
     /// Create a draft with a parent.
     pub fn new(message: impl Into<String>, fractal: Fractal<E>, parent: Parent) -> Self {
-        todo!()
+        Draft {
+            fractal,
+            message: Message(message.into()),
+            parent: Some(parent),
+            author: None,
+        }
     }
 
     /// Stamp the Author.
     pub fn authored(mut self, author: Author) -> Self {
-        todo!()
+        self.author = Some(author);
+        self
     }
 
     /// The author, if set.
     pub fn author(&self) -> Option<&Author> {
-        todo!()
+        self.author.as_ref()
     }
 
     /// Write this draft to a git repository.
@@ -78,7 +89,37 @@ impl<E> Draft<E> {
     where
         E: crate::encoding::Encode,
     {
-        todo!()
+        let author = self
+            .author
+            .unwrap_or_else(|| Author::new(&committer.name, &committer.email));
+        let oid = crate::git::write_commit(
+            repo,
+            &self.fractal,
+            &author,
+            &committer,
+            &self.message.0,
+            self.parent.as_ref().map(|p| &p.0),
+        )?;
+        let git_commit = repo.find_commit(oid)?;
+        let timestamp = crate::witnessed::Timestamp(git_commit.time().seconds().to_string());
+        let witnessed = Witnessed::new(author, committer, timestamp);
+        let sha = Sha(oid.to_string());
+
+        Ok(match self.parent {
+            None => Commit::Root {
+                fractal: self.fractal,
+                witnessed,
+                message: self.message,
+                sha,
+            },
+            Some(parent) => Commit::Child {
+                fractal: self.fractal,
+                witnessed,
+                message: self.message,
+                parent,
+                sha,
+            },
+        })
     }
 }
 
@@ -86,32 +127,43 @@ impl<E> Draftable for Draft<E> {
     type Element = E;
 
     fn fractal(&self) -> &Fractal<E> {
-        todo!()
+        &self.fractal
     }
 
     fn message(&self) -> &Message {
-        todo!()
+        &self.message
     }
 
     fn parent(&self) -> Option<&Parent> {
-        todo!()
+        self.parent.as_ref()
     }
 }
 
 impl<E> Commit<E> {
     /// This commit's SHA.
     pub fn sha(&self) -> &Sha {
-        todo!()
+        match self {
+            Commit::Root { sha, .. } => sha,
+            Commit::Child { sha, .. } => sha,
+        }
     }
 
     /// Witness metadata: author, committer, timestamp.
     pub fn witnessed(&self) -> &Witnessed {
-        todo!()
+        match self {
+            Commit::Root { witnessed, .. } => witnessed,
+            Commit::Child { witnessed, .. } => witnessed,
+        }
     }
 
     /// Create a child draft from this commit.
     pub fn child(&self, message: impl Into<String>, fractal: Fractal<E>) -> Draft<E> {
-        todo!()
+        Draft {
+            fractal,
+            message: Message(message.into()),
+            parent: Some(Parent(self.sha().clone())),
+            author: None,
+        }
     }
 
     /// Construct a Root with full metadata (used by read_commit).
@@ -121,7 +173,12 @@ impl<E> Commit<E> {
         message: Message,
         sha: Sha,
     ) -> Self {
-        todo!()
+        Commit::Root {
+            fractal,
+            witnessed,
+            message,
+            sha,
+        }
     }
 
     /// Construct a Child with full metadata (used by read_commit).
@@ -132,7 +189,13 @@ impl<E> Commit<E> {
         parent: Parent,
         sha: Sha,
     ) -> Self {
-        todo!()
+        Commit::Child {
+            fractal,
+            witnessed,
+            message,
+            parent,
+            sha,
+        }
     }
 }
 
@@ -140,14 +203,23 @@ impl<E> Draftable for Commit<E> {
     type Element = E;
 
     fn fractal(&self) -> &Fractal<E> {
-        todo!()
+        match self {
+            Commit::Root { fractal, .. } => fractal,
+            Commit::Child { fractal, .. } => fractal,
+        }
     }
 
     fn message(&self) -> &Message {
-        todo!()
+        match self {
+            Commit::Root { message, .. } => message,
+            Commit::Child { message, .. } => message,
+        }
     }
 
     fn parent(&self) -> Option<&Parent> {
-        todo!()
+        match self {
+            Commit::Root { .. } => None,
+            Commit::Child { parent, .. } => Some(parent),
+        }
     }
 }
