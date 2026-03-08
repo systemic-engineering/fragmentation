@@ -103,7 +103,20 @@ impl<A, B, K: Keys> Actor<A, B, K> {
     /// Produce a Witnessed record from this actor.
     /// Author and Committer carry the actor's name and email.
     /// Timestamp is current epoch seconds.
-    pub fn witness(&self, _message: impl Into<String>) -> Witnessed {
-        todo!()
+    pub fn witness(&self, message: impl Into<String>) -> Witnessed {
+        use crate::witnessed::{Author, Committer, Message, Timestamp};
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock before UNIX epoch")
+            .as_secs();
+
+        Witnessed::new(
+            Author::new(&self.name, &self.email),
+            Committer::new(&self.name, &self.email),
+            Timestamp(now.to_string()),
+            Message(message.into()),
+        )
     }
 }

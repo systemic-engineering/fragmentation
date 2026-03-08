@@ -5,7 +5,6 @@ use fragmentation::keys::{Keys, Local, PlainKeys};
 use fragmentation::ref_::Ref;
 use fragmentation::sha;
 use fragmentation::visibility::Public;
-use fragmentation::witnessed::{Author, Committer};
 
 // ---------------------------------------------------------------------------
 // Helpers
