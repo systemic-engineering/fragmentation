@@ -2,49 +2,10 @@ use std::convert::Infallible;
 use std::fmt;
 
 use crate::encoding::{Decode, Encode};
-use crate::fragment::{self, Fragment};
+use crate::fragment::{self, Fractal, Fragment};
 use crate::ref_::Ref;
 use crate::sha::Sha;
-
-/// Signed content: the inner value, the proof, and who signed it.
-/// No PhantomData. Every field is real.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Signed<K, T> {
-    inner: T,
-    signature: Vec<u8>,
-    signer: K,
-}
-
-impl<K, T> Signed<K, T> {
-    /// Construct a signed wrapper.
-    pub fn new(inner: T, signature: Vec<u8>, signer: K) -> Self {
-        Signed {
-            inner,
-            signature,
-            signer,
-        }
-    }
-
-    /// Access the signed content.
-    pub fn inner(&self) -> &T {
-        &self.inner
-    }
-
-    /// Access the signature bytes.
-    pub fn signature(&self) -> &[u8] {
-        &self.signature
-    }
-
-    /// Access the signer.
-    pub fn signer(&self) -> &K {
-        &self.signer
-    }
-
-    /// Consume the wrapper, returning the inner value.
-    pub fn into_inner(self) -> T {
-        self.inner
-    }
-}
+use crate::visibility::Public;
 
 /// Encrypted content: opaque bytes and who it's encrypted for.
 /// No type parameter for the content — it's opaque until decrypted.
@@ -72,19 +33,19 @@ impl<K> Encrypted<K> {
 }
 
 /// Visibility layer encoding. Sign, encrypt, decrypt.
-/// Self threads through as real data — the signer in Signed,
+/// Self threads through as real data — the key in Public,
 /// the recipient in Encrypted.
 pub trait Keys: Sized + Clone {
     type Error: fmt::Display + fmt::Debug;
 
     /// Sign a fragment. The signature proves authorship.
-    fn sign<E>(&self, fragment: Fragment<E>) -> Result<Signed<Self, Fragment<E>>, Self::Error>;
+    fn sign<E>(&self, fragment: Fractal<E>) -> Result<Public<Self, Fractal<E>>, Self::Error>;
 
     /// Encrypt a fragment. The result is opaque bytes.
-    fn encrypt<E: Encode>(&self, fragment: Fragment<E>) -> Result<Encrypted<Self>, Self::Error>;
+    fn encrypt<E: Encode>(&self, fragment: Fractal<E>) -> Result<Encrypted<Self>, Self::Error>;
 
     /// Decrypt an encrypted fragment.
-    fn decrypt<E: Decode>(&self, encrypted: &Encrypted<Self>) -> Result<Fragment<E>, Self::Error>;
+    fn decrypt<E: Decode>(&self, encrypted: &Encrypted<Self>) -> Result<Fractal<E>, Self::Error>;
 }
 
 /// No-op keys: empty signatures, no encryption.
@@ -96,19 +57,19 @@ pub struct PlainKeys;
 impl Keys for PlainKeys {
     type Error = Infallible;
 
-    fn sign<E>(&self, fragment: Fragment<E>) -> Result<Signed<Self, Fragment<E>>, Self::Error> {
-        Ok(Signed::new(fragment, vec![], PlainKeys))
+    fn sign<E>(&self, fragment: Fractal<E>) -> Result<Public<Self, Fractal<E>>, Self::Error> {
+        Ok(Public::new(fragment, vec![], PlainKeys))
     }
 
-    fn encrypt<E: Encode>(&self, fragment: Fragment<E>) -> Result<Encrypted<Self>, Self::Error> {
+    fn encrypt<E: Encode>(&self, fragment: Fractal<E>) -> Result<Encrypted<Self>, Self::Error> {
         Ok(Encrypted::new(fragment.data().encode(), PlainKeys))
     }
 
-    fn decrypt<E: Decode>(&self, encrypted: &Encrypted<Self>) -> Result<Fragment<E>, Self::Error> {
+    fn decrypt<E: Decode>(&self, encrypted: &Encrypted<Self>) -> Result<Fractal<E>, Self::Error> {
         let data = E::decode(&encrypted.ciphertext).expect("PlainKeys: invalid data");
         let sha = Sha(fragment::blob_oid_bytes(&encrypted.ciphertext));
         let ref_ = Ref::new(sha, "decrypted");
-        Ok(Fragment::shard_typed(ref_, data))
+        Ok(Fractal::shard_typed(ref_, data))
     }
 }
 
@@ -152,25 +113,25 @@ pub enum Local {
 impl Keys for Local {
     type Error = LocalError;
 
-    fn sign<E>(&self, fragment: Fragment<E>) -> Result<Signed<Self, Fragment<E>>, Self::Error> {
+    fn sign<E>(&self, fragment: Fractal<E>) -> Result<Public<Self, Fractal<E>>, Self::Error> {
         match self {
-            Local::None => Ok(Signed::new(fragment, vec![], Local::None)),
+            Local::None => Ok(Public::new(fragment, vec![], Local::None)),
             #[cfg(feature = "ssh")]
             Local::Ssh(ssh_key) => {
                 let sha_bytes = fragment.self_ref().sha.0.as_bytes();
                 let signature = ssh_key.sign_bytes(sha_bytes)?;
-                Ok(Signed::new(fragment, signature, self.clone()))
+                Ok(Public::new(fragment, signature, self.clone()))
             }
             #[cfg(feature = "gpg")]
             Local::Gpg(gpg_key) => {
                 let sha_bytes = fragment.self_ref().sha.0.as_bytes();
                 let signature = gpg_key.sign_bytes(sha_bytes)?;
-                Ok(Signed::new(fragment, signature, self.clone()))
+                Ok(Public::new(fragment, signature, self.clone()))
             }
         }
     }
 
-    fn encrypt<E: Encode>(&self, fragment: Fragment<E>) -> Result<Encrypted<Self>, Self::Error> {
+    fn encrypt<E: Encode>(&self, fragment: Fractal<E>) -> Result<Encrypted<Self>, Self::Error> {
         let plaintext = fragment.data().encode();
         let ciphertext = match self {
             Local::None => plaintext,
@@ -182,7 +143,7 @@ impl Keys for Local {
         Ok(Encrypted::new(ciphertext, self.clone()))
     }
 
-    fn decrypt<E: Decode>(&self, encrypted: &Encrypted<Self>) -> Result<Fragment<E>, Self::Error> {
+    fn decrypt<E: Decode>(&self, encrypted: &Encrypted<Self>) -> Result<Fractal<E>, Self::Error> {
         let plaintext = match self {
             Local::None => encrypted.ciphertext.clone(),
             #[cfg(feature = "ssh")]
@@ -193,7 +154,7 @@ impl Keys for Local {
         let data = E::decode(&plaintext).map_err(|e| LocalError::Decode(format!("{}", e)))?;
         let sha = Sha(fragment::blob_oid_bytes(&plaintext));
         let ref_ = Ref::new(sha, "decrypted");
-        Ok(Fragment::shard_typed(ref_, data))
+        Ok(Fractal::shard_typed(ref_, data))
     }
 }
 

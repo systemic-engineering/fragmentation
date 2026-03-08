@@ -1,5 +1,5 @@
 use crate::encoding::Encode;
-use crate::fragment::{self, Fragment};
+use crate::fragment::{self, Fractal, Fragment};
 
 use crate::fragment::Blob;
 
@@ -7,27 +7,27 @@ use crate::fragment::Blob;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Change<E = Blob> {
     /// Fragment exists only in the new tree.
-    Added(Fragment<E>),
+    Added(Fractal<E>),
     /// Fragment exists only in the old tree.
-    Removed(Fragment<E>),
+    Removed(Fractal<E>),
     /// Same position, different content.
-    Modified { old: Fragment<E>, new: Fragment<E> },
+    Modified { old: Fractal<E>, new: Fractal<E> },
     /// Same ref, same content.
-    Unchanged(Fragment<E>),
+    Unchanged(Fractal<E>),
 }
 
 /// Diff two fragment trees by their roots.
 /// Compares structurally: same hash = unchanged, different hash = modified.
 /// Children compared positionally.
-pub fn diff<E: Encode + Clone>(old: &Fragment<E>, new: &Fragment<E>) -> Vec<Change<E>> {
+pub fn diff<E: Encode + Clone>(old: &Fractal<E>, new: &Fractal<E>) -> Vec<Change<E>> {
     if fragment::content_oid(old) == fragment::content_oid(new) {
         vec![Change::Unchanged(old.clone())]
     } else {
-        diff_fragments(old, new)
+        diff_fractals(old, new)
     }
 }
 
-fn diff_fragments<E: Encode + Clone>(old: &Fragment<E>, new: &Fragment<E>) -> Vec<Change<E>> {
+fn diff_fractals<E: Encode + Clone>(old: &Fractal<E>, new: &Fractal<E>) -> Vec<Change<E>> {
     let mut changes = vec![Change::Modified {
         old: old.clone(),
         new: new.clone(),
@@ -38,7 +38,7 @@ fn diff_fragments<E: Encode + Clone>(old: &Fragment<E>, new: &Fragment<E>) -> Ve
     changes
 }
 
-fn diff_children<E: Encode + Clone>(old: &[Fragment<E>], new: &[Fragment<E>]) -> Vec<Change<E>> {
+fn diff_children<E: Encode + Clone>(old: &[Fractal<E>], new: &[Fractal<E>]) -> Vec<Change<E>> {
     let mut changes = Vec::new();
     let max_len = old.len().max(new.len());
 

@@ -2,29 +2,59 @@
 use crate::encoding::Encode;
 
 #[cfg(feature = "git")]
-use crate::fragment::Fragment;
+use crate::fragment::{Fractal, Fragment};
 
 #[cfg(feature = "git")]
 use crate::witnessed::Witnessed;
 
+/// Read a git commit into its components: Witnessed metadata + tree OID.
+/// Works on any git commit, not just fragmentation-written ones.
+#[cfg(feature = "git")]
+pub fn read_commit(
+    repo: &git2::Repository,
+    oid: git2::Oid,
+) -> Result<(Witnessed, git2::Oid), Box<dyn std::error::Error>> {
+    use crate::witnessed::{Author, Committer, Message, Timestamp};
+
+    let commit = repo.find_commit(oid)?;
+    let author = Author(commit.author().name().unwrap_or("").to_string());
+    let committer = Committer(commit.committer().name().unwrap_or("").to_string());
+    let timestamp = Timestamp(commit.time().seconds().to_string());
+    let message = Message(commit.message().unwrap_or("").to_string());
+    let witnessed = Witnessed::new(author, committer, timestamp, message);
+    Ok((witnessed, commit.tree_id()))
+}
+
+/// Extract the signature from a signed commit, if present.
+/// Returns None for unsigned commits.
+#[cfg(feature = "git")]
+pub fn commit_signature(
+    repo: &git2::Repository,
+    oid: git2::Oid,
+) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
+    match repo.extract_signature(&oid, None) {
+        Ok((sig, _signed_data)) => Ok(Some(sig.to_vec())),
+        Err(e) if e.code() == git2::ErrorCode::NotFound => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
 /// Write a fragment tree to git objects. Returns the root OID.
-/// Shard -> blob, Fragment -> tree with .data + numbered children.
+/// Shard -> blob, Fractal -> tree with .data + numbered children.
 #[cfg(feature = "git")]
 pub fn write_tree<E: Encode>(
     repo: &git2::Repository,
-    fragment: &Fragment<E>,
+    fragment: &Fractal<E>,
 ) -> Result<git2::Oid, git2::Error> {
     match fragment {
-        Fragment::Shard { data, .. } => repo.blob(&data.encode()),
-        Fragment::Fractal {
-            data, fragments, ..
-        } => {
+        Fractal::Shard { data, .. } => repo.blob(&data.encode()),
+        Fractal::Fractal { data, fractal, .. } => {
             let mut builder = repo.treebuilder(None)?;
 
             let data_oid = repo.blob(&data.encode())?;
             builder.insert(".data", data_oid, 0o100644)?;
 
-            for (i, child) in fragments.iter().enumerate() {
+            for (i, child) in fractal.iter().enumerate() {
                 let child_oid = write_tree(repo, child)?;
                 let mode = if child.is_shard() { 0o100644 } else { 0o040000 };
                 builder.insert(format!("{:04}", i), child_oid, mode)?;
@@ -40,19 +70,19 @@ pub fn write_tree<E: Encode>(
 #[cfg(feature = "git")]
 pub fn write_commit<E: Encode>(
     repo: &git2::Repository,
-    fragment: &Fragment<E>,
+    fragment: &Fractal<E>,
     witnessed: &Witnessed,
     message: &str,
     parent: Option<&git2::Commit>,
 ) -> Result<git2::Oid, git2::Error> {
     let tree_oid = match fragment {
-        Fragment::Shard { .. } => {
+        Fractal::Shard { .. } => {
             let blob_oid = write_tree(repo, fragment)?;
             let mut builder = repo.treebuilder(None)?;
             builder.insert(".data", blob_oid, 0o100644)?;
             builder.write()?
         }
-        Fragment::Fractal { .. } => write_tree(repo, fragment)?,
+        Fractal::Fractal { .. } => write_tree(repo, fragment)?,
     };
     let tree = repo.find_tree(tree_oid)?;
 
@@ -69,13 +99,13 @@ pub fn write_commit<E: Encode>(
     repo.commit(None, &author, &committer, message, &tree, &parents)
 }
 
-/// Reconstruct a Fragment<String> from git objects.
-/// Blob -> Shard, Tree -> Fragment. Witness lives on the commit, not the tree.
+/// Reconstruct a Fractal<String> from git objects.
+/// Blob -> Shard, Tree -> Fractal. Witness lives on the commit, not the tree.
 #[cfg(feature = "git")]
 pub fn read_tree(
     repo: &git2::Repository,
     oid: git2::Oid,
-) -> Result<Fragment<String>, Box<dyn std::error::Error>> {
+) -> Result<Fractal<String>, Box<dyn std::error::Error>> {
     use crate::ref_::Ref;
     use crate::sha::Sha;
 
@@ -86,7 +116,7 @@ pub fn read_tree(
             let blob = repo.find_blob(oid)?;
             let data = std::str::from_utf8(blob.content())?.to_string();
             let ref_ = Ref::new(Sha(oid.to_string()), "self");
-            Ok(Fragment::shard(ref_, data))
+            Ok(Fractal::shard(ref_, data))
         }
         Some(git2::ObjectType::Tree) => {
             let tree = repo.find_tree(oid)?;
@@ -110,7 +140,7 @@ pub fn read_tree(
             }
 
             let ref_ = Ref::new(Sha(oid.to_string()), "self");
-            Ok(Fragment::fractal(ref_, data, children))
+            Ok(Fractal::new(ref_, data, children))
         }
         _ => Err(format!("unexpected object type for oid {}", oid).into()),
     }

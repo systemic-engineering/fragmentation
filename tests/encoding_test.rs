@@ -1,6 +1,6 @@
 use fragmentation::diff;
 use fragmentation::encoding;
-use fragmentation::fragment;
+use fragmentation::fragment::{self, Fragment};
 use fragmentation::store::Store;
 
 // ===========================================================================
@@ -53,7 +53,7 @@ fn encode_char_oid_is_blob_oid() {
 }
 
 // ===========================================================================
-// Round 2: Word -> Fragment of char Shards
+// Round 2: Word -> Fractal of char Shards
 // ===========================================================================
 
 #[test]
@@ -103,7 +103,7 @@ fn encode_word_oid_matches_content_oid() {
 }
 
 // ===========================================================================
-// Round 3: Paragraph -> Fragment of sentence Fragments
+// Round 3: Paragraph -> Fractal of sentence Fractals
 // ===========================================================================
 
 #[test]
@@ -153,7 +153,7 @@ fn encode_paragraph_filters_empty_words() {
 }
 
 // ===========================================================================
-// Round 3b: Sentence -> Fragment of word Fragments
+// Round 3b: Sentence -> Fractal of word Fractals
 // ===========================================================================
 
 #[test]
