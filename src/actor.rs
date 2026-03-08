@@ -2,7 +2,6 @@ use crate::encoding::{Decode, Encode};
 use crate::fragment::{Blob, Fractal};
 use crate::keys::{Encrypted, Keys, Local};
 use crate::visibility::Public;
-use crate::witnessed::Witnessed;
 
 /// Witness identity with encoding boundary.
 ///
@@ -100,23 +99,21 @@ impl<A, B, K: Keys> Actor<A, B, K> {
         self.keys.decrypt(encrypted)
     }
 
-    /// Produce a Witnessed record from this actor.
-    /// Author and Committer carry the actor's name and email.
-    /// Timestamp is current epoch seconds.
-    pub fn witness(&self, message: impl Into<String>) -> Witnessed {
-        use crate::witnessed::{Author, Committer, Message, Timestamp};
-        use std::time::{SystemTime, UNIX_EPOCH};
-
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock before UNIX epoch")
-            .as_secs();
-
-        Witnessed::new(
-            Author::new(&self.name, &self.email),
-            Committer::new(&self.name, &self.email),
-            Timestamp(now.to_string()),
-            Message(message.into()),
-        )
+    /// Write a draft to a git repository as this actor.
+    /// If no author is set on the draft, actor becomes both author and committer.
+    /// If authored, actor becomes committer only.
+    #[cfg(feature = "git")]
+    pub fn commit<E: crate::encoding::Encode>(
+        &self,
+        draft: crate::commit::Draft<E>,
+        repo: &git2::Repository,
+    ) -> Result<crate::commit::Commit<E>, git2::Error> {
+        use crate::witnessed::{Author, Committer};
+        let d = if draft.author().is_none() {
+            draft.authored(Author::new(&self.name, &self.email))
+        } else {
+            draft
+        };
+        d.write(repo, Committer::new(&self.name, &self.email))
     }
 }

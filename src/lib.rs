@@ -1,4 +1,5 @@
 pub mod actor;
+pub mod commit;
 pub mod diff;
 pub mod encoding;
 pub mod fragment;

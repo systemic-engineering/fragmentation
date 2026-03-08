@@ -1,6 +1,6 @@
 use std::convert::Infallible;
 
-use crate::fragment::{self, Fractal, Fragment};
+use crate::fragment::{self, Fractal, Fragmentable};
 use crate::ref_::Ref;
 use crate::sha;
 use crate::store::Store;

@@ -1,4 +1,4 @@
-use crate::fragment::Fragment;
+use crate::fragment::Fragmentable;
 
 /// What to do when visiting a fragment.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -10,13 +10,13 @@ pub enum Visitor<A> {
 }
 
 /// Collect all fragments in a tree, depth-first.
-pub fn collect<F: Fragment>(root: &F) -> Vec<&F> {
+pub fn collect<F: Fragmentable>(root: &F) -> Vec<&F> {
     let mut acc = Vec::new();
     do_collect(root, &mut acc);
     acc
 }
 
-fn do_collect<'a, F: Fragment>(frag: &'a F, acc: &mut Vec<&'a F>) {
+fn do_collect<'a, F: Fragmentable>(frag: &'a F, acc: &mut Vec<&'a F>) {
     acc.push(frag);
     for child in frag.children() {
         do_collect(child, acc);
@@ -24,11 +24,11 @@ fn do_collect<'a, F: Fragment>(frag: &'a F, acc: &mut Vec<&'a F>) {
 }
 
 /// Fold over all fragments in a tree, depth-first.
-pub fn fold<A, F: Fragment>(root: &F, acc: A, f: &dyn Fn(A, &F) -> Visitor<A>) -> A {
+pub fn fold<A, F: Fragmentable>(root: &F, acc: A, f: &dyn Fn(A, &F) -> Visitor<A>) -> A {
     do_fold(root, acc, f)
 }
 
-fn do_fold<A, F: Fragment>(frag: &F, acc: A, f: &dyn Fn(A, &F) -> Visitor<A>) -> A {
+fn do_fold<A, F: Fragmentable>(frag: &F, acc: A, f: &dyn Fn(A, &F) -> Visitor<A>) -> A {
     match f(acc, frag) {
         Visitor::Stop(result) => result,
         Visitor::Continue(result) => frag
@@ -39,7 +39,7 @@ fn do_fold<A, F: Fragment>(frag: &F, acc: A, f: &dyn Fn(A, &F) -> Visitor<A>) ->
 }
 
 /// Get the depth of a fragment tree.
-pub fn depth<F: Fragment>(root: &F) -> usize {
+pub fn depth<F: Fragmentable>(root: &F) -> usize {
     match root.children() {
         [] => 0,
         children => {
@@ -50,7 +50,7 @@ pub fn depth<F: Fragment>(root: &F) -> usize {
 }
 
 /// Find the first fragment matching a predicate, depth-first.
-pub fn find<'a, F: Fragment>(root: &'a F, predicate: &dyn Fn(&F) -> bool) -> Option<&'a F> {
+pub fn find<'a, F: Fragmentable>(root: &'a F, predicate: &dyn Fn(&F) -> bool) -> Option<&'a F> {
     if predicate(root) {
         return Some(root);
     }

@@ -1,14 +1,14 @@
 use crate::encoding::Encode;
-use crate::fragment::{self, Fractal, Fragment};
+use crate::fragment::{self, Fractal, Fragmentable};
 
 use crate::fragment::Blob;
 
 /// A change between two fragment trees.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Change<E = Blob> {
-    /// Fragment exists only in the new tree.
+    /// Fragmentable exists only in the new tree.
     Added(Fractal<E>),
-    /// Fragment exists only in the old tree.
+    /// Fragmentable exists only in the old tree.
     Removed(Fractal<E>),
     /// Same position, different content.
     Modified { old: Fractal<E>, new: Fractal<E> },

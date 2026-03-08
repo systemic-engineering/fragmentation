@@ -1,5 +1,5 @@
 use fragmentation::diff::{self, Change};
-use fragmentation::fragment::{self, Fractal, Fragment};
+use fragmentation::fragment::{self, Fractal, Fragmentable};
 use fragmentation::ref_::Ref;
 use fragmentation::sha;
 use fragmentation::store::Store;
@@ -79,7 +79,7 @@ fn ref_construction() {
 }
 
 // ===========================================================================
-// Witnessed value types (type stays, just not on Fragment)
+// Witnessed value types (type stays, just not on Fragmentable)
 // ===========================================================================
 
 #[test]
@@ -114,7 +114,6 @@ fn witnessed_construction() {
         Author::new("alex", "alex@systemic.engineer"),
         Committer::new("reed", "reed@systemic.engineer"),
         Timestamp("2026-03-01T00:00:00Z".into()),
-        Message("initial".into()),
     );
     assert_eq!(w.author, Author::new("alex", "alex@systemic.engineer"));
     assert_eq!(
@@ -122,11 +121,10 @@ fn witnessed_construction() {
         Committer::new("reed", "reed@systemic.engineer")
     );
     assert_eq!(w.timestamp, Timestamp("2026-03-01T00:00:00Z".into()));
-    assert_eq!(w.message, Message("initial".into()));
 }
 
 // ===========================================================================
-// Fragment construction
+// Fragmentable construction
 // ===========================================================================
 
 #[test]

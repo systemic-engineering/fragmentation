@@ -1,6 +1,6 @@
 use fragmentation::diff;
 use fragmentation::encoding;
-use fragmentation::fragment::{self, Fragment};
+use fragmentation::fragment::{self, Fragmentable};
 use fragmentation::store::Store;
 
 // ===========================================================================

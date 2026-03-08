@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::fragment::{Blob, Fractal, Fragment};
+use crate::fragment::{Blob, Fractal, Fragmentable};
 use crate::sha::Sha;
 
 /// Content-addressed fragment store.

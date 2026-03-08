@@ -1,6 +1,6 @@
 use fragmentation::actor::Actor;
 use fragmentation::encoding::{Decode, Encode};
-use fragmentation::fragment::{self, Blob, Fractal, Fragment};
+use fragmentation::fragment::{self, Blob, Fractal, Fragmentable};
 use fragmentation::keys::{Keys, Local, PlainKeys};
 use fragmentation::ref_::Ref;
 use fragmentation::sha;
@@ -550,98 +550,23 @@ mod from_repo_tests {
 }
 
 // ===========================================================================
-// Actor::witness — produce Witnessed from Actor identity
+// Public<K, Commit<E>> — signed commit type is expressible
 // ===========================================================================
 
+/// Public<K, T: Draftable> implements Draftable — signed commits are draftable things.
 #[test]
-fn actor_witness_author_name() {
+fn public_commit_implements_draftable() {
+    use fragmentation::commit::{Draft, Draftable};
     let actor = Actor::identity("mara", "mara@systemic.engineer");
-    let witnessed = actor.witness("test message");
-    assert_eq!(witnessed.author.name, "mara");
-}
+    let shard = make_blob_shard(vec![1, 2, 3]);
+    let draft = Draft::root("signed observation", shard);
+    let public: Public<Local, Draft<Blob>> = Public::new(draft, vec![], actor.keys().clone());
 
-#[test]
-fn actor_witness_author_email() {
-    let actor = Actor::identity("mara", "mara@systemic.engineer");
-    let witnessed = actor.witness("test message");
-    assert_eq!(witnessed.author.email, "mara@systemic.engineer");
-}
+    // Compile-time proof: Public<K, Draft<E>> implements Draftable
+    fn accepts_draftable<T: Draftable>(_d: &T) {}
+    accepts_draftable(&public);
 
-#[test]
-fn actor_witness_committer_name() {
-    let actor = Actor::identity("mara", "mara@systemic.engineer");
-    let witnessed = actor.witness("test message");
-    assert_eq!(witnessed.committer.name, "mara");
-}
-
-#[test]
-fn actor_witness_committer_email() {
-    let actor = Actor::identity("mara", "mara@systemic.engineer");
-    let witnessed = actor.witness("test message");
-    assert_eq!(witnessed.committer.email, "mara@systemic.engineer");
-}
-
-#[test]
-fn actor_witness_message() {
-    let actor = Actor::identity("mara", "mara@systemic.engineer");
-    let witnessed = actor.witness("the observation");
-    assert_eq!(witnessed.message.0, "the observation");
-}
-
-#[test]
-fn actor_witness_timestamp_is_epoch_seconds() {
-    let actor = Actor::identity("mara", "mara@systemic.engineer");
-    let witnessed = actor.witness("timestamp test");
-    // Timestamp should be parseable as an integer (epoch seconds)
-    let parsed: Result<i64, _> = witnessed.timestamp.0.parse();
-    assert!(
-        parsed.is_ok(),
-        "timestamp should be epoch seconds, got: {}",
-        witnessed.timestamp.0
-    );
-    // Should be a reasonable epoch (after 2020 = 1577836800)
-    assert!(parsed.unwrap() > 1577836800, "timestamp should be recent");
-}
-
-#[test]
-fn actor_witness_message_from_string() {
-    let actor = Actor::identity("reed", "reed@systemic.engineer");
-    let msg = String::from("owned message");
-    let witnessed = actor.witness(msg);
-    assert_eq!(witnessed.message.0, "owned message");
-}
-
-#[test]
-fn actor_witness_different_actors_different_authors() {
-    let mara = Actor::identity("mara", "mara@systemic.engineer");
-    let reed = Actor::identity("reed", "reed@systemic.engineer");
-    let w1 = mara.witness("same message");
-    let w2 = reed.witness("same message");
-    assert_ne!(w1.author, w2.author);
-    assert_ne!(w1.committer, w2.committer);
-}
-
-#[test]
-fn actor_witness_custom_keys() {
-    let actor: Actor<Blob, Blob, PlainKeys> = Actor::new(
-        "keyed",
-        "keyed@test",
-        |f| f.clone(),
-        |f| f.clone(),
-        PlainKeys,
-    );
-    let witnessed = actor.witness("custom keys witness");
-    assert_eq!(witnessed.author.name, "keyed");
-    assert_eq!(witnessed.author.email, "keyed@test");
-}
-
-/// Public<K, Witnessed> is expressible as a type.
-/// The Actor's key wraps a Witnessed record, proving the type composes.
-#[test]
-fn public_witnessed_type_expressible() {
-    let actor = Actor::identity("mara", "mara@systemic.engineer");
-    let witnessed = actor.witness("signed observation");
-    let public: Public<Local, fragmentation::witnessed::Witnessed> =
-        Public::new(witnessed, vec![], actor.keys().clone());
     assert_eq!(public.key(), &Local::None);
+    assert_eq!(public.message().0, "signed observation");
+    assert!(public.parent().is_none());
 }

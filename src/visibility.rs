@@ -1,5 +1,5 @@
 use crate::encoding::{Decode, Encode};
-use crate::fragment::{Fractal, Fragment};
+use crate::fragment::{Fractal, Fragmentable};
 use crate::keys::{Encrypted, Keys};
 use crate::ref_::Ref;
 
@@ -37,7 +37,7 @@ impl<K, T> Public<K, T> {
     }
 }
 
-impl<K, T: Fragment> Fragment for Public<K, T> {
+impl<K, T: Fragmentable> Fragmentable for Public<K, T> {
     type Data = T::Data;
 
     fn self_ref(&self) -> &Ref {
@@ -96,7 +96,7 @@ impl<K: Keys> Protected<K> {
     }
 }
 
-impl<K> Fragment for Protected<K> {
+impl<K> Fragmentable for Protected<K> {
     type Data = Vec<u8>;
 
     fn self_ref(&self) -> &Ref {
@@ -128,7 +128,7 @@ impl<K> Private<K> {
         &self.key
     }
 
-    pub fn seal<T: Fragment>(fragment: &T, key: K) -> Self {
+    pub fn seal<T: Fragmentable>(fragment: &T, key: K) -> Self {
         Private {
             ref_: fragment.self_ref().clone(),
             key,
@@ -136,7 +136,23 @@ impl<K> Private<K> {
     }
 }
 
-impl<K> Fragment for Private<K> {
+impl<K, T: crate::commit::Draftable> crate::commit::Draftable for Public<K, T> {
+    type Element = T::Element;
+
+    fn fractal(&self) -> &Fractal<Self::Element> {
+        self.inner.fractal()
+    }
+
+    fn message(&self) -> &crate::witnessed::Message {
+        self.inner.message()
+    }
+
+    fn parent(&self) -> Option<&crate::commit::Parent> {
+        self.inner.parent()
+    }
+}
+
+impl<K> Fragmentable for Private<K> {
     type Data = ();
 
     fn self_ref(&self) -> &Ref {

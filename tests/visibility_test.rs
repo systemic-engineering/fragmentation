@@ -1,4 +1,4 @@
-use fragmentation::fragment::{self, Fractal, Fragment};
+use fragmentation::fragment::{self, Fractal, Fragmentable};
 use fragmentation::keys::PlainKeys;
 use fragmentation::ref_::Ref;
 use fragmentation::sha;
