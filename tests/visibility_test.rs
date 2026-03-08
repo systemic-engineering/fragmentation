@@ -246,3 +246,45 @@ fn sha_accessible_from_all_three() {
     assert_eq!(protected.self_ref().sha, sha);
     assert_eq!(private.self_ref().sha, sha);
 }
+
+// ===========================================================================
+// Mixed-visibility integration
+// ===========================================================================
+
+/// A tree where each child is wrapped in a different visibility level.
+/// The SHA from the original fragment is accessible from all three wrappers.
+#[test]
+fn mixed_visibility_children_preserve_sha() {
+    todo!("SHA accessible from Public, Protected, Private wrappers")
+}
+
+/// Merkle property: wrapping children in different visibility levels doesn't
+/// change their SHAs, because visibility delegates self_ref to the stored ref.
+/// The parent's SHA incorporates child SHAs directly.
+#[test]
+fn merkle_stability_across_visibility_boundaries() {
+    todo!("child SHAs unchanged by wrapping; parent SHA stable")
+}
+
+/// walk::collect on each visibility wrapper returns exactly 1 (terminal),
+/// proving the visibility boundary stops traversal even when the inner
+/// fragment has children.
+#[test]
+fn walk_collect_stops_at_visibility_boundary() {
+    todo!("visibility wrappers are terminal — walk stops")
+}
+
+/// Protected::wrap preserves the original ref on the wrapper.
+/// unlock recovers the data content, and the wrapper's self_ref
+/// matches the original fragment's ref throughout.
+#[test]
+fn protected_wrap_unlock_roundtrip_preserves_ref_and_data() {
+    todo!("Protected wrap/unlock round-trip preserves ref and data")
+}
+
+/// A "mixed bag": refs collected from Public, Protected, Private wrappers
+/// all match the original children's refs.
+#[test]
+fn mixed_bag_refs_match_originals() {
+    todo!("mixed bag of visibility wrappers all preserve original refs")
+}
