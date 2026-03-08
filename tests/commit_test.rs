@@ -1,5 +1,5 @@
-use fragmentation::commit::Commit;
-use fragmentation::fragment::{self, Fractal, Fragment};
+use fragmentation::commit::{Draft, Draftable, Parent};
+use fragmentation::fragment::{self, Fractal, Fragmentable};
 use fragmentation::ref_::Ref;
 use fragmentation::sha;
 use fragmentation::witnessed::Author;
@@ -10,91 +10,140 @@ fn make_shard(data: &str) -> Fractal<String> {
 }
 
 // ===========================================================================
-// Construction
+// Parent
 // ===========================================================================
 
 #[test]
-fn commit_root_construction() {
+fn parent_construction() {
+    let parent = Parent(sha::Sha("abc123".into()));
+    assert_eq!(parent.0, sha::Sha("abc123".into()));
+}
+
+#[test]
+fn parent_clone() {
+    let parent = Parent(sha::Sha("abc".into()));
+    let cloned = parent.clone();
+    assert_eq!(parent, cloned);
+}
+
+// ===========================================================================
+// Draft construction
+// ===========================================================================
+
+#[test]
+fn draft_root_construction() {
     let shard = make_shard("hello");
-    let commit = Commit::root("initial", shard);
-    assert_eq!(commit.message().0, "initial");
-    assert!(commit.parent().is_none());
-    assert!(commit.sha().is_none());
+    let draft = Draft::root("initial", shard);
+    assert_eq!(draft.message().0, "initial");
+    assert!(draft.parent().is_none());
+    assert!(draft.author().is_none());
 }
 
 #[test]
-fn commit_with_parent() {
+fn draft_with_parent() {
     let shard = make_shard("data");
-    let parent = sha::Sha("abc123".into());
-    let commit = Commit::new("child commit", shard, parent.clone());
-    assert_eq!(commit.parent(), Some(&parent));
+    let parent = Parent(sha::Sha("abc123".into()));
+    let draft = Draft::new("child commit", shard, parent.clone());
+    assert_eq!(draft.parent(), Some(&parent));
 }
 
 #[test]
-fn commit_fractal_accessor() {
+fn draft_fractal_accessor() {
     let shard = make_shard("payload");
-    let commit = Commit::root("test", shard);
-    assert_eq!(commit.fractal().data(), "payload");
+    let draft = Draft::root("test", shard);
+    assert_eq!(draft.fractal().data(), "payload");
 }
 
 #[test]
-fn commit_message_accessor() {
+fn draft_message_accessor() {
     let shard = make_shard("x");
-    let commit = Commit::root("the message", shard);
-    assert_eq!(commit.message().0, "the message");
+    let draft = Draft::root("the message", shard);
+    assert_eq!(draft.message().0, "the message");
 }
 
 #[test]
-fn commit_witnessed_empty_by_default() {
-    let shard = make_shard("x");
-    let commit = Commit::root("test", shard);
-    assert_eq!(commit.witnessed().author.name, "");
-    assert_eq!(commit.witnessed().committer.name, "");
-}
-
-#[test]
-fn commit_message_from_string() {
+fn draft_message_from_string() {
     let msg = String::from("owned message");
-    let commit = Commit::root(msg, make_shard("x"));
-    assert_eq!(commit.message().0, "owned message");
+    let draft = Draft::root(msg, make_shard("x"));
+    assert_eq!(draft.message().0, "owned message");
 }
 
 // ===========================================================================
-// authored()
+// Draft::authored()
 // ===========================================================================
 
 #[test]
 fn authored_stamps_name() {
-    let commit = Commit::root("test", make_shard("x"))
+    let draft = Draft::root("test", make_shard("x"))
         .authored(Author::new("mara", "mara@systemic.engineer"));
-    assert_eq!(commit.witnessed().author.name, "mara");
+    assert_eq!(draft.author().unwrap().name, "mara");
 }
 
 #[test]
 fn authored_stamps_email() {
-    let commit = Commit::root("test", make_shard("x"))
+    let draft = Draft::root("test", make_shard("x"))
         .authored(Author::new("mara", "mara@systemic.engineer"));
-    assert_eq!(commit.witnessed().author.email, "mara@systemic.engineer");
+    assert_eq!(draft.author().unwrap().email, "mara@systemic.engineer");
 }
 
 #[test]
 fn authored_preserves_message() {
-    let commit = Commit::root("preserved", make_shard("x"))
+    let draft = Draft::root("preserved", make_shard("x"))
         .authored(Author::new("mara", "mara@systemic.engineer"));
-    assert_eq!(commit.message().0, "preserved");
+    assert_eq!(draft.message().0, "preserved");
 }
 
 #[test]
 fn authored_preserves_fractal() {
-    let commit = Commit::root("test", make_shard("payload"))
+    let draft = Draft::root("test", make_shard("payload"))
         .authored(Author::new("mara", "mara@systemic.engineer"));
-    assert_eq!(commit.fractal().data(), "payload");
+    assert_eq!(draft.fractal().data(), "payload");
 }
 
 #[test]
 fn authored_preserves_parent() {
-    let parent = sha::Sha("parent123".into());
-    let commit = Commit::new("test", make_shard("x"), parent.clone())
+    let parent = Parent(sha::Sha("parent123".into()));
+    let draft = Draft::new("test", make_shard("x"), parent.clone())
         .authored(Author::new("mara", "mara@systemic.engineer"));
-    assert_eq!(commit.parent(), Some(&parent));
+    assert_eq!(draft.parent(), Some(&parent));
+}
+
+// ===========================================================================
+// Draftable trait
+// ===========================================================================
+
+#[test]
+fn draft_implements_draftable() {
+    let draft = Draft::root("test", make_shard("x"));
+    fn accepts_draftable<T: Draftable>(_d: &T) {}
+    accepts_draftable(&draft);
+}
+
+#[test]
+fn draftable_fractal() {
+    let draft = Draft::root("test", make_shard("payload"));
+    let d: &dyn Draftable<Element = String> = &draft;
+    assert_eq!(d.fractal().data(), "payload");
+}
+
+#[test]
+fn draftable_message() {
+    let draft = Draft::root("the msg", make_shard("x"));
+    let d: &dyn Draftable<Element = String> = &draft;
+    assert_eq!(d.message().0, "the msg");
+}
+
+#[test]
+fn draftable_parent_none() {
+    let draft = Draft::root("test", make_shard("x"));
+    let d: &dyn Draftable<Element = String> = &draft;
+    assert!(d.parent().is_none());
+}
+
+#[test]
+fn draftable_parent_some() {
+    let parent = Parent(sha::Sha("abc".into()));
+    let draft = Draft::new("test", make_shard("x"), parent.clone());
+    let d: &dyn Draftable<Element = String> = &draft;
+    assert_eq!(d.parent(), Some(&parent));
 }

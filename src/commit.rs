@@ -1,129 +1,153 @@
 use crate::fragment::Fractal;
 use crate::sha::Sha;
-use crate::witnessed::{Author, Committer, Message, Timestamp, Witnessed};
+use crate::witnessed::{Author, Committer, Message, Witnessed};
 
-/// The atomic unit. A fractal committed with witness metadata.
-///
-/// Two potentially different actors: Alice writes the patch (Author),
-/// Bob applies it (Committer). The Message is on the Commit, not the
-/// Witnessed — it's what happened, not who was there.
+/// Typed reference to a parent commit. Not a raw SHA — a graph edge.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Commit<E> {
-    fractal: Fractal<E>,
-    witnessed: Witnessed,
-    message: Message,
-    parent: Option<Sha>,
-    sha: Option<Sha>,
+pub struct Parent(pub Sha);
+
+/// The commit graph interface. Draft and Commit both implement this.
+/// A signed commit (Public<K, T: Draftable>) also implements it.
+pub trait Draftable {
+    type Element;
+    fn fractal(&self) -> &Fractal<Self::Element>;
+    fn message(&self) -> &Message;
+    fn parent(&self) -> Option<&Parent>;
 }
 
-impl<E> Commit<E> {
-    /// Create a commit with a parent.
-    pub fn new(message: impl Into<String>, fractal: Fractal<E>, parent: Sha) -> Self {
-        Commit {
-            fractal,
-            witnessed: Witnessed::empty(),
-            message: Message(message.into()),
-            parent: Some(parent),
-            sha: None,
-        }
+/// A commit before it has been written to git.
+/// Has content and intent, but no SHA and no witnessed metadata.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Draft<E> {
+    fractal: Fractal<E>,
+    message: Message,
+    parent: Option<Parent>,
+    author: Option<Author>,
+}
+
+/// A commit that has been written to git.
+/// Root has no parent. Child has a parent. The enum discriminant carries the distinction.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Commit<E> {
+    /// Terminal in the commit graph. No parent.
+    Root {
+        fractal: Fractal<E>,
+        witnessed: Witnessed,
+        message: Message,
+        sha: Sha,
+    },
+    /// Has a parent. Always.
+    Child {
+        fractal: Fractal<E>,
+        witnessed: Witnessed,
+        message: Message,
+        parent: Parent,
+        sha: Sha,
+    },
+}
+
+impl<E> Draft<E> {
+    /// Create a root draft (no parent).
+    pub fn root(message: impl Into<String>, fractal: Fractal<E>) -> Self {
+        todo!()
     }
 
-    /// Create a root commit (no parent).
-    pub fn root(message: impl Into<String>, fractal: Fractal<E>) -> Self {
-        Commit {
-            fractal,
-            witnessed: Witnessed::empty(),
-            message: Message(message.into()),
-            parent: None,
-            sha: None,
-        }
+    /// Create a draft with a parent.
+    pub fn new(message: impl Into<String>, fractal: Fractal<E>, parent: Parent) -> Self {
+        todo!()
     }
 
     /// Stamp the Author.
     pub fn authored(mut self, author: Author) -> Self {
-        self.witnessed.author = author;
-        self
+        todo!()
     }
 
-    /// Create a child commit. Requires this commit to have been written (has SHA).
-    pub fn child(&self, message: impl Into<String>, fractal: Fractal<E>) -> Commit<E> {
-        let sha = self
-            .sha
-            .as_ref()
-            .expect("cannot create child of unwritten commit");
-        Commit {
-            fractal,
-            witnessed: Witnessed::empty(),
-            message: Message(message.into()),
-            parent: Some(sha.clone()),
-            sha: None,
-        }
+    /// The author, if set.
+    pub fn author(&self) -> Option<&Author> {
+        todo!()
     }
 
-    /// Write this commit to a git repository.
-    /// Stamps committer and timestamp, returns Self with SHA populated.
+    /// Write this draft to a git repository.
+    /// Returns a Commit (Root or Child) with SHA and witnessed metadata.
     #[cfg(feature = "git")]
     pub fn write(
-        mut self,
+        self,
         repo: &git2::Repository,
         committer: Committer,
-    ) -> Result<Self, git2::Error>
+    ) -> Result<Commit<E>, git2::Error>
     where
         E: crate::encoding::Encode,
     {
-        self.witnessed.committer = committer;
-        if self.witnessed.author.name.is_empty() {
-            self.witnessed.author = Author::new(
-                &self.witnessed.committer.name,
-                &self.witnessed.committer.email,
-            );
-        }
-        let oid = crate::git::write_commit(repo, &self)?;
-        let git_commit = repo.find_commit(oid)?;
-        self.witnessed.timestamp = Timestamp(git_commit.time().seconds().to_string());
-        self.sha = Some(Sha(oid.to_string()));
-        Ok(self)
+        todo!()
+    }
+}
+
+impl<E> Draftable for Draft<E> {
+    type Element = E;
+
+    fn fractal(&self) -> &Fractal<E> {
+        todo!()
     }
 
-    /// The fractal tree this commit captures.
-    pub fn fractal(&self) -> &Fractal<E> {
-        &self.fractal
+    fn message(&self) -> &Message {
+        todo!()
+    }
+
+    fn parent(&self) -> Option<&Parent> {
+        todo!()
+    }
+}
+
+impl<E> Commit<E> {
+    /// This commit's SHA.
+    pub fn sha(&self) -> &Sha {
+        todo!()
     }
 
     /// Witness metadata: author, committer, timestamp.
     pub fn witnessed(&self) -> &Witnessed {
-        &self.witnessed
+        todo!()
     }
 
-    /// The commit message.
-    pub fn message(&self) -> &Message {
-        &self.message
+    /// Create a child draft from this commit.
+    pub fn child(&self, message: impl Into<String>, fractal: Fractal<E>) -> Draft<E> {
+        todo!()
     }
 
-    /// Parent commit SHA, if any.
-    pub fn parent(&self) -> Option<&Sha> {
-        self.parent.as_ref()
-    }
-
-    /// This commit's SHA, if written.
-    pub fn sha(&self) -> Option<&Sha> {
-        self.sha.as_ref()
-    }
-
-    /// Construct with full metadata (used by read_commit).
-    pub(crate) fn full(
+    /// Construct a Root with full metadata (used by read_commit).
+    pub(crate) fn full_root(
         fractal: Fractal<E>,
         witnessed: Witnessed,
         message: Message,
-        parent: Option<Sha>,
         sha: Sha,
     ) -> Self {
-        Commit {
-            fractal,
-            witnessed,
-            message,
-            parent,
-            sha: Some(sha),
-        }
+        todo!()
+    }
+
+    /// Construct a Child with full metadata (used by read_commit).
+    pub(crate) fn full_child(
+        fractal: Fractal<E>,
+        witnessed: Witnessed,
+        message: Message,
+        parent: Parent,
+        sha: Sha,
+    ) -> Self {
+        todo!()
+    }
+}
+
+impl<E> Draftable for Commit<E> {
+    type Element = E;
+
+    fn fractal(&self) -> &Fractal<E> {
+        todo!()
+    }
+
+    fn message(&self) -> &Message {
+        todo!()
+    }
+
+    fn parent(&self) -> Option<&Parent> {
+        todo!()
     }
 }

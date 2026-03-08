@@ -1,4 +1,4 @@
-use fragmentation::fragment::{self, Fractal, Fragment};
+use fragmentation::fragment::{self, Fractal, Fragmentable};
 use fragmentation::ref_::Ref;
 use fragmentation::sha;
 
@@ -109,7 +109,7 @@ fn tree_oid_children_order_matters() {
 mod git_native {
     use super::*;
     use fragmentation::actor::Actor;
-    use fragmentation::commit::Commit;
+    use fragmentation::commit::{Commit, Draft, Draftable};
     use fragmentation::git;
     use fragmentation::witnessed::{Author, Committer};
 
@@ -180,17 +180,17 @@ mod git_native {
     }
 
     // =================================================================
-    // Commit::write — low-level API
+    // Draft::write — low-level API
     // =================================================================
 
     #[test]
     fn write_carries_metadata() {
         let (_dir, repo) = init_repo();
-        let c = Commit::root("test commit", make_shard("committed"))
+        let c = Draft::root("test commit", make_shard("committed"))
             .authored(Author::new("alex", "alex@systemic.engineer"))
             .write(&repo, Committer::new("reed", "reed@systemic.engineer"))
             .unwrap();
-        let git_oid = git2::Oid::from_str(&c.sha().unwrap().0).unwrap();
+        let git_oid = git2::Oid::from_str(&c.sha().0).unwrap();
         let git_commit = repo.find_commit(git_oid).unwrap();
         assert_eq!(git_commit.author().name(), Some("alex"));
         assert_eq!(git_commit.committer().name(), Some("reed"));
@@ -200,17 +200,16 @@ mod git_native {
     #[test]
     fn write_sets_sha() {
         let (_dir, repo) = init_repo();
-        let c = Commit::root("test", make_shard("x"))
+        let c = Draft::root("test", make_shard("x"))
             .write(&repo, Committer::new("test", "test@test"))
             .unwrap();
-        assert!(c.sha().is_some());
-        assert_eq!(c.sha().unwrap().0.len(), 40);
+        assert_eq!(c.sha().0.len(), 40);
     }
 
     #[test]
     fn write_sets_timestamp() {
         let (_dir, repo) = init_repo();
-        let c = Commit::root("test", make_shard("x"))
+        let c = Draft::root("test", make_shard("x"))
             .write(&repo, Committer::new("test", "test@test"))
             .unwrap();
         let ts: Result<i64, _> = c.witnessed().timestamp.0.parse();
@@ -221,7 +220,7 @@ mod git_native {
     #[test]
     fn write_default_author_from_committer() {
         let (_dir, repo) = init_repo();
-        let c = Commit::root("test", make_shard("x"))
+        let c = Draft::root("test", make_shard("x"))
             .write(&repo, Committer::new("mara", "mara@systemic.engineer"))
             .unwrap();
         assert_eq!(c.witnessed().author.name, "mara");
@@ -232,11 +231,11 @@ mod git_native {
     #[test]
     fn write_uses_email() {
         let (_dir, repo) = init_repo();
-        let c = Commit::root("email commit", make_shard("email-test"))
+        let c = Draft::root("email commit", make_shard("email-test"))
             .authored(Author::new("mara", "mara@systemic.engineer"))
             .write(&repo, Committer::new("mara", "mara@systemic.engineer"))
             .unwrap();
-        let git_oid = git2::Oid::from_str(&c.sha().unwrap().0).unwrap();
+        let git_oid = git2::Oid::from_str(&c.sha().0).unwrap();
         let git_commit = repo.find_commit(git_oid).unwrap();
         assert_eq!(git_commit.author().email(), Some("mara@systemic.engineer"));
         assert_eq!(
@@ -248,16 +247,45 @@ mod git_native {
     #[test]
     fn write_different_author_committer() {
         let (_dir, repo) = init_repo();
-        let c = Commit::root("split commit", make_shard("split-identity"))
+        let c = Draft::root("split commit", make_shard("split-identity"))
             .authored(Author::new("alex", "alex@example.com"))
             .write(&repo, Committer::new("reed", "reed@example.com"))
             .unwrap();
-        let git_oid = git2::Oid::from_str(&c.sha().unwrap().0).unwrap();
+        let git_oid = git2::Oid::from_str(&c.sha().0).unwrap();
         let git_commit = repo.find_commit(git_oid).unwrap();
         assert_eq!(git_commit.author().name(), Some("alex"));
         assert_eq!(git_commit.author().email(), Some("alex@example.com"));
         assert_eq!(git_commit.committer().name(), Some("reed"));
         assert_eq!(git_commit.committer().email(), Some("reed@example.com"));
+    }
+
+    // =================================================================
+    // Commit::Root vs Commit::Child
+    // =================================================================
+
+    #[test]
+    fn write_root_has_no_parent() {
+        let (_dir, repo) = init_repo();
+        let c = Draft::root("root", make_shard("x"))
+            .write(&repo, Committer::new("test", "test@test"))
+            .unwrap();
+        assert!(matches!(c, Commit::Root { .. }));
+        assert!(c.parent().is_none());
+    }
+
+    #[test]
+    fn write_child_has_parent() {
+        let (_dir, repo) = init_repo();
+        let committer = Committer::new("test", "test@test");
+        let c1 = Draft::root("first", make_shard("first"))
+            .write(&repo, committer.clone())
+            .unwrap();
+        let c2 = c1
+            .child("second", make_shard("second"))
+            .write(&repo, committer)
+            .unwrap();
+        assert!(matches!(c2, Commit::Child { .. }));
+        assert!(c2.parent().is_some());
     }
 
     // =================================================================
@@ -269,7 +297,7 @@ mod git_native {
         let (_dir, repo) = init_repo();
         let committer = Committer::new("test", "test@test");
 
-        let c1 = Commit::root("first commit", make_shard("first"))
+        let c1 = Draft::root("first commit", make_shard("first"))
             .write(&repo, committer.clone())
             .unwrap();
 
@@ -278,8 +306,8 @@ mod git_native {
             .write(&repo, committer)
             .unwrap();
 
-        let oid1 = git2::Oid::from_str(&c1.sha().unwrap().0).unwrap();
-        let oid2 = git2::Oid::from_str(&c2.sha().unwrap().0).unwrap();
+        let oid1 = git2::Oid::from_str(&c1.sha().0).unwrap();
+        let oid2 = git2::Oid::from_str(&c2.sha().0).unwrap();
         let git_commit2 = repo.find_commit(oid2).unwrap();
         assert_eq!(git_commit2.parent_count(), 1);
         assert_eq!(git_commit2.parent_id(0).unwrap(), oid1);
@@ -288,7 +316,7 @@ mod git_native {
     #[test]
     fn child_preserves_authored() {
         let (_dir, repo) = init_repo();
-        let c1 = Commit::root("first", make_shard("first"))
+        let c1 = Draft::root("first", make_shard("first"))
             .authored(Author::new("alex", "alex@example.com"))
             .write(&repo, Committer::new("reed", "reed@example.com"))
             .unwrap();
@@ -296,8 +324,8 @@ mod git_native {
         let c2 = c1
             .child("second", make_shard("second"))
             .authored(Author::new("mara", "mara@systemic.engineer"));
-        assert_eq!(c2.witnessed().author.name, "mara");
-        assert_eq!(c2.parent(), Some(c1.sha().unwrap()));
+        assert_eq!(c2.author().unwrap().name, "mara");
+        assert_eq!(c2.parent().unwrap().0, *c1.sha());
     }
 
     // =================================================================
@@ -309,24 +337,83 @@ mod git_native {
         let (_dir, repo) = init_repo();
         let actor = Actor::identity("mara", "mara@systemic.engineer");
         let c = actor
-            .commit(Commit::root("test", make_shard("x")), &repo)
+            .commit(Draft::root("test", make_shard("x")), &repo)
             .unwrap();
         assert_eq!(c.witnessed().author.name, "mara");
         assert_eq!(c.witnessed().committer.name, "mara");
         assert_eq!(c.witnessed().author.email, "mara@systemic.engineer");
         assert_eq!(c.witnessed().committer.email, "mara@systemic.engineer");
-        assert!(c.sha().is_some());
     }
 
     #[test]
     fn actor_commit_preserves_authored() {
         let (_dir, repo) = init_repo();
         let reed = Actor::identity("reed", "reed@systemic.engineer");
-        let c = Commit::root("test", make_shard("x"))
+        let d = Draft::root("test", make_shard("x"))
             .authored(Author::new("alex", "alex@systemic.engineer"));
-        let c = reed.commit(c, &repo).unwrap();
+        let c = reed.commit(d, &repo).unwrap();
         assert_eq!(c.witnessed().author.name, "alex");
         assert_eq!(c.witnessed().committer.name, "reed");
+    }
+
+    // =================================================================
+    // Draftable for Commit
+    // =================================================================
+
+    #[test]
+    fn commit_implements_draftable() {
+        let (_dir, repo) = init_repo();
+        let c = Draft::root("test", make_shard("x"))
+            .write(&repo, Committer::new("test", "test@test"))
+            .unwrap();
+        fn accepts_draftable<T: Draftable>(_d: &T) {}
+        accepts_draftable(&c);
+    }
+
+    #[test]
+    fn commit_draftable_fractal() {
+        let (_dir, repo) = init_repo();
+        let c = Draft::root("test", make_shard("payload"))
+            .write(&repo, Committer::new("test", "test@test"))
+            .unwrap();
+        let d: &dyn Draftable<Element = String> = &c;
+        assert_eq!(d.fractal().data(), "payload");
+    }
+
+    #[test]
+    fn commit_draftable_message() {
+        let (_dir, repo) = init_repo();
+        let c = Draft::root("the msg", make_shard("x"))
+            .write(&repo, Committer::new("test", "test@test"))
+            .unwrap();
+        let d: &dyn Draftable<Element = String> = &c;
+        assert_eq!(d.message().0, "the msg");
+    }
+
+    #[test]
+    fn commit_root_draftable_parent_none() {
+        let (_dir, repo) = init_repo();
+        let c = Draft::root("test", make_shard("x"))
+            .write(&repo, Committer::new("test", "test@test"))
+            .unwrap();
+        let d: &dyn Draftable<Element = String> = &c;
+        assert!(d.parent().is_none());
+    }
+
+    #[test]
+    fn commit_child_draftable_parent_some() {
+        let (_dir, repo) = init_repo();
+        let committer = Committer::new("test", "test@test");
+        let c1 = Draft::root("first", make_shard("first"))
+            .write(&repo, committer.clone())
+            .unwrap();
+        let c2 = c1
+            .child("second", make_shard("second"))
+            .write(&repo, committer)
+            .unwrap();
+        let d: &dyn Draftable<Element = String> = &c2;
+        assert!(d.parent().is_some());
+        assert_eq!(d.parent().unwrap().0, *c1.sha());
     }
 
     // =================================================================
@@ -418,13 +505,12 @@ mod git_native {
     #[test]
     fn read_commit_roundtrip() {
         let (_dir, repo) = init_repo();
-        let c = Commit::root("roundtrip test", make_shard("roundtrip-commit"))
+        let c = Draft::root("roundtrip test", make_shard("roundtrip-commit"))
             .authored(Author::new("mara", "mara@systemic.engineer"))
             .write(&repo, Committer::new("mara", "mara@systemic.engineer"))
             .unwrap();
 
-        let recovered =
-            git::read_commit(&repo, git2::Oid::from_str(&c.sha().unwrap().0).unwrap()).unwrap();
+        let recovered = git::read_commit(&repo, git2::Oid::from_str(&c.sha().0).unwrap()).unwrap();
         assert_eq!(recovered.witnessed().author.name, "mara");
         assert_eq!(recovered.witnessed().author.email, "mara@systemic.engineer");
         assert_eq!(recovered.witnessed().committer.name, "mara");
@@ -435,7 +521,7 @@ mod git_native {
         assert!(recovered.message().0.contains("roundtrip test"));
         assert_eq!(recovered.fractal().data(), "roundtrip-commit");
         assert!(recovered.parent().is_none());
-        assert!(recovered.sha().is_some());
+        assert!(matches!(recovered, Commit::Root { .. }));
     }
 
     #[test]
@@ -443,7 +529,7 @@ mod git_native {
         let (_dir, repo) = init_repo();
         let committer = Committer::new("test", "test@test");
 
-        let c1 = Commit::root("first", make_shard("first"))
+        let c1 = Draft::root("first", make_shard("first"))
             .write(&repo, committer.clone())
             .unwrap();
 
@@ -452,22 +538,21 @@ mod git_native {
             .write(&repo, committer)
             .unwrap();
 
-        let recovered =
-            git::read_commit(&repo, git2::Oid::from_str(&c2.sha().unwrap().0).unwrap()).unwrap();
-        assert_eq!(recovered.parent(), Some(c1.sha().unwrap()));
+        let recovered = git::read_commit(&repo, git2::Oid::from_str(&c2.sha().0).unwrap()).unwrap();
+        assert_eq!(recovered.parent().unwrap().0, *c1.sha());
         assert_eq!(recovered.fractal().data(), "second");
+        assert!(matches!(recovered, Commit::Child { .. }));
     }
 
     #[test]
     fn read_commit_captures_email() {
         let (_dir, repo) = init_repo();
-        let c = Commit::root("email roundtrip test", make_shard("email-roundtrip"))
+        let c = Draft::root("email roundtrip test", make_shard("email-roundtrip"))
             .authored(Author::new("mara", "mara@systemic.engineer"))
             .write(&repo, Committer::new("cairn", "cairn@systemic.engineer"))
             .unwrap();
 
-        let recovered =
-            git::read_commit(&repo, git2::Oid::from_str(&c.sha().unwrap().0).unwrap()).unwrap();
+        let recovered = git::read_commit(&repo, git2::Oid::from_str(&c.sha().0).unwrap()).unwrap();
         assert_eq!(recovered.witnessed().author.name, "mara");
         assert_eq!(recovered.witnessed().author.email, "mara@systemic.engineer");
         assert_eq!(recovered.witnessed().committer.name, "cairn");
@@ -484,10 +569,10 @@ mod git_native {
     #[test]
     fn commit_signature_unsigned() {
         let (_dir, repo) = init_repo();
-        let c = Commit::root("unsigned commit", make_shard("unsigned"))
+        let c = Draft::root("unsigned commit", make_shard("unsigned"))
             .write(&repo, Committer::new("test", "test@test"))
             .unwrap();
-        let git_oid = git2::Oid::from_str(&c.sha().unwrap().0).unwrap();
+        let git_oid = git2::Oid::from_str(&c.sha().0).unwrap();
         let sig = git::commit_signature(&repo, git_oid).unwrap();
         assert!(sig.is_none());
     }

@@ -1,6 +1,6 @@
 use fragmentation::diff;
 use fragmentation::encoding::{Decode, Encode};
-use fragmentation::fragment::{self, Fractal, Fragment};
+use fragmentation::fragment::{self, Fractal, Fragmentable};
 use fragmentation::ref_::Ref;
 use fragmentation::sha;
 use fragmentation::store::Store;

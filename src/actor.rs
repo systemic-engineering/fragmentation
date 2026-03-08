@@ -1,4 +1,3 @@
-use crate::commit::Commit;
 use crate::encoding::{Decode, Encode};
 use crate::fragment::{Blob, Fractal};
 use crate::keys::{Encrypted, Keys, Local};
@@ -100,21 +99,15 @@ impl<A, B, K: Keys> Actor<A, B, K> {
         self.keys.decrypt(encrypted)
     }
 
-    /// Write a commit to a git repository as this actor.
-    /// If no author is set, actor becomes both author and committer.
+    /// Write a draft to a git repository as this actor.
+    /// If no author is set on the draft, actor becomes both author and committer.
     /// If authored, actor becomes committer only.
     #[cfg(feature = "git")]
     pub fn commit<E: crate::encoding::Encode>(
         &self,
-        commit: Commit<E>,
+        draft: crate::commit::Draft<E>,
         repo: &git2::Repository,
-    ) -> Result<Commit<E>, git2::Error> {
-        use crate::witnessed::{Author, Committer};
-        let c = if commit.witnessed().author.name.is_empty() {
-            commit.authored(Author::new(&self.name, &self.email))
-        } else {
-            commit
-        };
-        c.write(repo, Committer::new(&self.name, &self.email))
+    ) -> Result<crate::commit::Commit<E>, git2::Error> {
+        todo!()
     }
 }

@@ -2,7 +2,7 @@
 use crate::encoding::Encode;
 
 #[cfg(feature = "git")]
-use crate::fragment::{Fractal, Fragment};
+use crate::fragment::{Fractal, Fragmentable};
 
 #[cfg(feature = "git")]
 use crate::witnessed::Witnessed;
@@ -31,26 +31,17 @@ pub fn read_witnessed(
     Ok((witnessed, message, commit.tree_id()))
 }
 
-/// Read a fragmentation commit. Returns Commit<String> with full metadata and fractal tree.
+/// Read a fragmentation commit. Returns Commit<String> (Root or Child) with full metadata.
 /// Only works on commits written by write_commit (fragmentation-format trees).
 #[cfg(feature = "git")]
 pub fn read_commit(
     repo: &git2::Repository,
     oid: git2::Oid,
 ) -> Result<crate::commit::Commit<String>, Box<dyn std::error::Error>> {
+    use crate::commit::Parent;
     use crate::sha::Sha;
 
-    let git_commit = repo.find_commit(oid)?;
-    let (witnessed, message, tree_oid) = read_witnessed(repo, oid)?;
-    let fractal = read_tree(repo, tree_oid)?;
-    let parent = git_commit.parent_id(0).ok().map(|id| Sha(id.to_string()));
-    Ok(crate::commit::Commit::full(
-        fractal,
-        witnessed,
-        message,
-        parent,
-        Sha(oid.to_string()),
-    ))
+    todo!()
 }
 
 /// Extract the signature from a signed commit, if present.
@@ -93,50 +84,17 @@ pub fn write_tree<E: Encode>(
     }
 }
 
-/// Write a Commit to git. Returns the commit OID.
-/// Witnessed fields map to git author/committer. Message is pass-through.
+/// Write a commit to git from individual pieces. Returns the commit OID.
 #[cfg(feature = "git")]
-pub fn write_commit<E: Encode>(
+pub(crate) fn write_commit<E: Encode>(
     repo: &git2::Repository,
-    commit: &crate::commit::Commit<E>,
+    fractal: &Fractal<E>,
+    author: &crate::witnessed::Author,
+    committer: &crate::witnessed::Committer,
+    message: &str,
+    parent: Option<&crate::sha::Sha>,
 ) -> Result<git2::Oid, git2::Error> {
-    let tree_oid = match commit.fractal() {
-        Fractal::Shard { .. } => {
-            let blob_oid = write_tree(repo, commit.fractal())?;
-            let mut builder = repo.treebuilder(None)?;
-            builder.insert(".data", blob_oid, 0o100644)?;
-            builder.write()?
-        }
-        Fractal::Fractal { .. } => write_tree(repo, commit.fractal())?,
-    };
-    let tree = repo.find_tree(tree_oid)?;
-
-    let author = git2::Signature::now(
-        &commit.witnessed().author.name,
-        &commit.witnessed().author.email,
-    )?;
-    let committer = git2::Signature::now(
-        &commit.witnessed().committer.name,
-        &commit.witnessed().committer.email,
-    )?;
-
-    let parent_commit;
-    let parents: Vec<&git2::Commit> = if let Some(parent_sha) = commit.parent() {
-        let parent_oid = git2::Oid::from_str(&parent_sha.0)?;
-        parent_commit = repo.find_commit(parent_oid)?;
-        vec![&parent_commit]
-    } else {
-        vec![]
-    };
-
-    repo.commit(
-        None,
-        &author,
-        &committer,
-        &commit.message().0,
-        &tree,
-        &parents,
-    )
+    todo!()
 }
 
 /// Reconstruct a Fractal<String> from git objects.

@@ -7,7 +7,7 @@ pub type Blob = Vec<u8>;
 
 /// The interface for anything content-addressed and self-similar.
 /// Turtles all the way down: your children are yourself.
-pub trait Fragment {
+pub trait Fragmentable {
     type Data;
     fn self_ref(&self) -> &Ref;
     fn data(&self) -> &Self::Data;
@@ -76,7 +76,7 @@ impl<E> Fractal<E> {
     }
 }
 
-impl<E> Fragment for Fractal<E> {
+impl<E> Fragmentable for Fractal<E> {
     type Data = E;
 
     fn self_ref(&self) -> &Ref {

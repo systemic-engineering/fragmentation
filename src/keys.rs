@@ -2,7 +2,7 @@ use std::convert::Infallible;
 use std::fmt;
 
 use crate::encoding::{Decode, Encode};
-use crate::fragment::{self, Fractal, Fragment};
+use crate::fragment::{self, Fractal, Fragmentable};
 use crate::ref_::Ref;
 use crate::sha::Sha;
 use crate::visibility::Public;

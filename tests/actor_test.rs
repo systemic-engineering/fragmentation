@@ -1,6 +1,6 @@
 use fragmentation::actor::Actor;
 use fragmentation::encoding::{Decode, Encode};
-use fragmentation::fragment::{self, Blob, Fractal, Fragment};
+use fragmentation::fragment::{self, Blob, Fractal, Fragmentable};
 use fragmentation::keys::{Keys, Local, PlainKeys};
 use fragmentation::ref_::Ref;
 use fragmentation::sha;
@@ -553,14 +553,20 @@ mod from_repo_tests {
 // Public<K, Commit<E>> — signed commit type is expressible
 // ===========================================================================
 
-/// Public<K, Commit<E>> is expressible as a type.
-/// The Actor's key wraps a Commit, proving the type composes.
+/// Public<K, T: Draftable> implements Draftable — signed commits are draftable things.
 #[test]
-fn public_commit_type_expressible() {
-    use fragmentation::commit::Commit;
+fn public_commit_implements_draftable() {
+    use fragmentation::commit::{Draft, Draftable};
     let actor = Actor::identity("mara", "mara@systemic.engineer");
     let shard = make_blob_shard(vec![1, 2, 3]);
-    let commit = Commit::root("signed observation", shard);
-    let public: Public<Local, Commit<Blob>> = Public::new(commit, vec![], actor.keys().clone());
+    let draft = Draft::root("signed observation", shard);
+    let public: Public<Local, Draft<Blob>> = Public::new(draft, vec![], actor.keys().clone());
+
+    // Compile-time proof: Public<K, Draft<E>> implements Draftable
+    fn accepts_draftable<T: Draftable>(_d: &T) {}
+    accepts_draftable(&public);
+
     assert_eq!(public.key(), &Local::None);
+    assert_eq!(public.message().0, "signed observation");
+    assert!(public.parent().is_none());
 }

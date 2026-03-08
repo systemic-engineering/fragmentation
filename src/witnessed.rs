@@ -55,13 +55,4 @@ impl Witnessed {
             timestamp,
         }
     }
-
-    /// Empty witness — to be filled by actor.author() and actor.commit().
-    pub fn empty() -> Self {
-        Witnessed {
-            author: Author::new("", ""),
-            committer: Committer::new("", ""),
-            timestamp: Timestamp(String::new()),
-        }
-    }
 }

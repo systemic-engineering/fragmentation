@@ -1,5 +1,5 @@
 use fragmentation::diff::{self, Change};
-use fragmentation::fragment::{self, Fractal, Fragment};
+use fragmentation::fragment::{self, Fractal, Fragmentable};
 use fragmentation::ref_::Ref;
 use fragmentation::sha;
 use fragmentation::store::Store;
@@ -79,7 +79,7 @@ fn ref_construction() {
 }
 
 // ===========================================================================
-// Witnessed value types (type stays, just not on Fragment)
+// Witnessed value types (type stays, just not on Fragmentable)
 // ===========================================================================
 
 #[test]
@@ -124,7 +124,7 @@ fn witnessed_construction() {
 }
 
 // ===========================================================================
-// Fragment construction
+// Fragmentable construction
 // ===========================================================================
 
 #[test]
