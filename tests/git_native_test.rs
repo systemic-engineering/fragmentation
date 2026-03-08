@@ -119,8 +119,8 @@ mod git_native {
 
     fn test_witnessed() -> Witnessed {
         Witnessed::new(
-            Author("alex".into()),
-            Committer("reed".into()),
+            Author::new("alex", "alex@systemic.engineer"),
+            Committer::new("reed", "reed@systemic.engineer"),
             Timestamp("2026-03-01T00:00:00Z".into()),
             Message("test".into()),
         )
@@ -266,8 +266,8 @@ mod git_native {
         let (witnessed, tree_oid) = git::read_commit(&repo, commit_oid).unwrap();
 
         // Main has real commits with real authors
-        assert!(!witnessed.author.0.is_empty());
-        assert!(!witnessed.committer.0.is_empty());
+        assert!(!witnessed.author.name.is_empty());
+        assert!(!witnessed.committer.name.is_empty());
         assert!(!witnessed.message.0.is_empty());
         assert!(!witnessed.timestamp.0.is_empty());
 
@@ -285,8 +285,13 @@ mod git_native {
         let commit = repo.find_commit(commit_oid).unwrap();
         let (witnessed, _) = git::read_commit(&repo, commit_oid).unwrap();
 
-        assert_eq!(witnessed.author.0, commit.author().name().unwrap());
-        assert_eq!(witnessed.committer.0, commit.committer().name().unwrap());
+        assert_eq!(witnessed.author.name, commit.author().name().unwrap());
+        assert_eq!(witnessed.committer.name, commit.committer().name().unwrap());
+        assert_eq!(witnessed.author.email, commit.author().email().unwrap());
+        assert_eq!(
+            witnessed.committer.email,
+            commit.committer().email().unwrap()
+        );
     }
 
     #[test]
@@ -298,12 +303,67 @@ mod git_native {
         let oid = git::write_commit(&repo, &shard, &w, "roundtrip test", None).unwrap();
 
         let (recovered, tree_oid) = git::read_commit(&repo, oid).unwrap();
-        assert_eq!(recovered.author.0, "alex");
-        assert_eq!(recovered.committer.0, "reed");
+        assert_eq!(recovered.author.name, "alex");
+        assert_eq!(recovered.author.email, "alex@systemic.engineer");
+        assert_eq!(recovered.committer.name, "reed");
+        assert_eq!(recovered.committer.email, "reed@systemic.engineer");
         assert!(recovered.message.0.contains("roundtrip test"));
 
         // Tree OID should be valid
         let _tree = repo.find_tree(tree_oid).unwrap();
+    }
+
+    #[test]
+    fn write_commit_uses_email_from_witnessed() {
+        let (_dir, repo) = init_repo();
+        let shard = make_shard("email-test");
+        let w = Witnessed::new(
+            Author::new("mara", "mara@systemic.engineer"),
+            Committer::new("mara", "mara@systemic.engineer"),
+            Timestamp("2026-03-08T00:00:00Z".into()),
+            Message("email test".into()),
+        );
+        let oid = git::write_commit(&repo, &shard, &w, "email commit", None).unwrap();
+        let commit = repo.find_commit(oid).unwrap();
+        assert_eq!(commit.author().email(), Some("mara@systemic.engineer"));
+        assert_eq!(commit.committer().email(), Some("mara@systemic.engineer"));
+    }
+
+    #[test]
+    fn write_commit_different_author_committer_email() {
+        let (_dir, repo) = init_repo();
+        let shard = make_shard("split-identity");
+        let w = Witnessed::new(
+            Author::new("alex", "alex@example.com"),
+            Committer::new("reed", "reed@example.com"),
+            Timestamp("2026-03-08T00:00:00Z".into()),
+            Message("split".into()),
+        );
+        let oid = git::write_commit(&repo, &shard, &w, "split commit", None).unwrap();
+        let commit = repo.find_commit(oid).unwrap();
+        assert_eq!(commit.author().name(), Some("alex"));
+        assert_eq!(commit.author().email(), Some("alex@example.com"));
+        assert_eq!(commit.committer().name(), Some("reed"));
+        assert_eq!(commit.committer().email(), Some("reed@example.com"));
+    }
+
+    #[test]
+    fn read_commit_captures_email() {
+        let (_dir, repo) = init_repo();
+        let shard = make_shard("email-roundtrip");
+        let w = Witnessed::new(
+            Author::new("mara", "mara@systemic.engineer"),
+            Committer::new("cairn", "cairn@systemic.engineer"),
+            Timestamp("2026-03-08T00:00:00Z".into()),
+            Message("email roundtrip".into()),
+        );
+        let oid = git::write_commit(&repo, &shard, &w, "email roundtrip test", None).unwrap();
+
+        let (recovered, _tree_oid) = git::read_commit(&repo, oid).unwrap();
+        assert_eq!(recovered.author.name, "mara");
+        assert_eq!(recovered.author.email, "mara@systemic.engineer");
+        assert_eq!(recovered.committer.name, "cairn");
+        assert_eq!(recovered.committer.email, "cairn@systemic.engineer");
     }
 
     #[test]

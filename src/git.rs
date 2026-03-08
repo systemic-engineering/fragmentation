@@ -17,8 +17,14 @@ pub fn read_commit(
     use crate::witnessed::{Author, Committer, Message, Timestamp};
 
     let commit = repo.find_commit(oid)?;
-    let author = Author(commit.author().name().unwrap_or("").to_string());
-    let committer = Committer(commit.committer().name().unwrap_or("").to_string());
+    let author = Author::new(
+        commit.author().name().unwrap_or(""),
+        commit.author().email().unwrap_or(""),
+    );
+    let committer = Committer::new(
+        commit.committer().name().unwrap_or(""),
+        commit.committer().email().unwrap_or(""),
+    );
     let timestamp = Timestamp(commit.time().seconds().to_string());
     let message = Message(commit.message().unwrap_or("").to_string());
     let witnessed = Witnessed::new(author, committer, timestamp, message);
@@ -86,14 +92,8 @@ pub fn write_commit<E: Encode>(
     };
     let tree = repo.find_tree(tree_oid)?;
 
-    let author = git2::Signature::now(
-        &witnessed.author.0,
-        &format!("{}@systemic.engineer", witnessed.author.0),
-    )?;
-    let committer = git2::Signature::now(
-        &witnessed.committer.0,
-        &format!("{}@systemic.engineer", witnessed.committer.0),
-    )?;
+    let author = git2::Signature::now(&witnessed.author.name, &witnessed.author.email)?;
+    let committer = git2::Signature::now(&witnessed.committer.name, &witnessed.committer.email)?;
 
     let parents: Vec<&git2::Commit> = parent.into_iter().collect();
     repo.commit(None, &author, &committer, message, &tree, &parents)

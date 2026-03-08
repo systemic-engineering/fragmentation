@@ -84,14 +84,16 @@ fn ref_construction() {
 
 #[test]
 fn author_construction() {
-    let a = Author("alex".into());
-    assert_eq!(a.0, "alex");
+    let a = Author::new("alex", "alex@systemic.engineer");
+    assert_eq!(a.name, "alex");
+    assert_eq!(a.email, "alex@systemic.engineer");
 }
 
 #[test]
 fn committer_construction() {
-    let c = Committer("reed".into());
-    assert_eq!(c.0, "reed");
+    let c = Committer::new("reed", "reed@systemic.engineer");
+    assert_eq!(c.name, "reed");
+    assert_eq!(c.email, "reed@systemic.engineer");
 }
 
 #[test]
@@ -109,13 +111,16 @@ fn message_construction() {
 #[test]
 fn witnessed_construction() {
     let w = Witnessed::new(
-        Author("alex".into()),
-        Committer("reed".into()),
+        Author::new("alex", "alex@systemic.engineer"),
+        Committer::new("reed", "reed@systemic.engineer"),
         Timestamp("2026-03-01T00:00:00Z".into()),
         Message("initial".into()),
     );
-    assert_eq!(w.author, Author("alex".into()));
-    assert_eq!(w.committer, Committer("reed".into()));
+    assert_eq!(w.author, Author::new("alex", "alex@systemic.engineer"));
+    assert_eq!(
+        w.committer,
+        Committer::new("reed", "reed@systemic.engineer")
+    );
     assert_eq!(w.timestamp, Timestamp("2026-03-01T00:00:00Z".into()));
     assert_eq!(w.message, Message("initial".into()));
 }

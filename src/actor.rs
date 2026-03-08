@@ -2,6 +2,7 @@ use crate::encoding::{Decode, Encode};
 use crate::fragment::{Blob, Fractal};
 use crate::keys::{Encrypted, Keys, Local};
 use crate::visibility::Public;
+use crate::witnessed::Witnessed;
 
 /// Witness identity with encoding boundary.
 ///
@@ -97,5 +98,12 @@ impl<A, B, K: Keys> Actor<A, B, K> {
         B: Decode,
     {
         self.keys.decrypt(encrypted)
+    }
+
+    /// Produce a Witnessed record from this actor.
+    /// Author and Committer carry the actor's name and email.
+    /// Timestamp is current epoch seconds.
+    pub fn witness(&self, _message: impl Into<String>) -> Witnessed {
+        todo!()
     }
 }
