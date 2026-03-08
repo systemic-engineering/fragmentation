@@ -3,16 +3,21 @@ use crate::fragment::{Fractal, Fragment};
 use crate::keys::{Encrypted, Keys};
 use crate::ref_::Ref;
 
-/// Transparent visibility. Content accessible. Key is provenance.
+/// Visible, attributed, proven content. Key is provenance. Signature is proof.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Public<K, T> {
     inner: T,
+    signature: Vec<u8>,
     key: K,
 }
 
 impl<K, T> Public<K, T> {
-    pub fn new(inner: T, key: K) -> Self {
-        Public { inner, key }
+    pub fn new(inner: T, signature: Vec<u8>, key: K) -> Self {
+        Public {
+            inner,
+            signature,
+            key,
+        }
     }
 
     pub fn inner(&self) -> &T {
@@ -21,6 +26,10 @@ impl<K, T> Public<K, T> {
 
     pub fn into_inner(self) -> T {
         self.inner
+    }
+
+    pub fn signature(&self) -> &[u8] {
+        &self.signature
     }
 
     pub fn key(&self) -> &K {

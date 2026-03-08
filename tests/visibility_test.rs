@@ -26,21 +26,21 @@ fn make_fractal(label: &str, children: Vec<Fractal<String>>) -> Fractal<String> 
 #[test]
 fn public_construction() {
     let shard = make_shard("hello");
-    let public = Public::new(shard.clone(), PlainKeys);
+    let public = Public::new(shard.clone(), vec![], PlainKeys);
     assert_eq!(public.inner(), &shard);
 }
 
 #[test]
 fn public_inner_access() {
     let shard = make_shard("data");
-    let public = Public::new(shard.clone(), PlainKeys);
+    let public = Public::new(shard.clone(), vec![], PlainKeys);
     assert_eq!(public.inner().data(), "data");
 }
 
 #[test]
 fn public_into_inner() {
     let shard = make_shard("unwrap");
-    let public = Public::new(shard.clone(), PlainKeys);
+    let public = Public::new(shard.clone(), vec![], PlainKeys);
     let recovered = public.into_inner();
     assert_eq!(recovered, shard);
 }
@@ -48,43 +48,58 @@ fn public_into_inner() {
 #[test]
 fn public_key() {
     let shard = make_shard("keyed");
-    let public = Public::new(shard, PlainKeys);
+    let public = Public::new(shard, vec![], PlainKeys);
     assert_eq!(public.key(), &PlainKeys);
+}
+
+#[test]
+fn public_signature_empty() {
+    let shard = make_shard("unsigned");
+    let public = Public::new(shard, vec![], PlainKeys);
+    assert!(public.signature().is_empty());
+}
+
+#[test]
+fn public_signature_present() {
+    let shard = make_shard("signed");
+    let sig = vec![0xDE, 0xAD, 0xBE, 0xEF];
+    let public = Public::new(shard, sig.clone(), PlainKeys);
+    assert_eq!(public.signature(), &sig[..]);
 }
 
 #[test]
 fn public_fragment_self_ref() {
     let shard = make_shard("ref-test");
     let expected_ref = shard.self_ref().clone();
-    let public = Public::new(shard, PlainKeys);
+    let public = Public::new(shard, vec![], PlainKeys);
     assert_eq!(public.self_ref(), &expected_ref);
 }
 
 #[test]
 fn public_fragment_data() {
     let shard = make_shard("visible");
-    let public = Public::new(shard, PlainKeys);
+    let public = Public::new(shard, vec![], PlainKeys);
     assert_eq!(public.data(), "visible");
 }
 
 #[test]
 fn public_fragment_children_empty() {
     let parent = make_fractal("parent", vec![make_shard("child")]);
-    let public = Public::new(parent, PlainKeys);
+    let public = Public::new(parent, vec![], PlainKeys);
     assert!(public.children().is_empty());
 }
 
 #[test]
 fn public_fragment_is_shard() {
     let shard = make_shard("terminal");
-    let public = Public::new(shard, PlainKeys);
+    let public = Public::new(shard, vec![], PlainKeys);
     assert!(public.is_shard());
 }
 
 #[test]
 fn public_walk_terminal() {
     let shard = make_shard("single");
-    let public = Public::new(shard, PlainKeys);
+    let public = Public::new(shard, vec![], PlainKeys);
     let collected = walk::collect(&public);
     assert_eq!(collected.len(), 1);
 }
@@ -238,7 +253,7 @@ fn sha_accessible_from_all_three() {
     let shard = make_shard("shared");
     let sha = shard.self_ref().sha.clone();
 
-    let public = Public::new(shard.clone(), PlainKeys);
+    let public = Public::new(shard.clone(), vec![], PlainKeys);
     let protected = Protected::wrap(shard.clone(), PlainKeys).unwrap();
     let private = Private::seal(&shard, PlainKeys);
 
@@ -263,7 +278,7 @@ fn mixed_visibility_children_preserve_sha() {
         vec![child_a.clone(), child_b.clone(), child_c.clone()],
     );
 
-    let pub_a = Public::new(child_a.clone(), PlainKeys);
+    let pub_a = Public::new(child_a.clone(), vec![], PlainKeys);
     let prot_b = Protected::wrap(child_b.clone(), PlainKeys).unwrap();
     let priv_c = Private::seal(&child_c, PlainKeys);
 
@@ -298,7 +313,7 @@ fn merkle_stability_across_visibility_boundaries() {
     let parent_sha = parent.self_ref().sha.clone();
 
     // Wrap each child differently
-    let pub_a = Public::new(child_a, PlainKeys);
+    let pub_a = Public::new(child_a, vec![], PlainKeys);
     let prot_b = Protected::wrap(child_b, PlainKeys).unwrap();
     let priv_c = Private::seal(&child_c, PlainKeys);
 
@@ -332,7 +347,7 @@ fn walk_collect_stops_at_visibility_boundary() {
     assert_eq!(walk::collect(&deep).len(), 4);
 
     // Each visibility wrapper is terminal
-    let pub_deep = Public::new(deep.clone(), PlainKeys);
+    let pub_deep = Public::new(deep.clone(), vec![], PlainKeys);
     assert_eq!(walk::collect(&pub_deep).len(), 1);
 
     let prot_deep = Protected::wrap(deep.clone(), PlainKeys).unwrap();
@@ -375,7 +390,7 @@ fn mixed_bag_refs_match_originals() {
     let original_refs: Vec<Ref> = children.iter().map(|c| c.self_ref().clone()).collect();
 
     // Wrap each child with a different visibility level
-    let pub_wrap = Public::new(children[0].clone(), PlainKeys);
+    let pub_wrap = Public::new(children[0].clone(), vec![], PlainKeys);
     let prot_wrap = Protected::wrap(children[1].clone(), PlainKeys).unwrap();
     let priv_wrap = Private::seal(&children[2], PlainKeys);
 

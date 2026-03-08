@@ -1,6 +1,7 @@
 use crate::encoding::{Decode, Encode};
 use crate::fragment::{Blob, Fractal};
-use crate::keys::{Encrypted, Keys, Local, Signed};
+use crate::keys::{Encrypted, Keys, Local};
+use crate::visibility::Public;
 
 /// Witness identity with encoding boundary.
 ///
@@ -78,7 +79,7 @@ impl<A, B, K: Keys> Actor<A, B, K> {
     }
 
     /// Sign an encoded fragment.
-    pub fn sign(&self, fragment: Fractal<B>) -> Result<Signed<K, Fractal<B>>, K::Error> {
+    pub fn sign(&self, fragment: Fractal<B>) -> Result<Public<K, Fractal<B>>, K::Error> {
         self.keys.sign(fragment)
     }
 

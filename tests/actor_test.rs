@@ -1,9 +1,10 @@
 use fragmentation::actor::Actor;
 use fragmentation::encoding::{Decode, Encode};
 use fragmentation::fragment::{self, Blob, Fractal, Fragment};
-use fragmentation::keys::{Keys, Local, PlainKeys, Signed};
+use fragmentation::keys::{Keys, Local, PlainKeys};
 use fragmentation::ref_::Ref;
 use fragmentation::sha;
+use fragmentation::visibility::Public;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -87,17 +88,17 @@ fn plain_keys_encrypt_decrypt_roundtrip() {
 }
 
 #[test]
-fn signed_carries_signer() {
+fn public_carries_key() {
     let shard = make_blob_shard(vec![42]);
-    let signed = PlainKeys.sign(shard).unwrap();
-    assert_eq!(signed.signer(), &PlainKeys);
+    let public = PlainKeys.sign(shard).unwrap();
+    assert_eq!(public.key(), &PlainKeys);
 }
 
 #[test]
-fn signed_has_empty_signature() {
+fn public_has_empty_signature() {
     let shard = make_blob_shard(vec![42]);
-    let signed = PlainKeys.sign(shard).unwrap();
-    assert!(signed.signature().is_empty());
+    let public = PlainKeys.sign(shard).unwrap();
+    assert!(public.signature().is_empty());
 }
 
 #[test]
@@ -126,10 +127,10 @@ fn local_keys_plain_sign_preserves_content() {
 }
 
 #[test]
-fn local_keys_plain_signed_carries_signer() {
+fn local_keys_plain_public_carries_key() {
     let shard = make_blob_shard(vec![42]);
-    let signed = Local::None.sign(shard).unwrap();
-    assert_eq!(signed.signer(), &Local::None);
+    let public = Local::None.sign(shard).unwrap();
+    assert_eq!(public.key(), &Local::None);
 }
 
 #[test]
@@ -196,8 +197,8 @@ struct TestKeys {
 impl Keys for TestKeys {
     type Error = std::convert::Infallible;
 
-    fn sign<E>(&self, fragment: Fractal<E>) -> Result<Signed<Self, Fractal<E>>, Self::Error> {
-        Ok(Signed::new(fragment, b"test-sig".to_vec(), self.clone()))
+    fn sign<E>(&self, fragment: Fractal<E>) -> Result<Public<Self, Fractal<E>>, Self::Error> {
+        Ok(Public::new(fragment, b"test-sig".to_vec(), self.clone()))
     }
 
     fn encrypt<E: Encode>(
@@ -309,12 +310,12 @@ mod ssh_tests {
     }
 
     #[test]
-    fn ssh_key_signed_carries_signer() {
+    fn ssh_key_public_carries_key() {
         let key = test_ssh_key();
         let local = Local::Ssh(Box::new(key.clone()));
         let shard = make_blob_shard(vec![42]);
-        let signed = local.sign(shard).unwrap();
-        assert_eq!(signed.signer(), &Local::Ssh(Box::new(key)));
+        let public = local.sign(shard).unwrap();
+        assert_eq!(public.key(), &Local::Ssh(Box::new(key)));
     }
 
     #[test]
@@ -451,7 +452,7 @@ mod gpg_tests {
     }
 
     #[test]
-    fn gpg_key_signed_carries_signer() {
+    fn gpg_key_public_carries_key() {
         if !gpg_available() {
             eprintln!("gpg not available, skipping");
             return;
@@ -460,9 +461,9 @@ mod gpg_tests {
         let local = Local::Gpg(key.clone());
         let shard = make_blob_shard(vec![42]);
         // Sign may fail if gpg key doesn't exist — that's expected in CI
-        // Just verify the signer is carried when it does work
+        // Just verify the key is carried when it does work
         match local.sign(shard) {
-            Ok(signed) => assert_eq!(signed.signer(), &Local::Gpg(key)),
+            Ok(public) => assert_eq!(public.key(), &Local::Gpg(key)),
             Err(_) => eprintln!("gpg sign failed (expected without real key), skipping assertion"),
         }
     }
