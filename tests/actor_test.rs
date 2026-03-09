@@ -1,7 +1,7 @@
 use fragmentation::actor::Actor;
 use fragmentation::encoding::{Decode, Encode};
 use fragmentation::fragment::{self, Blob, Fractal, Fragmentable};
-use fragmentation::keys::{Keys, Local, PlainKeys};
+use fragmentation::keys::{Keys, Local, PlainKeys, Signature};
 use fragmentation::ref_::Ref;
 use fragmentation::sha;
 use fragmentation::visibility::Public;
@@ -72,10 +72,19 @@ fn identity_actor_local_keys() {
 // ===========================================================================
 
 #[test]
-fn plain_keys_sign_roundtrip() {
+fn plain_keys_sign_produces_signature() {
     let shard = make_blob_shard(vec![1, 2, 3]);
-    let signed = PlainKeys.sign(shard.clone()).unwrap();
-    assert_eq!(signed.into_inner().data(), shard.data());
+    let sig = PlainKeys.sign(&shard).unwrap();
+    assert!(sig.bytes().is_empty());
+    assert_eq!(sig.key(), &PlainKeys);
+}
+
+#[test]
+fn plain_keys_sign_through_actor_roundtrip() {
+    let shard = make_blob_shard(vec![1, 2, 3]);
+    let sig = PlainKeys.sign(&shard).unwrap();
+    let public = Public::new(shard.clone(), sig);
+    assert_eq!(public.into_inner().data(), shard.data());
 }
 
 #[test]
@@ -90,15 +99,17 @@ fn plain_keys_encrypt_decrypt_roundtrip() {
 #[test]
 fn public_carries_key() {
     let shard = make_blob_shard(vec![42]);
-    let public = PlainKeys.sign(shard).unwrap();
+    let sig = PlainKeys.sign(&shard).unwrap();
+    let public = Public::new(shard, sig);
     assert_eq!(public.key(), &PlainKeys);
 }
 
 #[test]
-fn public_has_empty_signature() {
+fn public_has_empty_signature_bytes() {
     let shard = make_blob_shard(vec![42]);
-    let public = PlainKeys.sign(shard).unwrap();
-    assert!(public.signature().is_empty());
+    let sig = PlainKeys.sign(&shard).unwrap();
+    let public = Public::new(shard, sig);
+    assert!(public.signature().bytes().is_empty());
 }
 
 #[test]
@@ -115,21 +126,23 @@ fn encrypted_carries_key() {
 #[test]
 fn local_keys_plain_sign_empty_signature() {
     let shard = make_blob_shard(vec![1, 2, 3]);
-    let signed = Local::None.sign(shard).unwrap();
-    assert!(signed.signature().is_empty());
+    let sig = Local::None.sign(&shard).unwrap();
+    assert!(sig.bytes().is_empty());
 }
 
 #[test]
 fn local_keys_plain_sign_preserves_content() {
     let shard = make_blob_shard(vec![1, 2, 3]);
-    let signed = Local::None.sign(shard.clone()).unwrap();
-    assert_eq!(signed.into_inner().data(), shard.data());
+    let sig = Local::None.sign(&shard).unwrap();
+    let public = Public::new(shard.clone(), sig);
+    assert_eq!(public.into_inner().data(), shard.data());
 }
 
 #[test]
 fn local_keys_plain_public_carries_key() {
     let shard = make_blob_shard(vec![42]);
-    let public = Local::None.sign(shard).unwrap();
+    let sig = Local::None.sign(&shard).unwrap();
+    let public = Public::new(shard, sig);
     assert_eq!(public.key(), &Local::None);
 }
 
@@ -186,7 +199,7 @@ fn custom_actor_transforms_data() {
 }
 
 // ===========================================================================
-// Custom Keys implementation (now with Result)
+// Custom Keys implementation
 // ===========================================================================
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -197,8 +210,8 @@ struct TestKeys {
 impl Keys for TestKeys {
     type Error = std::convert::Infallible;
 
-    fn sign<E>(&self, fragment: Fractal<E>) -> Result<Public<Self, Fractal<E>>, Self::Error> {
-        Ok(Public::new(fragment, b"test-sig".to_vec(), self.clone()))
+    fn sign<E>(&self, _fragment: &Fractal<E>) -> Result<Signature<Self>, Self::Error> {
+        Ok(Signature::new(self.clone(), b"test-sig".to_vec()))
     }
 
     fn encrypt<E: Encode>(
@@ -241,7 +254,7 @@ fn custom_keys_sign_has_signature() {
         Actor::new("keyed", "k@k", |f| f.clone(), |f| f.clone(), keys);
     let shard = make_blob_shard(vec![1, 2, 3]);
     let signed = actor.sign(shard).unwrap();
-    assert_eq!(signed.signature(), b"test-sig");
+    assert_eq!(signed.signature().bytes(), b"test-sig");
 }
 
 // ===========================================================================
@@ -296,8 +309,8 @@ mod ssh_tests {
         let key = test_ssh_key();
         let local = Local::Ssh(Box::new(key));
         let shard = make_blob_shard(vec![1, 2, 3]);
-        let signed = local.sign(shard).unwrap();
-        assert!(!signed.signature().is_empty());
+        let sig = local.sign(&shard).unwrap();
+        assert!(!sig.bytes().is_empty());
     }
 
     #[test]
@@ -305,8 +318,9 @@ mod ssh_tests {
         let key = test_ssh_key();
         let local = Local::Ssh(Box::new(key));
         let shard = make_blob_shard(vec![1, 2, 3]);
-        let signed = local.sign(shard.clone()).unwrap();
-        assert_eq!(signed.into_inner().data(), shard.data());
+        let sig = local.sign(&shard).unwrap();
+        let public = Public::new(shard.clone(), sig);
+        assert_eq!(public.into_inner().data(), shard.data());
     }
 
     #[test]
@@ -314,7 +328,8 @@ mod ssh_tests {
         let key = test_ssh_key();
         let local = Local::Ssh(Box::new(key.clone()));
         let shard = make_blob_shard(vec![42]);
-        let public = local.sign(shard).unwrap();
+        let sig = local.sign(&shard).unwrap();
+        let public = Public::new(shard, sig);
         assert_eq!(public.key(), &Local::Ssh(Box::new(key)));
     }
 
@@ -462,8 +477,11 @@ mod gpg_tests {
         let shard = make_blob_shard(vec![42]);
         // Sign may fail if gpg key doesn't exist — that's expected in CI
         // Just verify the key is carried when it does work
-        match local.sign(shard) {
-            Ok(public) => assert_eq!(public.key(), &Local::Gpg(key)),
+        match local.sign(&shard) {
+            Ok(sig) => {
+                let public = Public::new(shard, sig);
+                assert_eq!(public.key(), &Local::Gpg(key));
+            }
             Err(_) => eprintln!("gpg sign failed (expected without real key), skipping assertion"),
         }
     }
@@ -559,8 +577,9 @@ fn public_commit_implements_draftable() {
     use fragmentation::commit::{Draft, Draftable};
     let actor = Actor::identity("mara", "mara@systemic.engineer");
     let shard = make_blob_shard(vec![1, 2, 3]);
+    let sig = actor.keys().sign(&shard).unwrap();
     let draft = Draft::root("signed observation", shard);
-    let public: Public<Local, Draft<Blob>> = Public::new(draft, vec![], actor.keys().clone());
+    let public: Public<Local, Draft<Blob>> = Public::new(draft, sig);
 
     // Compile-time proof: Public<K, Draft<E>> implements Draftable
     fn accepts_draftable<T: Draftable>(_d: &T) {}

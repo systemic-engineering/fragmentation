@@ -78,9 +78,10 @@ impl<A, B, K: Keys> Actor<A, B, K> {
         (self.decoder)(fragment)
     }
 
-    /// Sign an encoded fragment.
+    /// Sign an encoded fragment, wrapping it in Public visibility.
     pub fn sign(&self, fragment: Fractal<B>) -> Result<Public<K, Fractal<B>>, K::Error> {
-        self.keys.sign(fragment)
+        let sig = self.keys.sign(&fragment)?;
+        Ok(Public::new(fragment, sig))
     }
 
     /// Encrypt an encoded fragment.

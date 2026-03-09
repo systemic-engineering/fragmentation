@@ -5,7 +5,6 @@ use crate::encoding::{Decode, Encode};
 use crate::fragment::{self, Fractal, Fragmentable};
 use crate::ref_::Ref;
 use crate::sha::Sha;
-use crate::visibility::Public;
 
 /// Encrypted content: opaque bytes and who it's encrypted for.
 /// No type parameter for the content — it's opaque until decrypted.
@@ -32,14 +31,40 @@ impl<K> Encrypted<K> {
     }
 }
 
+/// Proof of authorship. Key is who signed, bytes are the proof.
+/// Private constructor — only obtainable through `Keys::sign`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Signature<K> {
+    key: K,
+    bytes: Vec<u8>,
+}
+
+impl<K: Keys> Signature<K> {
+    /// Create a signature. Called by Keys implementations in their sign() method.
+    /// Fields are private — a Signature cannot be modified after creation.
+    pub fn new(key: K, bytes: Vec<u8>) -> Self {
+        Signature { key, bytes }
+    }
+
+    /// The key that produced this signature — provenance.
+    pub fn key(&self) -> &K {
+        &self.key
+    }
+
+    /// The proof bytes. Empty for PlainKeys, real for SSH/GPG.
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+}
+
 /// Visibility layer encoding. Sign, encrypt, decrypt.
-/// Self threads through as real data — the key in Public,
+/// Self threads through as real data — the key in Signature,
 /// the recipient in Encrypted.
 pub trait Keys: Sized + Clone {
     type Error: fmt::Display + fmt::Debug;
 
-    /// Sign a fragment. The signature proves authorship.
-    fn sign<E>(&self, fragment: Fractal<E>) -> Result<Public<Self, Fractal<E>>, Self::Error>;
+    /// Sign a fragment. Returns proof of authorship, not visibility.
+    fn sign<E>(&self, fragment: &Fractal<E>) -> Result<Signature<Self>, Self::Error>;
 
     /// Encrypt a fragment. The result is opaque bytes.
     fn encrypt<E: Encode>(&self, fragment: Fractal<E>) -> Result<Encrypted<Self>, Self::Error>;
@@ -57,8 +82,8 @@ pub struct PlainKeys;
 impl Keys for PlainKeys {
     type Error = Infallible;
 
-    fn sign<E>(&self, fragment: Fractal<E>) -> Result<Public<Self, Fractal<E>>, Self::Error> {
-        Ok(Public::new(fragment, vec![], PlainKeys))
+    fn sign<E>(&self, _fragment: &Fractal<E>) -> Result<Signature<Self>, Self::Error> {
+        Ok(Signature::new(PlainKeys, vec![]))
     }
 
     fn encrypt<E: Encode>(&self, fragment: Fractal<E>) -> Result<Encrypted<Self>, Self::Error> {
@@ -113,20 +138,20 @@ pub enum Local {
 impl Keys for Local {
     type Error = LocalError;
 
-    fn sign<E>(&self, fragment: Fractal<E>) -> Result<Public<Self, Fractal<E>>, Self::Error> {
+    fn sign<E>(&self, fragment: &Fractal<E>) -> Result<Signature<Self>, Self::Error> {
         match self {
-            Local::None => Ok(Public::new(fragment, vec![], Local::None)),
+            Local::None => Ok(Signature::new(Local::None, vec![])),
             #[cfg(feature = "ssh")]
             Local::Ssh(ssh_key) => {
                 let sha_bytes = fragment.self_ref().sha.0.as_bytes();
-                let signature = ssh_key.sign_bytes(sha_bytes)?;
-                Ok(Public::new(fragment, signature, self.clone()))
+                let sig_bytes = ssh_key.sign_bytes(sha_bytes)?;
+                Ok(Signature::new(self.clone(), sig_bytes))
             }
             #[cfg(feature = "gpg")]
             Local::Gpg(gpg_key) => {
                 let sha_bytes = fragment.self_ref().sha.0.as_bytes();
-                let signature = gpg_key.sign_bytes(sha_bytes)?;
-                Ok(Public::new(fragment, signature, self.clone()))
+                let sig_bytes = gpg_key.sign_bytes(sha_bytes)?;
+                Ok(Signature::new(self.clone(), sig_bytes))
             }
         }
     }
