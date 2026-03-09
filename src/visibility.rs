@@ -1,23 +1,18 @@
 use crate::encoding::{Decode, Encode};
 use crate::fragment::{Fractal, Fragmentable};
-use crate::keys::{Encrypted, Keys};
+use crate::keys::{Encrypted, Keys, Signature};
 use crate::ref_::Ref;
 
-/// Visible, attributed, proven content. Key is provenance. Signature is proof.
+/// Visible, attributed, proven content. Signature carries both key and proof.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Public<K, T> {
+pub struct Public<K: Keys, T> {
     inner: T,
-    signature: Vec<u8>,
-    key: K,
+    signature: Signature<K>,
 }
 
-impl<K, T> Public<K, T> {
-    pub fn new(inner: T, signature: Vec<u8>, key: K) -> Self {
-        Public {
-            inner,
-            signature,
-            key,
-        }
+impl<K: Keys, T> Public<K, T> {
+    pub fn new(inner: T, signature: Signature<K>) -> Self {
+        Public { inner, signature }
     }
 
     pub fn inner(&self) -> &T {
@@ -28,16 +23,16 @@ impl<K, T> Public<K, T> {
         self.inner
     }
 
-    pub fn signature(&self) -> &[u8] {
+    pub fn signature(&self) -> &Signature<K> {
         &self.signature
     }
 
     pub fn key(&self) -> &K {
-        &self.key
+        self.signature.key()
     }
 }
 
-impl<K, T: Fragmentable> Fragmentable for Public<K, T> {
+impl<K: Keys, T: Fragmentable> Fragmentable for Public<K, T> {
     type Data = T::Data;
 
     fn self_ref(&self) -> &Ref {
@@ -55,18 +50,18 @@ impl<K, T: Fragmentable> Fragmentable for Public<K, T> {
 
 /// Encrypted visibility. Content accessible with key. Ref is plaintext address.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Protected<K> {
+pub struct Protected<K: Keys> {
     ref_: Ref,
     ciphertext: Vec<u8>,
-    key: K,
+    signature: Signature<K>,
 }
 
-impl<K> Protected<K> {
-    pub fn new(ref_: Ref, ciphertext: Vec<u8>, key: K) -> Self {
+impl<K: Keys> Protected<K> {
+    pub fn new(ref_: Ref, ciphertext: Vec<u8>, signature: Signature<K>) -> Self {
         Protected {
             ref_,
             ciphertext,
-            key,
+            signature,
         }
     }
 
@@ -74,29 +69,36 @@ impl<K> Protected<K> {
         &self.ciphertext
     }
 
+    pub fn signature(&self) -> &Signature<K> {
+        &self.signature
+    }
+
     pub fn key(&self) -> &K {
-        &self.key
+        self.signature.key()
     }
 }
 
 impl<K: Keys> Protected<K> {
-    pub fn wrap<E: Encode>(fragment: Fractal<E>, key: K) -> Result<Self, K::Error> {
+    pub fn wrap<E: Encode>(
+        fragment: Fractal<E>,
+        signature: Signature<K>,
+    ) -> Result<Self, K::Error> {
         let ref_ = fragment.self_ref().clone();
-        let encrypted = key.encrypt(fragment)?;
+        let encrypted = signature.key().encrypt(fragment)?;
         Ok(Protected {
             ref_,
             ciphertext: encrypted.ciphertext().to_vec(),
-            key,
+            signature,
         })
     }
 
     pub fn unlock<E: Decode>(&self) -> Result<Fractal<E>, K::Error> {
-        let encrypted = Encrypted::new(self.ciphertext.clone(), self.key.clone());
-        self.key.decrypt(&encrypted)
+        let encrypted = Encrypted::new(self.ciphertext.clone(), self.signature.key().clone());
+        self.signature.key().decrypt(&encrypted)
     }
 }
 
-impl<K> Fragmentable for Protected<K> {
+impl<K: Keys> Fragmentable for Protected<K> {
     type Data = Vec<u8>;
 
     fn self_ref(&self) -> &Ref {
@@ -114,29 +116,33 @@ impl<K> Fragmentable for Protected<K> {
 
 /// Proof of existence only. No content travels.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Private<K> {
+pub struct Private<K: Keys> {
     ref_: Ref,
-    key: K,
+    signature: Signature<K>,
 }
 
-impl<K> Private<K> {
-    pub fn new(ref_: Ref, key: K) -> Self {
-        Private { ref_, key }
+impl<K: Keys> Private<K> {
+    pub fn new(ref_: Ref, signature: Signature<K>) -> Self {
+        Private { ref_, signature }
+    }
+
+    pub fn signature(&self) -> &Signature<K> {
+        &self.signature
     }
 
     pub fn key(&self) -> &K {
-        &self.key
+        self.signature.key()
     }
 
-    pub fn seal<T: Fragmentable>(fragment: &T, key: K) -> Self {
+    pub fn seal<T: Fragmentable>(fragment: &T, signature: Signature<K>) -> Self {
         Private {
             ref_: fragment.self_ref().clone(),
-            key,
+            signature,
         }
     }
 }
 
-impl<K, T: crate::commit::Draftable> crate::commit::Draftable for Public<K, T> {
+impl<K: Keys, T: crate::commit::Draftable> crate::commit::Draftable for Public<K, T> {
     type Element = T::Element;
 
     fn fractal(&self) -> &Fractal<Self::Element> {
@@ -152,7 +158,7 @@ impl<K, T: crate::commit::Draftable> crate::commit::Draftable for Public<K, T> {
     }
 }
 
-impl<K> Fragmentable for Private<K> {
+impl<K: Keys> Fragmentable for Private<K> {
     type Data = ();
 
     fn self_ref(&self) -> &Ref {
