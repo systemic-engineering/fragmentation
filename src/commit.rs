@@ -1,6 +1,8 @@
 use crate::fragment::Fractal;
 use crate::sha::Sha;
-use crate::witnessed::{Author, Committer, Message, Witnessed};
+#[cfg(feature = "git")]
+use crate::witnessed::Committer;
+use crate::witnessed::{Author, Message, Witnessed};
 
 /// Typed reference to a parent commit. Not a raw SHA — a graph edge.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -167,6 +169,7 @@ impl<E> Commit<E> {
     }
 
     /// Construct a Root with full metadata (used by read_commit).
+    #[cfg(feature = "git")]
     pub(crate) fn full_root(
         fractal: Fractal<E>,
         witnessed: Witnessed,
@@ -182,6 +185,7 @@ impl<E> Commit<E> {
     }
 
     /// Construct a Child with full metadata (used by read_commit).
+    #[cfg(feature = "git")]
     pub(crate) fn full_child(
         fractal: Fractal<E>,
         witnessed: Witnessed,

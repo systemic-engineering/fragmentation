@@ -1,4 +1,3 @@
-use fragmentation::actor::Actor;
 use fragmentation::encoding::{Decode, Encode};
 use fragmentation::fragment::{self, Blob, Fractal, Fragmentable};
 use fragmentation::keys::{Keys, Local, PlainKeys, Signature};
@@ -21,53 +20,6 @@ fn make_string_shard(data: &str) -> Fractal<String> {
 }
 
 // ===========================================================================
-// Identity actor (Blob -> Blob, Local)
-// ===========================================================================
-
-#[test]
-fn identity_actor_has_name() {
-    let actor = Actor::identity("mara", "mara@systemic.engineer");
-    assert_eq!(actor.name(), "mara");
-}
-
-#[test]
-fn identity_actor_has_email() {
-    let actor = Actor::identity("mara", "mara@systemic.engineer");
-    assert_eq!(actor.email(), "mara@systemic.engineer");
-}
-
-#[test]
-fn identity_actor_encode_is_clone() {
-    let actor = Actor::identity("test", "test@test");
-    let shard = make_blob_shard(vec![1, 2, 3]);
-    let encoded = actor.encode(&shard);
-    assert_eq!(encoded.data(), shard.data());
-}
-
-#[test]
-fn identity_actor_decode_is_clone() {
-    let actor = Actor::identity("test", "test@test");
-    let shard = make_blob_shard(vec![1, 2, 3]);
-    let decoded = actor.decode(&shard);
-    assert_eq!(decoded.data(), shard.data());
-}
-
-#[test]
-fn identity_actor_roundtrip() {
-    let actor = Actor::identity("test", "test@test");
-    let shard = make_blob_shard(vec![0xCA, 0xFE]);
-    let encoded = actor.encode(&shard);
-    let decoded = actor.decode(&encoded);
-    assert_eq!(decoded.data(), shard.data());
-}
-
-#[test]
-fn identity_actor_local_keys() {
-    let actor = Actor::identity("test", "test@test");
-    assert_eq!(actor.keys(), &Local::None);
-}
-
-// ===========================================================================
 // PlainKeys sign/encrypt/decrypt (Error = Infallible)
 // ===========================================================================
 
@@ -80,7 +32,7 @@ fn plain_keys_sign_produces_signature() {
 }
 
 #[test]
-fn plain_keys_sign_through_actor_roundtrip() {
+fn plain_keys_sign_public_roundtrip() {
     let shard = make_blob_shard(vec![1, 2, 3]);
     let sig = PlainKeys.sign(&shard).unwrap();
     let public = Public::new(shard.clone(), sig);
@@ -156,49 +108,6 @@ fn local_keys_plain_encrypt_decrypt_roundtrip() {
 }
 
 // ===========================================================================
-// Custom actor (String -> Blob transformation)
-// ===========================================================================
-
-fn string_to_blob(f: &Fractal<String>) -> Fractal<Blob> {
-    let ref_ = f.self_ref().clone();
-    Fractal::shard_typed(ref_, f.data().as_bytes().to_vec())
-}
-
-fn blob_to_string(f: &Fractal<Blob>) -> Fractal<String> {
-    let ref_ = f.self_ref().clone();
-    Fractal::shard(ref_, String::from_utf8(f.data().clone()).unwrap())
-}
-
-#[test]
-fn custom_actor_string_to_bytes() {
-    let actor: Actor<String, Blob, PlainKeys> = Actor::new(
-        "transform",
-        "t@t",
-        string_to_blob,
-        blob_to_string,
-        PlainKeys,
-    );
-    let input = make_string_shard("hello");
-    let encoded = actor.encode(&input);
-    assert_eq!(encoded.data(), &b"hello".to_vec());
-}
-
-#[test]
-fn custom_actor_transforms_data() {
-    let actor: Actor<String, Blob, PlainKeys> = Actor::new(
-        "transform",
-        "t@t",
-        string_to_blob,
-        blob_to_string,
-        PlainKeys,
-    );
-    let input = make_string_shard("cafe");
-    let encoded = actor.encode(&input);
-    let decoded = actor.decode(&encoded);
-    assert_eq!(decoded.data(), "cafe");
-}
-
-// ===========================================================================
 // Custom Keys implementation
 // ===========================================================================
 
@@ -236,58 +145,45 @@ impl Keys for TestKeys {
 }
 
 #[test]
-fn custom_actor_with_keys() {
-    let keys = TestKeys {
-        label: "test".into(),
-    };
-    let actor: Actor<Blob, Blob, TestKeys> =
-        Actor::new("keyed", "k@k", |f| f.clone(), |f| f.clone(), keys.clone());
-    assert_eq!(actor.keys(), &keys);
-}
-
-#[test]
 fn custom_keys_sign_has_signature() {
     let keys = TestKeys {
         label: "test".into(),
     };
-    let actor: Actor<Blob, Blob, TestKeys> =
-        Actor::new("keyed", "k@k", |f| f.clone(), |f| f.clone(), keys);
     let shard = make_blob_shard(vec![1, 2, 3]);
-    let signed = actor.sign(shard).unwrap();
-    assert_eq!(signed.signature().bytes(), b"test-sig");
-}
-
-// ===========================================================================
-// Actor derives Clone
-// ===========================================================================
-
-#[test]
-fn actor_clone() {
-    let actor = Actor::identity("mara", "mara@systemic.engineer");
-    let cloned = actor.clone();
-    assert_eq!(cloned.name(), "mara");
-    assert_eq!(cloned.email(), "mara@systemic.engineer");
-}
-
-// ===========================================================================
-// Actor sign/encrypt/decrypt return Result
-// ===========================================================================
-
-#[test]
-fn actor_sign_returns_result() {
-    let actor = Actor::identity("test", "test@test");
-    let shard = make_blob_shard(vec![1, 2, 3]);
-    let signed = actor.sign(shard.clone()).unwrap();
-    assert_eq!(signed.inner().data(), shard.data());
+    let sig = keys.sign(&shard).unwrap();
+    assert_eq!(sig.bytes(), b"test-sig");
 }
 
 #[test]
-fn actor_encrypt_decrypt_returns_result() {
-    let actor = Actor::identity("test", "test@test");
+fn custom_keys_encrypt_decrypt_roundtrip() {
+    let keys = TestKeys {
+        label: "test".into(),
+    };
+    let data = vec![1, 2, 3];
+    let shard = make_blob_shard(data.clone());
+    let encrypted = keys.encrypt(shard).unwrap();
+    let decrypted: Fractal<Blob> = keys.decrypt(&encrypted).unwrap();
+    assert_eq!(decrypted.data(), &data);
+}
+
+// ===========================================================================
+// Public<K, Commit<E>> — signed commit type is expressible
+// ===========================================================================
+
+#[test]
+fn public_commit_implements_draftable() {
+    use fragmentation::commit::{Draft, Draftable};
     let shard = make_blob_shard(vec![1, 2, 3]);
-    let encrypted = actor.encrypt(shard.clone()).unwrap();
-    let decrypted: Fractal<Blob> = actor.decrypt(&encrypted).unwrap();
-    assert_eq!(decrypted.data(), shard.data());
+    let sig = Local::None.sign(&shard).unwrap();
+    let draft = Draft::root("signed observation", shard);
+    let public: Public<Local, Draft<Blob>> = Public::new(draft, sig);
+
+    fn accepts_draftable<T: Draftable>(_d: &T) {}
+    accepts_draftable(&public);
+
+    assert_eq!(public.key(), &Local::None);
+    assert_eq!(public.message().0, "signed observation");
+    assert!(public.parent().is_none());
 }
 
 // ===========================================================================
@@ -300,7 +196,6 @@ mod ssh_tests {
     use fragmentation::keys::SSH;
 
     fn test_ssh_key() -> SSH {
-        // Generate an Ed25519 key in memory for testing
         SSH::generate_ed25519().expect("generate test key")
     }
 
@@ -351,9 +246,7 @@ mod ssh_tests {
         let data = vec![1, 2, 3, 4, 5];
         let shard = make_blob_shard(data.clone());
         let encrypted = local.encrypt(shard).unwrap();
-        // Ciphertext must differ from plaintext
         assert_ne!(encrypted.ciphertext(), &data[..]);
-        // ECIES envelope: 32 ephemeral_pub + 12 nonce + ciphertext + 16 tag
         assert!(encrypted.ciphertext().len() >= 60 + data.len());
     }
 
@@ -375,7 +268,6 @@ mod ssh_tests {
         let local2 = Local::Ssh(Box::new(key2));
         let shard = make_blob_shard(vec![42, 43, 44]);
         let encrypted = local1.encrypt(shard).unwrap();
-        // Wrap ciphertext with key2's identity for decrypt dispatch
         let mismatched =
             fragmentation::keys::Encrypted::new(encrypted.ciphertext().to_vec(), local2.clone());
         let result: Result<Fractal<Blob>, _> = local2.decrypt(&mismatched);
@@ -389,7 +281,6 @@ mod ssh_tests {
         let shard = make_blob_shard(vec![1, 2, 3]);
         let enc1 = local.encrypt(shard.clone()).unwrap();
         let enc2 = local.encrypt(shard).unwrap();
-        // Ephemeral key + random nonce → different ciphertext each time
         assert_ne!(enc1.ciphertext(), enc2.ciphertext());
     }
 }
@@ -410,7 +301,6 @@ mod gpg_tests {
             .is_ok()
     }
 
-    /// Create an isolated GPG keyring with a test key. Returns None if gpg unavailable.
     fn setup_gpg_keyring() -> Option<(GPG, tempfile::TempDir)> {
         if !gpg_available() {
             return None;
@@ -418,10 +308,7 @@ mod gpg_tests {
         let td = tempfile::tempdir().ok()?;
         let home = td.path();
 
-        // Generate an RSA-2048 test key with no passphrase
-        let batch_config = format!(
-            "%no-protection\nKey-Type: RSA\nKey-Length: 2048\nSubkey-Type: RSA\nSubkey-Length: 2048\nName-Real: Test\nName-Email: test@test\nExpire-Date: 0\n%commit\n"
-        );
+        let batch_config = "%no-protection\nKey-Type: RSA\nKey-Length: 2048\nSubkey-Type: RSA\nSubkey-Length: 2048\nName-Real: Test\nName-Email: test@test\nExpire-Date: 0\n%commit\n";
         let output = std::process::Command::new("gpg")
             .env("GNUPGHOME", home)
             .args(["--batch", "--generate-key"])
@@ -442,14 +329,9 @@ mod gpg_tests {
             })?;
 
         if !output.status.success() {
-            eprintln!(
-                "gpg key generation failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
             return None;
         }
 
-        // Get the key ID
         let list_output = std::process::Command::new("gpg")
             .env("GNUPGHOME", home)
             .args(["--list-keys", "--with-colons", "--keyid-format", "long"])
@@ -469,27 +351,23 @@ mod gpg_tests {
     #[test]
     fn gpg_key_public_carries_key() {
         if !gpg_available() {
-            eprintln!("gpg not available, skipping");
             return;
         }
         let key = GPG::new("test-key-id");
         let local = Local::Gpg(key.clone());
         let shard = make_blob_shard(vec![42]);
-        // Sign may fail if gpg key doesn't exist — that's expected in CI
-        // Just verify the key is carried when it does work
         match local.sign(&shard) {
             Ok(sig) => {
                 let public = Public::new(shard, sig);
                 assert_eq!(public.key(), &Local::Gpg(key));
             }
-            Err(_) => eprintln!("gpg sign failed (expected without real key), skipping assertion"),
+            Err(_) => {}
         }
     }
 
     #[test]
     fn gpg_encrypt_decrypt_roundtrip() {
         let Some((gpg, _td)) = setup_gpg_keyring() else {
-            eprintln!("gpg keyring setup failed, skipping");
             return;
         };
         let local = Local::Gpg(gpg);
@@ -503,7 +381,6 @@ mod gpg_tests {
     #[test]
     fn gpg_encrypt_ciphertext_differs() {
         let Some((gpg, _td)) = setup_gpg_keyring() else {
-            eprintln!("gpg keyring setup failed, skipping");
             return;
         };
         let local = Local::Gpg(gpg);
@@ -536,12 +413,10 @@ mod from_repo_tests {
         let td = tempfile::tempdir().unwrap();
         let repo = git2::Repository::init(td.path()).unwrap();
 
-        // Write a test SSH key to a temp file
         let key = fragmentation::keys::SSH::generate_ed25519().unwrap();
         let key_path = td.path().join("test_key");
         key.write_to_file(&key_path).unwrap();
 
-        // Configure git to use SSH signing with that key
         let mut config = repo.config().unwrap();
         config.set_str("gpg.format", "ssh").unwrap();
         config
@@ -565,27 +440,4 @@ mod from_repo_tests {
         let keys = Local::from_repo(&repo).unwrap();
         assert!(matches!(keys, Local::Gpg(_)));
     }
-}
-
-// ===========================================================================
-// Public<K, Commit<E>> — signed commit type is expressible
-// ===========================================================================
-
-/// Public<K, T: Draftable> implements Draftable — signed commits are draftable things.
-#[test]
-fn public_commit_implements_draftable() {
-    use fragmentation::commit::{Draft, Draftable};
-    let actor = Actor::identity("mara", "mara@systemic.engineer");
-    let shard = make_blob_shard(vec![1, 2, 3]);
-    let sig = actor.keys().sign(&shard).unwrap();
-    let draft = Draft::root("signed observation", shard);
-    let public: Public<Local, Draft<Blob>> = Public::new(draft, sig);
-
-    // Compile-time proof: Public<K, Draft<E>> implements Draftable
-    fn accepts_draftable<T: Draftable>(_d: &T) {}
-    accepts_draftable(&public);
-
-    assert_eq!(public.key(), &Local::None);
-    assert_eq!(public.message().0, "signed observation");
-    assert!(public.parent().is_none());
 }

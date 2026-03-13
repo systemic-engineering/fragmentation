@@ -139,6 +139,8 @@ impl Keys for Local {
     type Error = LocalError;
 
     fn sign<E>(&self, fragment: &Fractal<E>) -> Result<Signature<Self>, Self::Error> {
+        #[cfg(not(any(feature = "ssh", feature = "gpg")))]
+        let _ = &fragment;
         match self {
             Local::None => Ok(Signature::new(Local::None, vec![])),
             #[cfg(feature = "ssh")]

@@ -108,7 +108,6 @@ fn tree_oid_children_order_matters() {
 #[cfg(feature = "git")]
 mod git_native {
     use super::*;
-    use fragmentation::actor::Actor;
     use fragmentation::commit::{Commit, Draft, Draftable};
     use fragmentation::git;
     use fragmentation::witnessed::{Author, Committer};
@@ -329,15 +328,15 @@ mod git_native {
     }
 
     // =================================================================
-    // Actor::commit — high-level API
+    // Draft::write — direct commit at boundary
     // =================================================================
 
     #[test]
-    fn actor_commit_single_identity() {
+    fn commit_single_identity() {
         let (_dir, repo) = init_repo();
-        let actor = Actor::identity("mara", "mara@systemic.engineer");
-        let c = actor
-            .commit(Draft::root("test", make_shard("x")), &repo)
+        let c = Draft::root("test", make_shard("x"))
+            .authored(Author::new("mara", "mara@systemic.engineer"))
+            .write(&repo, Committer::new("mara", "mara@systemic.engineer"))
             .unwrap();
         assert_eq!(c.witnessed().author.name, "mara");
         assert_eq!(c.witnessed().committer.name, "mara");
@@ -346,12 +345,12 @@ mod git_native {
     }
 
     #[test]
-    fn actor_commit_preserves_authored() {
+    fn commit_preserves_authored_vs_committer() {
         let (_dir, repo) = init_repo();
-        let reed = Actor::identity("reed", "reed@systemic.engineer");
-        let d = Draft::root("test", make_shard("x"))
-            .authored(Author::new("alex", "alex@systemic.engineer"));
-        let c = reed.commit(d, &repo).unwrap();
+        let c = Draft::root("test", make_shard("x"))
+            .authored(Author::new("alex", "alex@systemic.engineer"))
+            .write(&repo, Committer::new("reed", "reed@systemic.engineer"))
+            .unwrap();
         assert_eq!(c.witnessed().author.name, "alex");
         assert_eq!(c.witnessed().committer.name, "reed");
     }

@@ -2,7 +2,6 @@ use crate::encoding::Encode;
 use crate::ref_::Ref;
 
 /// Raw bytes. The default data type for fragments.
-/// String is a lens an actor applies.
 pub type Blob = Vec<u8>;
 
 /// The interface for anything content-addressed and self-similar.
