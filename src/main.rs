@@ -38,6 +38,9 @@ enum Command {
         /// Parent commit SHA. Omit for root commit.
         #[arg(short, long)]
         parent: Option<String>,
+        /// Ref name under refs/fragmentation/. Defaults to "default".
+        #[arg(long = "ref", default_value = "default")]
+        ref_name: String,
     },
     /// Sign a shard. Prints signature bytes as hex.
     #[cfg(feature = "git")]
@@ -74,7 +77,7 @@ enum Command {
         #[arg(short, long)]
         repo: Option<String>,
         /// Ref name under refs/fragmentation/. Defaults to "default".
-        #[arg(long, default_value = "default")]
+        #[arg(long = "ref", default_value = "default")]
         ref_name: String,
     },
     /// Run as a git smudge/clean filter (identity transform).
@@ -149,6 +152,7 @@ fn main() {
             message,
             repo,
             parent,
+            ref_name,
         } => {
             let input = read_input(data);
             let tree = encoding::encode(&input);
@@ -180,6 +184,15 @@ fn main() {
                 .write(&repository, committer)
                 .unwrap_or_else(|e| {
                     eprintln!("failed to write commit: {}", e);
+                    std::process::exit(1);
+                });
+
+            let full_ref = format!("refs/fragmentation/{}", ref_name);
+            let oid = git2::Oid::from_str(&commit.sha().0).expect("invalid oid");
+            repository
+                .reference(&full_ref, oid, true, "fragmentation commit")
+                .unwrap_or_else(|e| {
+                    eprintln!("failed to update ref: {}", e);
                     std::process::exit(1);
                 });
 

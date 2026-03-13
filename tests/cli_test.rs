@@ -277,7 +277,10 @@ fn commit_default_ref_is_default() {
         ])
         .output()
         .unwrap();
-    assert!(rev.status.success(), "refs/fragmentation/default should exist");
+    assert!(
+        rev.status.success(),
+        "refs/fragmentation/default should exist"
+    );
     let ref_sha = String::from_utf8(rev.stdout).unwrap().trim().to_string();
     assert_eq!(ref_sha, sha);
 }
@@ -334,7 +337,10 @@ fn commit_chain_advances_ref_to_child() {
         .output()
         .unwrap();
     let ref_sha = String::from_utf8(rev.stdout).unwrap().trim().to_string();
-    assert_eq!(ref_sha, child_sha, "ref should track latest commit in chain");
+    assert_eq!(
+        ref_sha, child_sha,
+        "ref should track latest commit in chain"
+    );
 }
 
 // ===========================================================================
