@@ -208,6 +208,136 @@ fn commit_child_has_parent() {
 }
 
 // ===========================================================================
+// commit — refs/fragmentation/ namespace
+// ===========================================================================
+
+#[test]
+fn commit_advances_fragmentation_ref() {
+    let dir = init_repo();
+    let output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+        .args([
+            "commit",
+            "--repo",
+            dir.path().to_str().unwrap(),
+            "--message",
+            "first",
+            "--ref",
+            "myref",
+            "hello",
+        ])
+        .output()
+        .expect("failed to run fragmentation");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let sha = String::from_utf8(output.stdout).unwrap().trim().to_string();
+    assert_eq!(sha.len(), 40);
+
+    let rev = Command::new("git")
+        .args([
+            "-C",
+            dir.path().to_str().unwrap(),
+            "rev-parse",
+            "refs/fragmentation/myref",
+        ])
+        .output()
+        .unwrap();
+    assert!(rev.status.success(), "ref should exist");
+    let ref_sha = String::from_utf8(rev.stdout).unwrap().trim().to_string();
+    assert_eq!(ref_sha, sha, "ref should point at printed commit");
+}
+
+#[test]
+fn commit_default_ref_is_default() {
+    let dir = init_repo();
+    let output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+        .args([
+            "commit",
+            "--repo",
+            dir.path().to_str().unwrap(),
+            "--message",
+            "first",
+            "hello",
+        ])
+        .output()
+        .expect("failed to run fragmentation");
+
+    assert!(output.status.success());
+    let sha = String::from_utf8(output.stdout).unwrap().trim().to_string();
+
+    let rev = Command::new("git")
+        .args([
+            "-C",
+            dir.path().to_str().unwrap(),
+            "rev-parse",
+            "refs/fragmentation/default",
+        ])
+        .output()
+        .unwrap();
+    assert!(rev.status.success(), "refs/fragmentation/default should exist");
+    let ref_sha = String::from_utf8(rev.stdout).unwrap().trim().to_string();
+    assert_eq!(ref_sha, sha);
+}
+
+#[test]
+fn commit_chain_advances_ref_to_child() {
+    let dir = init_repo();
+
+    let root = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+        .args([
+            "commit",
+            "--repo",
+            dir.path().to_str().unwrap(),
+            "--message",
+            "root",
+            "--ref",
+            "chain",
+            "first",
+        ])
+        .output()
+        .unwrap();
+    assert!(root.status.success());
+    let root_sha = String::from_utf8(root.stdout).unwrap().trim().to_string();
+
+    let child = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+        .args([
+            "commit",
+            "--repo",
+            dir.path().to_str().unwrap(),
+            "--message",
+            "child",
+            "--ref",
+            "chain",
+            "--parent",
+            &root_sha,
+            "second",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        child.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&child.stderr)
+    );
+    let child_sha = String::from_utf8(child.stdout).unwrap().trim().to_string();
+
+    let rev = Command::new("git")
+        .args([
+            "-C",
+            dir.path().to_str().unwrap(),
+            "rev-parse",
+            "refs/fragmentation/chain",
+        ])
+        .output()
+        .unwrap();
+    let ref_sha = String::from_utf8(rev.stdout).unwrap().trim().to_string();
+    assert_eq!(ref_sha, child_sha, "ref should track latest commit in chain");
+}
+
+// ===========================================================================
 // sign — visibility layer
 // ===========================================================================
 
