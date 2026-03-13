@@ -108,6 +108,15 @@ fn public_fragment_is_shard() {
 }
 
 #[test]
+fn public_fragment_is_fractal_default() {
+    // Public<K, T> does not override is_fractal — exercises the trait default (fragment.rs:22-27)
+    let shard = make_shard("terminal");
+    let sig = PlainKeys.sign(&shard).unwrap();
+    let public = Public::new(shard, sig);
+    assert!(!public.is_fractal());
+}
+
+#[test]
 fn public_walk_terminal() {
     let shard = make_shard("single");
     let sig = PlainKeys.sign(&shard).unwrap();

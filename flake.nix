@@ -12,10 +12,12 @@
           buildInputs = [
             pkgs.rustc pkgs.cargo pkgs.clippy pkgs.rustfmt
             pkgs.rust-analyzer pkgs.pkg-config
+            pkgs.cargo-llvm-cov pkgs.llvm
             pkgs.git pkgs.just
             pkgs.openssl pkgs.zlib
           ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
             pkgs.libiconv
+            pkgs.macfuse-stubs
           ];
           shellHook = ''
             export LANG=en_US.UTF-8

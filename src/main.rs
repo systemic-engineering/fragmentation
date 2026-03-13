@@ -64,6 +64,32 @@ enum Command {
         #[arg(short, long)]
         repo: Option<String>,
     },
+    /// Mount a FUSE filesystem backed by fragmentation.
+    /// Blocks until unmounted (fusermount -u <mountpoint> or umount on macOS).
+    #[cfg(feature = "fuse-mount")]
+    Mount {
+        /// Directory to mount.
+        mountpoint: String,
+        /// Path to git repository. Defaults to current directory.
+        #[arg(short, long)]
+        repo: Option<String>,
+        /// Ref name under refs/fragmentation/. Defaults to "default".
+        #[arg(long, default_value = "default")]
+        ref_name: String,
+    },
+    /// Run as a git smudge/clean filter (identity transform).
+    #[cfg(feature = "fuse-mount")]
+    Filter {
+        /// Smudge: git → working tree (read from stdin, write to stdout).
+        #[arg(long)]
+        smudge: bool,
+        /// Clean: working tree → git (read from stdin, write to stdout).
+        #[arg(long)]
+        clean: bool,
+        /// Path to git repository. Defaults to current directory.
+        #[arg(short, long)]
+        repo: Option<String>,
+    },
 }
 
 #[cfg(feature = "git")]
@@ -227,6 +253,50 @@ fn main() {
             std::io::stdout()
                 .write_all(decrypted.data().as_bytes())
                 .expect("failed to write plaintext");
+        }
+        #[cfg(feature = "fuse-mount")]
+        Command::Mount {
+            mountpoint,
+            repo,
+            ref_name,
+        } => {
+            let repository = open_repo(repo);
+            let config = repository.config().expect("failed to read git config");
+            let name = config
+                .get_string("user.name")
+                .expect("git config user.name not set");
+            let email = config
+                .get_string("user.email")
+                .expect("git config user.email not set");
+            let committer = fragmentation::witnessed::Committer::new(&name, &email);
+            let full_ref = format!("refs/fragmentation/{}", ref_name);
+            let fs = fragmentation::fuse::FragmentFs::open(repository, committer, full_ref);
+            fuser::mount2(
+                fs,
+                mountpoint,
+                &[
+                    fuser::MountOption::RW,
+                    fuser::MountOption::FSName("fragmentation".to_string()),
+                ],
+            )
+            .unwrap_or_else(|e| {
+                eprintln!("mount failed: {}", e);
+                std::process::exit(1);
+            });
+        }
+        #[cfg(feature = "fuse-mount")]
+        Command::Filter {
+            smudge: _,
+            clean: _,
+            repo: _,
+        } => {
+            // Identity transform: pass stdin → stdout unchanged.
+            // First pass: witness protocol without transformation.
+            use std::io::Write;
+            let data = read_stdin_bytes();
+            std::io::stdout()
+                .write_all(&data)
+                .expect("failed to write filter output");
         }
     }
 }

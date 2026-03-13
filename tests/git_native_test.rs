@@ -415,6 +415,38 @@ mod git_native {
         assert_eq!(d.parent().unwrap().0, *c1.sha());
     }
 
+    #[test]
+    fn commit_child_witnessed_has_metadata() {
+        let (_dir, repo) = init_repo();
+        let committer = Committer::new("mara", "mara@test");
+        let c1 = Draft::root("first", make_shard("first"))
+            .write(&repo, committer.clone())
+            .unwrap();
+        let c2 = c1
+            .child("second", make_shard("second"))
+            .write(&repo, committer)
+            .unwrap();
+        // .witnessed() on Commit::Child → covers commit.rs:157
+        let w = c2.witnessed();
+        assert_eq!(w.author.name, "mara");
+    }
+
+    #[test]
+    fn commit_child_draftable_message_returns_msg() {
+        let (_dir, repo) = init_repo();
+        let committer = Committer::new("test", "test@test");
+        let c1 = Draft::root("first", make_shard("first"))
+            .write(&repo, committer.clone())
+            .unwrap();
+        let c2 = c1
+            .child("second msg", make_shard("second"))
+            .write(&repo, committer)
+            .unwrap();
+        // .message() via Draftable on Commit::Child → covers commit.rs:219
+        let d: &dyn Draftable<Element = String> = &c2;
+        assert_eq!(d.message().0, "second msg");
+    }
+
     // =================================================================
     // read_tree roundtrip
     // =================================================================
@@ -574,5 +606,160 @@ mod git_native {
         let git_oid = git2::Oid::from_str(&c.sha().0).unwrap();
         let sig = git::commit_signature(&repo, git_oid).unwrap();
         assert!(sig.is_none());
+    }
+
+    #[test]
+    fn commit_signature_signed_commit_returns_some() {
+        let (_dir, repo) = init_repo();
+
+        // Create a base commit to borrow its tree.
+        let c = Draft::root("base", make_shard("payload"))
+            .write(&repo, Committer::new("test", "test@test"))
+            .unwrap();
+        let base_oid = git2::Oid::from_str(&c.sha().0).unwrap();
+        let base_tree = repo.find_commit(base_oid).unwrap().tree().unwrap();
+
+        let sig = git2::Signature::now("test", "test@test").unwrap();
+        let buf = repo
+            .commit_create_buffer(&sig, &sig, "signed commit", &base_tree, &[])
+            .unwrap();
+        let commit_content = std::str::from_utf8(&buf).unwrap();
+        let fake_signature = "FAKESIG";
+
+        let signed_oid = repo
+            .commit_signed(commit_content, fake_signature, None)
+            .unwrap();
+        let result = git::commit_signature(&repo, signed_oid).unwrap();
+        assert!(result.is_some());
+        assert!(!result.unwrap().is_empty());
+    }
+
+    // =================================================================
+    // read_tree_named / read_tree — unexpected object type error path
+    // =================================================================
+
+    #[test]
+    fn read_tree_named_errors_on_non_tree_object() {
+        let (_dir, repo) = init_repo();
+        // A commit OID has type Commit, hitting the _ arm in read_tree_named.
+        let c = Draft::root("test", make_shard("x"))
+            .write(&repo, Committer::new("test", "test@test"))
+            .unwrap();
+        let commit_oid = git2::Oid::from_str(&c.sha().0).unwrap();
+        assert!(git::read_tree_named(&repo, commit_oid).is_err());
+    }
+
+    #[test]
+    fn read_tree_errors_on_non_tree_object() {
+        let (_dir, repo) = init_repo();
+        // A commit OID has type Commit, hitting the _ arm in read_tree.
+        let c = Draft::root("test", make_shard("x"))
+            .write(&repo, Committer::new("test", "test@test"))
+            .unwrap();
+        let commit_oid = git2::Oid::from_str(&c.sha().0).unwrap();
+        assert!(git::read_tree(&repo, commit_oid).is_err());
+    }
+
+    // =================================================================
+    // write_tree_named / read_tree_named — filesystem mode
+    // =================================================================
+
+    #[test]
+    fn write_tree_named_shard_creates_blob() {
+        let (_dir, repo) = init_repo();
+        use fragmentation::fragment::Fractal;
+        let ref_ = Ref::new(sha::Sha("abc".to_string()), "file.txt");
+        let shard: Fractal<Vec<u8>> = Fractal::shard_typed(ref_, b"hello".to_vec());
+        let oid = git::write_tree_named(&repo, &shard).unwrap();
+        let obj = repo.find_object(oid, None).unwrap();
+        assert_eq!(obj.kind(), Some(git2::ObjectType::Blob));
+    }
+
+    #[test]
+    fn write_tree_named_shard_blob_oid_matches() {
+        let (_dir, repo) = init_repo();
+        use fragmentation::fragment::{blob_oid_bytes, Fractal};
+        let data = b"hello world".to_vec();
+        let ref_ = Ref::new(sha::Sha("x".to_string()), "test.txt");
+        let shard: Fractal<Vec<u8>> = Fractal::shard_typed(ref_, data.clone());
+        let oid = git::write_tree_named(&repo, &shard).unwrap();
+        let expected = blob_oid_bytes(&data);
+        assert_eq!(oid.to_string(), expected);
+    }
+
+    #[test]
+    fn write_tree_named_roundtrip_label_preserved() {
+        let (_dir, repo) = init_repo();
+        use fragmentation::fragment::Fractal;
+        let file_ref = Ref::new(sha::Sha("abc".to_string()), "readme.md");
+        let shard: Fractal<Vec<u8>> = Fractal::shard_typed(file_ref, b"content".to_vec());
+        let dir_ref = Ref::new(sha::Sha("def".to_string()), "mydir");
+        let fractal: Fractal<Vec<u8>> = Fractal::new_typed(dir_ref, b"".to_vec(), vec![shard]);
+
+        let oid = git::write_tree_named(&repo, &fractal).unwrap();
+        let recovered = git::read_tree_named(&repo, oid).unwrap();
+
+        assert_eq!(recovered.children().len(), 1);
+        assert_eq!(recovered.children()[0].self_ref().label, "readme.md");
+        assert_eq!(recovered.children()[0].data(), b"content");
+    }
+
+    #[test]
+    fn write_tree_named_nested_dirs() {
+        let (_dir, repo) = init_repo();
+        use fragmentation::fragment::Fractal;
+        let file_ref = Ref::new(sha::Sha("a".to_string()), "file.txt");
+        let file: Fractal<Vec<u8>> = Fractal::shard_typed(file_ref, b"file content".to_vec());
+        let subdir_ref = Ref::new(sha::Sha("b".to_string()), "subdir");
+        let subdir: Fractal<Vec<u8>> = Fractal::new_typed(subdir_ref, b"".to_vec(), vec![file]);
+        let root_ref = Ref::new(sha::Sha("c".to_string()), "root");
+        let root: Fractal<Vec<u8>> = Fractal::new_typed(root_ref, b"".to_vec(), vec![subdir]);
+
+        let oid = git::write_tree_named(&repo, &root).unwrap();
+        let recovered = git::read_tree_named(&repo, oid).unwrap();
+
+        assert_eq!(recovered.children().len(), 1);
+        assert_eq!(recovered.children()[0].self_ref().label, "subdir");
+        assert_eq!(recovered.children()[0].children().len(), 1);
+        assert_eq!(
+            recovered.children()[0].children()[0].self_ref().label,
+            "file.txt"
+        );
+    }
+
+    #[test]
+    fn write_tree_named_data_entry_preserved() {
+        let (_dir, repo) = init_repo();
+        use fragmentation::fragment::Fractal;
+        let dir_ref = Ref::new(sha::Sha("a".to_string()), "dir");
+        let dir_data = b"directory metadata".to_vec();
+        let dir: Fractal<Vec<u8>> = Fractal::new_typed(dir_ref, dir_data.clone(), vec![]);
+
+        let oid = git::write_tree_named(&repo, &dir).unwrap();
+        let recovered = git::read_tree_named(&repo, oid).unwrap();
+
+        assert_eq!(recovered.data(), &dir_data);
+    }
+
+    #[test]
+    fn numbered_and_named_trees_coexist() {
+        let (_dir, repo) = init_repo();
+        use fragmentation::fragment::Fractal;
+
+        // Write numbered tree
+        let child = make_shard("leaf");
+        let parent = make_fractal("root", "data", vec![child]);
+        let numbered_oid = git::write_tree(&repo, &parent).unwrap();
+
+        // Write named tree
+        let file_ref = Ref::new(sha::Sha("x".to_string()), "myfile.txt");
+        let file: Fractal<Vec<u8>> = Fractal::shard_typed(file_ref, b"bytes".to_vec());
+        let dir_ref = Ref::new(sha::Sha("y".to_string()), "mydir");
+        let dir: Fractal<Vec<u8>> = Fractal::new_typed(dir_ref, b"".to_vec(), vec![file]);
+        let named_oid = git::write_tree_named(&repo, &dir).unwrap();
+
+        assert_ne!(numbered_oid, named_oid);
+        assert!(repo.find_tree(numbered_oid).is_ok());
+        assert!(repo.find_tree(named_oid).is_ok());
     }
 }

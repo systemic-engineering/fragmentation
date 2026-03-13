@@ -304,6 +304,25 @@ fn store_merge_dedup() {
     assert_eq!(a.size(), 1);
 }
 
+#[test]
+fn store_keys_returns_shas() {
+    let frag_a = make_shard("alpha");
+    let frag_b = make_shard("beta");
+    let mut s: Store<String> = Store::new();
+    s.put(frag_a.clone());
+    s.put(frag_b.clone());
+    let keys = s.keys();
+    assert_eq!(keys.len(), 2);
+    assert!(keys.iter().any(|k| *k == frag_a.self_ref().sha));
+    assert!(keys.iter().any(|k| *k == frag_b.self_ref().sha));
+}
+
+#[test]
+fn store_default_creates_empty() {
+    let s: Store<String> = Store::default();
+    assert_eq!(s.size(), 0);
+}
+
 // ===========================================================================
 // Walk
 // ===========================================================================

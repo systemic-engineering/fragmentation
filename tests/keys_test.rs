@@ -1,6 +1,6 @@
 use fragmentation::encoding::{Decode, Encode};
 use fragmentation::fragment::{self, Blob, Fractal, Fragmentable};
-use fragmentation::keys::{Keys, Local, PlainKeys, Signature};
+use fragmentation::keys::{Keys, Local, LocalError, PlainKeys, Signature};
 use fragmentation::ref_::Ref;
 use fragmentation::sha;
 use fragmentation::visibility::Public;
@@ -187,6 +187,27 @@ fn public_commit_implements_draftable() {
 }
 
 // ===========================================================================
+// LocalError Display
+// ===========================================================================
+
+#[test]
+fn local_error_display_decode() {
+    let e = LocalError::Decode("bad encoding".to_string());
+    assert_eq!(format!("{}", e), "decode error: bad encoding");
+}
+
+#[test]
+fn public_draftable_fractal_method() {
+    use fragmentation::commit::{Draft, Draftable};
+    let shard = make_blob_shard(vec![1, 2, 3]);
+    let sig = Local::None.sign(&shard).unwrap();
+    let draft = Draft::root("test", shard.clone());
+    let public: Public<Local, Draft<Blob>> = Public::new(draft, sig);
+    // .fractal() via Draftable → covers visibility.rs:148
+    assert_eq!(public.fractal().data(), shard.data());
+}
+
+// ===========================================================================
 // SSH tests (feature-gated)
 // ===========================================================================
 
@@ -282,6 +303,22 @@ mod ssh_tests {
         let enc1 = local.encrypt(shard.clone()).unwrap();
         let enc2 = local.encrypt(shard).unwrap();
         assert_ne!(enc1.ciphertext(), enc2.ciphertext());
+    }
+
+    #[test]
+    fn local_error_display_ssh() {
+        let e = LocalError::Ssh("key failure".to_string());
+        assert_eq!(format!("{}", e), "ssh error: key failure");
+    }
+
+    #[test]
+    fn ssh_decrypt_short_ciphertext_returns_error() {
+        let key = test_ssh_key();
+        let local = Local::Ssh(Box::new(key));
+        // Ciphertext shorter than 60 bytes → early error (keys.rs:302-305)
+        let short = fragmentation::keys::Encrypted::new(vec![0u8; 10], local.clone());
+        let result: Result<Fractal<Blob>, _> = local.decrypt(&short);
+        assert!(result.is_err());
     }
 }
 

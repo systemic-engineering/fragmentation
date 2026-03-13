@@ -6,6 +6,9 @@ lint:
     nix develop -c cargo clippy --all-features -- -D warnings
 
 test:
+    nix develop -c cargo test --features git,ssh,cli,fuse
+
+test-mount:
     nix develop -c cargo test --all-features
 
 format-check:

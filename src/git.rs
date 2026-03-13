@@ -136,6 +136,101 @@ pub(crate) fn write_commit<E: Encode>(
     repo.commit(None, &git_author, &git_committer, message, &tree, &parents)
 }
 
+/// Write a fragment tree using Ref::label as entry names (filesystem mode).
+/// Shard -> blob, Fractal -> tree with .data + label-named children.
+/// Encoding trees keep the numbered format (write_tree); this is for filesystem trees.
+#[cfg(feature = "git")]
+pub fn write_tree_named<E: crate::encoding::Encode>(
+    repo: &git2::Repository,
+    fragment: &Fractal<E>,
+) -> Result<git2::Oid, git2::Error> {
+    match fragment {
+        Fractal::Shard { data, .. } => repo.blob(&data.encode()),
+        Fractal::Fractal { data, fractal, .. } => {
+            let mut builder = repo.treebuilder(None)?;
+
+            let data_oid = repo.blob(&data.encode())?;
+            builder.insert(".data", data_oid, 0o100644)?;
+
+            for child in fractal.iter() {
+                let child_oid = write_tree_named(repo, child)?;
+                let mode = if child.is_shard() { 0o100644 } else { 0o040000 };
+                let name = &child.self_ref().label;
+                builder.insert(name.as_str(), child_oid, mode)?;
+            }
+
+            builder.write()
+        }
+    }
+}
+
+/// Reconstruct a Fractal<Vec<u8>> from git objects using entry name as Ref::label.
+/// Blob -> Shard with raw bytes, Tree -> Fractal. Children get label from tree entry name.
+#[cfg(feature = "git")]
+pub fn read_tree_named(
+    repo: &git2::Repository,
+    oid: git2::Oid,
+) -> Result<crate::fragment::Fractal<Vec<u8>>, Box<dyn std::error::Error>> {
+    use crate::ref_::Ref;
+    use crate::sha::Sha;
+
+    let obj = repo.find_object(oid, None)?;
+
+    match obj.kind() {
+        Some(git2::ObjectType::Blob) => {
+            let blob = repo.find_blob(oid)?;
+            let data = blob.content().to_vec();
+            let ref_ = Ref::new(Sha(oid.to_string()), "self");
+            Ok(crate::fragment::Fractal::shard_typed(ref_, data))
+        }
+        Some(git2::ObjectType::Tree) => {
+            let tree = repo.find_tree(oid)?;
+
+            let data_entry = tree.get_name(".data").ok_or("tree missing .data entry")?;
+            let data_blob = repo.find_blob(data_entry.id())?;
+            let data = data_blob.content().to_vec();
+
+            let mut children = Vec::new();
+            for entry in tree.iter() {
+                let name = entry.name().unwrap_or("").to_string();
+                if name == ".data" {
+                    continue;
+                }
+                let child = read_tree_named(repo, entry.id())?;
+                children.push(relabel_named(child, &name));
+            }
+
+            let ref_ = Ref::new(Sha(oid.to_string()), "self");
+            Ok(crate::fragment::Fractal::new_typed(ref_, data, children))
+        }
+        _ => Err(format!("unexpected object type for oid {}", oid).into()),
+    }
+}
+
+/// Set the label on the top-level Ref of a Fractal<Vec<u8>>.
+#[cfg(feature = "git")]
+fn relabel_named(
+    frag: crate::fragment::Fractal<Vec<u8>>,
+    label: &str,
+) -> crate::fragment::Fractal<Vec<u8>> {
+    use crate::ref_::Ref;
+    match frag {
+        crate::fragment::Fractal::Shard { ref_, data } => crate::fragment::Fractal::Shard {
+            ref_: Ref::new(ref_.sha, label),
+            data,
+        },
+        crate::fragment::Fractal::Fractal {
+            ref_,
+            data,
+            fractal,
+        } => crate::fragment::Fractal::Fractal {
+            ref_: Ref::new(ref_.sha, label),
+            data,
+            fractal,
+        },
+    }
+}
+
 /// Reconstruct a Fractal<String> from git objects.
 /// Blob -> Shard, Tree -> Fractal. Witness lives on the commit, not the tree.
 #[cfg(feature = "git")]

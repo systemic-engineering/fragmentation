@@ -17,6 +17,8 @@ pub mod commit;
 pub mod diff;
 pub mod encoding;
 pub mod fragment;
+#[cfg(any(feature = "fuse", feature = "fuse-mount"))]
+pub mod fuse;
 pub mod git;
 pub mod keys;
 pub mod ref_;
