@@ -1,8 +1,6 @@
 use crate::fragment::Fractal;
 use crate::sha::Sha;
-#[cfg(feature = "git")]
-use crate::witnessed::Committer;
-use crate::witnessed::{Author, Message, Witnessed};
+use crate::witnessed::{Author, Committer, Message, Witnessed};
 
 /// Typed reference to a parent commit. Not a raw SHA — a graph edge.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -78,6 +76,21 @@ impl<E> Draft<E> {
     /// The author, if set.
     pub fn author(&self) -> Option<&Author> {
         self.author.as_ref()
+    }
+
+    /// Commit this draft to an in-memory repo. No git2 dependency.
+    ///
+    /// `timestamp` is in git format: "{epoch} {tz_offset}", e.g. "1234567890 +0000".
+    pub fn commit(
+        self,
+        _repo: &mut crate::repo::Repo<E>,
+        _committer: Committer,
+        _timestamp: &str,
+    ) -> Commit<E>
+    where
+        E: crate::encoding::Encode + Clone,
+    {
+        todo!()
     }
 
     /// Write this draft to a git repository.
@@ -223,5 +236,73 @@ impl<E> Draftable for Commit<E> {
             Commit::Root { .. } => None,
             Commit::Child { parent, .. } => Some(parent),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::encoding;
+    use crate::fragment::Fractal;
+    use crate::repo::Repo;
+
+    fn test_fractal() -> Fractal<String> {
+        encoding::encode("hello world")
+    }
+
+    fn test_committer() -> Committer {
+        Committer::new("Test", "test@test.com")
+    }
+
+    const TEST_TIMESTAMP: &str = "1234567890 +0000";
+
+    #[test]
+    fn draft_commit_root() {
+        let mut repo: Repo<String> = Repo::new();
+        let fractal = test_fractal();
+        let draft = Draft::root("initial", fractal);
+        let commit = draft.commit(&mut repo, test_committer(), TEST_TIMESTAMP);
+        assert!(matches!(commit, Commit::Root { .. }));
+        assert!(!commit.sha().0.is_empty());
+        // Commit should be retrievable from repo
+        assert!(repo.get_commit(commit.sha()).is_some());
+    }
+
+    #[test]
+    fn draft_commit_child() {
+        let mut repo: Repo<String> = Repo::new();
+        let fractal = test_fractal();
+        let root = Draft::root("root", fractal.clone()).commit(
+            &mut repo,
+            test_committer(),
+            TEST_TIMESTAMP,
+        );
+        let child =
+            root.child("child", fractal)
+                .commit(&mut repo, test_committer(), "1234567891 +0000");
+        assert!(matches!(child, Commit::Child { .. }));
+        assert_ne!(child.sha(), root.sha());
+    }
+
+    #[cfg(feature = "git")]
+    #[test]
+    fn draft_commit_matches_write() {
+        let fractal = test_fractal();
+        let author = Author::new("Test", "test@test.com");
+        let committer = Committer::new("Test", "test@test.com");
+        let timestamp = "1234567890 +0000";
+
+        // In-memory via Draft::commit()
+        let mut mem_repo: Repo<String> = Repo::new();
+        let draft = Draft::root("test commit", fractal.clone()).authored(author.clone());
+        let mem_commit = draft.commit(&mut mem_repo, committer.clone(), timestamp);
+
+        // git2 via Draft::write()
+        let tmp = tempfile::tempdir().unwrap();
+        let git_repo = git2::Repository::init(tmp.path()).unwrap();
+        let git_draft = Draft::root("test commit", fractal).authored(author);
+        let git_commit = git_draft.write(&git_repo, committer).unwrap();
+
+        assert_eq!(mem_commit.sha(), git_commit.sha());
     }
 }
