@@ -168,8 +168,7 @@ impl<E> Commit<E> {
         }
     }
 
-    /// Construct a Root with full metadata (used by read_commit).
-    #[cfg(feature = "git")]
+    /// Construct a Root with full metadata.
     pub(crate) fn full_root(
         fractal: Fractal<E>,
         witnessed: Witnessed,
@@ -184,8 +183,7 @@ impl<E> Commit<E> {
         }
     }
 
-    /// Construct a Child with full metadata (used by read_commit).
-    #[cfg(feature = "git")]
+    /// Construct a Child with full metadata.
     pub(crate) fn full_child(
         fractal: Fractal<E>,
         witnessed: Witnessed,
