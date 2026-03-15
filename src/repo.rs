@@ -6,11 +6,11 @@
 
 use std::collections::HashMap;
 
-use crate::commit::{Commit, Draft, Parent};
+use crate::commit::{Commit, Draft, Draftable};
 use crate::encoding::Encode;
-use crate::fragment::{Blob, Fractal};
+use crate::fragment::{content_oid, tree_oid_bytes, Blob, Fractal};
 use crate::sha::Sha;
-use crate::witnessed::Committer;
+use crate::witnessed::{Author, Committer, Message, Timestamp, Witnessed};
 
 /// In-memory git-compatible object store.
 pub struct Repo<E = Blob> {
@@ -30,8 +30,20 @@ impl<E: Encode + Clone> Repo<E> {
     }
 
     /// Store all nodes of a fractal tree recursively. Returns the root content OID.
-    pub fn write_tree(&mut self, _fractal: &Fractal<E>) -> String {
-        todo!()
+    pub fn write_tree(&mut self, fractal: &Fractal<E>) -> String {
+        if let Fractal::Fractal {
+            fractal: children, ..
+        } = fractal
+        {
+            for child in children {
+                self.write_tree(child);
+            }
+        }
+        let oid = content_oid(fractal);
+        self.objects
+            .entry(oid.clone())
+            .or_insert_with(|| fractal.clone());
+        oid
     }
 
     /// Look up a tree/blob by its content OID.
@@ -42,13 +54,45 @@ impl<E: Encode + Clone> Repo<E> {
     /// Create a commit from a draft. Computes git-compatible commit SHA.
     ///
     /// `timestamp` is in git format: "{epoch} {tz_offset}", e.g. "1234567890 +0000".
-    pub fn commit(
-        &mut self,
-        _draft: Draft<E>,
-        _committer: Committer,
-        _timestamp: &str,
-    ) -> Commit<E> {
-        todo!()
+    pub fn commit(&mut self, draft: Draft<E>, committer: Committer, timestamp: &str) -> Commit<E> {
+        let author = draft
+            .author()
+            .cloned()
+            .unwrap_or_else(|| Author::new(&committer.name, &committer.email));
+
+        let fractal = draft.fractal().clone();
+        let message_str = draft.message().0.clone();
+        let parent = draft.parent().cloned();
+
+        // Compute tree OID — shards get wrapped in a tree (matching git::write_commit)
+        let tree_oid = match &fractal {
+            Fractal::Shard { data, .. } => tree_oid_bytes(&data.encode(), &[] as &[Fractal<E>]),
+            Fractal::Fractal { .. } => content_oid(&fractal),
+        };
+
+        self.write_tree(&fractal);
+
+        let commit_sha = compute_commit_sha(
+            &tree_oid,
+            parent.as_ref().map(|p| p.0 .0.as_str()),
+            &author,
+            &committer,
+            timestamp,
+            &message_str,
+        );
+
+        let sha = Sha(commit_sha);
+        let epoch = timestamp.split_whitespace().next().unwrap_or(timestamp);
+        let witnessed = Witnessed::new(author, committer, Timestamp(epoch.to_string()));
+        let msg = Message(message_str);
+
+        let commit = match parent {
+            None => Commit::full_root(fractal, witnessed, msg, sha.clone()),
+            Some(p) => Commit::full_child(fractal, witnessed, msg, p, sha.clone()),
+        };
+
+        self.commits.insert(sha.0.clone(), commit.clone());
+        commit
     }
 
     /// Look up a commit by its SHA.
@@ -57,8 +101,8 @@ impl<E: Encode + Clone> Repo<E> {
     }
 
     /// Point a ref at a commit SHA.
-    pub fn update_ref(&mut self, _name: &str, _sha: Sha) {
-        todo!()
+    pub fn update_ref(&mut self, name: &str, sha: Sha) {
+        self.refs.insert(name.to_string(), sha);
     }
 
     /// Resolve a ref to a commit SHA.
@@ -73,22 +117,60 @@ impl<E: Encode + Clone> Default for Repo<E> {
     }
 }
 
+/// Compute a git-compatible commit SHA from the raw commit object fields.
+///
+/// Mirrors git's commit object format exactly:
+/// ```text
+/// tree {tree_oid}\n
+/// [parent {parent_oid}\n]
+/// author {name} <{email}> {timestamp}\n
+/// committer {name} <{email}> {timestamp}\n
+/// \n
+/// {message}
+/// ```
+fn compute_commit_sha(
+    tree_oid: &str,
+    parent_sha: Option<&str>,
+    author: &Author,
+    committer: &Committer,
+    timestamp: &str,
+    message: &str,
+) -> String {
+    use sha1::{Digest, Sha1};
+
+    let mut content = String::new();
+    content.push_str(&format!("tree {}\n", tree_oid));
+    if let Some(parent) = parent_sha {
+        content.push_str(&format!("parent {}\n", parent));
+    }
+    content.push_str(&format!(
+        "author {} <{}> {}\n",
+        author.name, author.email, timestamp
+    ));
+    content.push_str(&format!(
+        "committer {} <{}> {}\n",
+        committer.name, committer.email, timestamp
+    ));
+    content.push_str(&format!("\n{}", message));
+
+    let header = format!("commit {}\0", content.len());
+    let mut hasher = Sha1::new();
+    hasher.update(header.as_bytes());
+    hasher.update(content.as_bytes());
+    hex::encode(hasher.finalize())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::commit::Draft;
     use crate::encoding;
-    use crate::fragment::{blob_oid, Fractal};
-    use crate::ref_::Ref;
+    use crate::fragment::Fractal;
     use crate::sha::Sha;
-    use crate::witnessed::{Author, Committer};
+    use crate::witnessed::Committer;
 
-    fn test_shard() -> Fractal<String> {
-        let data = "hello";
-        let oid = blob_oid(data);
-        let r = Ref::new(Sha(oid), "test");
-        Fractal::shard(r, data)
-    }
+    #[cfg(feature = "git")]
+    use crate::witnessed::Author;
 
     fn test_fractal() -> Fractal<String> {
         encoding::encode("hello world")

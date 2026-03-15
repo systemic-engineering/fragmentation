@@ -17,12 +17,12 @@ pub mod commit;
 pub mod diff;
 pub mod encoding;
 pub mod fragment;
-pub mod repo;
 #[cfg(any(feature = "fuse", feature = "fuse-mount"))]
 pub mod fuse;
 pub mod git;
 pub mod keys;
 pub mod ref_;
+pub mod repo;
 pub mod sha;
 pub mod store;
 pub mod visibility;
