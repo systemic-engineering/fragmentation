@@ -83,14 +83,14 @@ impl<E> Draft<E> {
     /// `timestamp` is in git format: "{epoch} {tz_offset}", e.g. "1234567890 +0000".
     pub fn commit(
         self,
-        _repo: &mut crate::repo::Repo<E>,
-        _committer: Committer,
-        _timestamp: &str,
+        repo: &mut crate::repo::Repo<E>,
+        committer: Committer,
+        timestamp: &str,
     ) -> Commit<E>
     where
         E: crate::encoding::Encode + Clone,
     {
-        todo!()
+        repo.commit(self, committer, timestamp)
     }
 
     /// Write this draft to a git repository.
@@ -284,25 +284,33 @@ mod tests {
         assert_ne!(child.sha(), root.sha());
     }
 
+    /// Draft::commit() must produce the same SHA as git2 with matching inputs.
+    /// Draft::write() uses Signature::now(), so we compare against raw git2 with fixed timestamps.
     #[cfg(feature = "git")]
     #[test]
-    fn draft_commit_matches_write() {
+    fn draft_commit_matches_git() {
         let fractal = test_fractal();
         let author = Author::new("Test", "test@test.com");
         let committer = Committer::new("Test", "test@test.com");
         let timestamp = "1234567890 +0000";
+        let epoch: i64 = 1234567890;
 
         // In-memory via Draft::commit()
         let mut mem_repo: Repo<String> = Repo::new();
-        let draft = Draft::root("test commit", fractal.clone()).authored(author.clone());
-        let mem_commit = draft.commit(&mut mem_repo, committer.clone(), timestamp);
+        let draft = Draft::root("test commit", fractal.clone()).authored(author);
+        let mem_commit = draft.commit(&mut mem_repo, committer, timestamp);
 
-        // git2 via Draft::write()
+        // git2 with matching fixed timestamp
         let tmp = tempfile::tempdir().unwrap();
         let git_repo = git2::Repository::init(tmp.path()).unwrap();
-        let git_draft = Draft::root("test commit", fractal).authored(author);
-        let git_commit = git_draft.write(&git_repo, committer).unwrap();
+        let tree_oid = crate::git::write_tree(&git_repo, &fractal).unwrap();
+        let tree = git_repo.find_tree(tree_oid).unwrap();
+        let git_sig =
+            git2::Signature::new("Test", "test@test.com", &git2::Time::new(epoch, 0)).unwrap();
+        let git_oid = git_repo
+            .commit(None, &git_sig, &git_sig, "test commit", &tree, &[])
+            .unwrap();
 
-        assert_eq!(mem_commit.sha(), git_commit.sha());
+        assert_eq!(mem_commit.sha().0, git_oid.to_string());
     }
 }
