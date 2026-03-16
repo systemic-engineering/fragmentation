@@ -64,7 +64,7 @@ pub trait Keys: Sized + Clone {
     type Error: fmt::Display + fmt::Debug;
 
     /// Sign a fragment. Returns proof of authorship, not visibility.
-    fn sign<E>(&self, fragment: &Fractal<E>) -> Result<Signature<Self>, Self::Error>;
+    fn sign<E: Encode>(&self, fragment: &Fractal<E>) -> Result<Signature<Self>, Self::Error>;
 
     /// Encrypt a fragment. The result is opaque bytes.
     fn encrypt<E: Encode>(&self, fragment: Fractal<E>) -> Result<Encrypted<Self>, Self::Error>;
@@ -82,7 +82,7 @@ pub struct PlainKeys;
 impl Keys for PlainKeys {
     type Error = Infallible;
 
-    fn sign<E>(&self, _fragment: &Fractal<E>) -> Result<Signature<Self>, Self::Error> {
+    fn sign<E: Encode>(&self, _fragment: &Fractal<E>) -> Result<Signature<Self>, Self::Error> {
         Ok(Signature::new(PlainKeys, vec![]))
     }
 
@@ -138,7 +138,7 @@ pub enum Local {
 impl Keys for Local {
     type Error = LocalError;
 
-    fn sign<E>(&self, fragment: &Fractal<E>) -> Result<Signature<Self>, Self::Error> {
+    fn sign<E: Encode>(&self, fragment: &Fractal<E>) -> Result<Signature<Self>, Self::Error> {
         #[cfg(not(any(feature = "ssh", feature = "gpg")))]
         let _ = &fragment;
         match self {

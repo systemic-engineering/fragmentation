@@ -176,7 +176,7 @@ fn public_commit_implements_draftable() {
     let shard = make_blob_shard(vec![1, 2, 3]);
     let sig = Local::None.sign(&shard).unwrap();
     let draft = Draft::root("signed observation", shard);
-    let public: Public<Local, Draft<Blob>> = Public::new(draft, sig);
+    let public: Public<Local, Draft<Fractal<Blob>>> = Public::new(draft, sig);
 
     fn accepts_draftable<T: Draftable>(_d: &T) {}
     accepts_draftable(&public);
@@ -202,9 +202,9 @@ fn public_draftable_fractal_method() {
     let shard = make_blob_shard(vec![1, 2, 3]);
     let sig = Local::None.sign(&shard).unwrap();
     let draft = Draft::root("test", shard.clone());
-    let public: Public<Local, Draft<Blob>> = Public::new(draft, sig);
-    // .fractal() via Draftable → covers visibility.rs:148
-    assert_eq!(public.fractal().data(), shard.data());
+    let public: Public<Local, Draft<Fractal<Blob>>> = Public::new(draft, sig);
+    // .node() via Draftable → covers visibility.rs:148
+    assert_eq!(public.node().data(), shard.data());
 }
 
 // ===========================================================================

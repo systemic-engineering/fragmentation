@@ -7,7 +7,7 @@ pub type Blob = Vec<u8>;
 /// The interface for anything content-addressed and self-similar.
 /// Turtles all the way down: your children are yourself.
 pub trait Fragmentable {
-    type Data;
+    type Data: Encode;
     fn self_ref(&self) -> &Ref;
     fn data(&self) -> &Self::Data;
     fn children(&self) -> &[Self]
@@ -75,7 +75,7 @@ impl<E> Fractal<E> {
     }
 }
 
-impl<E> Fragmentable for Fractal<E> {
+impl<E: Encode> Fragmentable for Fractal<E> {
     type Data = E;
 
     fn self_ref(&self) -> &Ref {
@@ -108,13 +108,14 @@ impl<E> Fragmentable for Fractal<E> {
     }
 }
 
-/// Compute a git-compatible content OID for a fragment.
+/// Compute a git-compatible content OID for any Fragmentable.
 /// Shard -> blob OID, Fractal -> tree OID.
 /// Witness metadata is NOT included -- same content = same OID.
-pub fn content_oid<E: Encode>(frag: &Fractal<E>) -> String {
-    match frag {
-        Fractal::Shard { data, .. } => blob_oid_bytes(&data.encode()),
-        Fractal::Fractal { data, fractal, .. } => tree_oid_bytes(&data.encode(), fractal),
+pub fn content_oid<F: Fragmentable>(frag: &F) -> String {
+    if frag.is_shard() {
+        blob_oid_bytes(&frag.data().encode())
+    } else {
+        tree_oid_bytes(&frag.data().encode(), frag.children())
     }
 }
 
@@ -137,12 +138,12 @@ pub fn blob_oid_bytes(data: &[u8]) -> String {
 
 /// Compute the git tree OID for a fragment with data and children.
 /// Builds the same binary tree object that git would, then SHA-1 hashes it.
-pub fn tree_oid<E: Encode>(data: &str, children: &[Fractal<E>]) -> String {
+pub fn tree_oid<F: Fragmentable>(data: &str, children: &[F]) -> String {
     tree_oid_bytes(data.as_bytes(), children)
 }
 
 /// Compute the git tree OID for a fragment with byte data and children.
-pub fn tree_oid_bytes<E: Encode>(data: &[u8], children: &[Fractal<E>]) -> String {
+pub fn tree_oid_bytes<F: Fragmentable>(data: &[u8], children: &[F]) -> String {
     use sha1::{Digest, Sha1};
 
     let tree_bytes = build_tree_bytes(data, children);
@@ -156,7 +157,7 @@ pub fn tree_oid_bytes<E: Encode>(data: &[u8], children: &[Fractal<E>]) -> String
 /// Build the raw bytes of a git tree object (without header).
 /// Entries: ".data" blob + "0000", "0001", ... numbered children.
 /// Each entry: "{mode} {name}\0{20-byte SHA-1}"
-fn build_tree_bytes<E: Encode>(data: &[u8], children: &[Fractal<E>]) -> Vec<u8> {
+fn build_tree_bytes<F: Fragmentable>(data: &[u8], children: &[F]) -> Vec<u8> {
     let mut entries: Vec<(String, u32, [u8; 20])> = Vec::new();
 
     // .data entry -- the fragment's own data as a blob

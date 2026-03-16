@@ -1,5 +1,5 @@
 use crate::encoding::Encode;
-use crate::fragment::{content_oid, tree_oid_bytes, Fractal};
+use crate::fragment::{content_oid, tree_oid_bytes, Fragmentable};
 use crate::repo::Repo;
 use crate::sha::Sha;
 use crate::witnessed::{Author, Committer, Message, Timestamp, Witnessed};
@@ -11,8 +11,8 @@ pub struct Parent(pub Sha);
 /// The commit graph interface. Draft and Commit both implement this.
 /// A signed commit (Public<K, T: Draftable>) also implements it.
 pub trait Draftable {
-    type Element;
-    fn fractal(&self) -> &Fractal<Self::Element>;
+    type Node;
+    fn node(&self) -> &Self::Node;
     fn message(&self) -> &Message;
     fn parent(&self) -> Option<&Parent>;
 }
@@ -20,8 +20,8 @@ pub trait Draftable {
 /// A commit before it has been written to git.
 /// Has content and intent, but no SHA and no witnessed metadata.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Draft<E> {
-    fractal: Fractal<E>,
+pub struct Draft<N> {
+    node: N,
     message: Message,
     parent: Option<Parent>,
     author: Option<Author>,
@@ -30,17 +30,17 @@ pub struct Draft<E> {
 /// A commit that has been written to git.
 /// Root has no parent. Child has a parent. The enum discriminant carries the distinction.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Commit<E> {
+pub enum Commit<N> {
     /// Terminal in the commit graph. No parent.
     Root {
-        fractal: Fractal<E>,
+        node: N,
         witnessed: Witnessed,
         message: Message,
         sha: Sha,
     },
     /// Has a parent. Always.
     Child {
-        fractal: Fractal<E>,
+        node: N,
         witnessed: Witnessed,
         message: Message,
         parent: Parent,
@@ -48,11 +48,11 @@ pub enum Commit<E> {
     },
 }
 
-impl<E> Draft<E> {
+impl<N> Draft<N> {
     /// Create a root draft (no parent).
-    pub fn root(message: impl Into<String>, fractal: Fractal<E>) -> Self {
+    pub fn root(message: impl Into<String>, node: N) -> Self {
         Draft {
-            fractal,
+            node,
             message: Message(message.into()),
             parent: None,
             author: None,
@@ -60,9 +60,9 @@ impl<E> Draft<E> {
     }
 
     /// Create a draft with a parent.
-    pub fn new(message: impl Into<String>, fractal: Fractal<E>, parent: Parent) -> Self {
+    pub fn new(message: impl Into<String>, node: N, parent: Parent) -> Self {
         Draft {
-            fractal,
+            node,
             message: Message(message.into()),
             parent: Some(parent),
             author: None,
@@ -85,24 +85,25 @@ impl<E> Draft<E> {
     /// `timestamp` is in git format: "{epoch} {tz_offset}", e.g. "1234567890 +0000".
     pub fn commit(
         self,
-        repo: &mut impl Repo<Element = E>,
+        repo: &mut impl Repo<Node = N>,
         committer: Committer,
         timestamp: &str,
-    ) -> Commit<E>
+    ) -> Commit<N>
     where
-        E: Encode + Clone,
+        N: Fragmentable + Clone,
     {
         let author = self
             .author
             .unwrap_or_else(|| Author::new(&committer.name, &committer.email));
 
         // Compute tree OID — shards get wrapped in a tree (matching git::write_commit)
-        let tree_oid = match &self.fractal {
-            Fractal::Shard { data, .. } => tree_oid_bytes(&data.encode(), &[] as &[Fractal<E>]),
-            Fractal::Fractal { .. } => content_oid(&self.fractal),
+        let tree_oid = if self.node.is_shard() {
+            tree_oid_bytes(&self.node.data().encode(), self.node.children())
+        } else {
+            content_oid(&self.node)
         };
 
-        repo.write_tree(&self.fractal);
+        repo.write_tree(&self.node);
 
         let commit_sha = compute_commit_sha(
             &tree_oid,
@@ -118,31 +119,31 @@ impl<E> Draft<E> {
         let witnessed = Witnessed::new(author, committer, Timestamp(epoch.to_string()));
 
         let commit = match self.parent {
-            None => Commit::full_root(self.fractal, witnessed, self.message, sha.clone()),
-            Some(p) => Commit::full_child(self.fractal, witnessed, self.message, p, sha.clone()),
+            None => Commit::full_root(self.node, witnessed, self.message, sha.clone()),
+            Some(p) => Commit::full_child(self.node, witnessed, self.message, p, sha.clone()),
         };
 
         repo.write_commit(commit.clone());
         commit
     }
+}
 
+/// Git-native write. Only available for Fractal nodes.
+#[cfg(feature = "git")]
+impl<E: Encode> Draft<crate::fragment::Fractal<E>> {
     /// Write this draft to a git repository.
     /// Returns a Commit (Root or Child) with SHA and witnessed metadata.
-    #[cfg(feature = "git")]
     pub fn write(
         self,
         repo: &git2::Repository,
         committer: Committer,
-    ) -> Result<Commit<E>, git2::Error>
-    where
-        E: Encode,
-    {
+    ) -> Result<Commit<crate::fragment::Fractal<E>>, git2::Error> {
         let author = self
             .author
             .unwrap_or_else(|| Author::new(&committer.name, &committer.email));
         let oid = crate::git::write_commit(
             repo,
-            &self.fractal,
+            &self.node,
             &author,
             &committer,
             &self.message.0,
@@ -155,13 +156,13 @@ impl<E> Draft<E> {
 
         Ok(match self.parent {
             None => Commit::Root {
-                fractal: self.fractal,
+                node: self.node,
                 witnessed,
                 message: self.message,
                 sha,
             },
             Some(parent) => Commit::Child {
-                fractal: self.fractal,
+                node: self.node,
                 witnessed,
                 message: self.message,
                 parent,
@@ -171,11 +172,11 @@ impl<E> Draft<E> {
     }
 }
 
-impl<E> Draftable for Draft<E> {
-    type Element = E;
+impl<N> Draftable for Draft<N> {
+    type Node = N;
 
-    fn fractal(&self) -> &Fractal<E> {
-        &self.fractal
+    fn node(&self) -> &N {
+        &self.node
     }
 
     fn message(&self) -> &Message {
@@ -187,7 +188,7 @@ impl<E> Draftable for Draft<E> {
     }
 }
 
-impl<E> Commit<E> {
+impl<N> Commit<N> {
     /// This commit's SHA.
     pub fn sha(&self) -> &Sha {
         match self {
@@ -205,9 +206,9 @@ impl<E> Commit<E> {
     }
 
     /// Create a child draft from this commit.
-    pub fn child(&self, message: impl Into<String>, fractal: Fractal<E>) -> Draft<E> {
+    pub fn child(&self, message: impl Into<String>, node: N) -> Draft<N> {
         Draft {
-            fractal,
+            node,
             message: Message(message.into()),
             parent: Some(Parent(self.sha().clone())),
             author: None,
@@ -215,14 +216,9 @@ impl<E> Commit<E> {
     }
 
     /// Construct a Root with full metadata.
-    pub(crate) fn full_root(
-        fractal: Fractal<E>,
-        witnessed: Witnessed,
-        message: Message,
-        sha: Sha,
-    ) -> Self {
+    pub(crate) fn full_root(node: N, witnessed: Witnessed, message: Message, sha: Sha) -> Self {
         Commit::Root {
-            fractal,
+            node,
             witnessed,
             message,
             sha,
@@ -231,14 +227,14 @@ impl<E> Commit<E> {
 
     /// Construct a Child with full metadata.
     pub(crate) fn full_child(
-        fractal: Fractal<E>,
+        node: N,
         witnessed: Witnessed,
         message: Message,
         parent: Parent,
         sha: Sha,
     ) -> Self {
         Commit::Child {
-            fractal,
+            node,
             witnessed,
             message,
             parent,
@@ -247,13 +243,13 @@ impl<E> Commit<E> {
     }
 }
 
-impl<E> Draftable for Commit<E> {
-    type Element = E;
+impl<N> Draftable for Commit<N> {
+    type Node = N;
 
-    fn fractal(&self) -> &Fractal<E> {
+    fn node(&self) -> &N {
         match self {
-            Commit::Root { fractal, .. } => fractal,
-            Commit::Child { fractal, .. } => fractal,
+            Commit::Root { node, .. } => node,
+            Commit::Child { node, .. } => node,
         }
     }
 
@@ -334,7 +330,7 @@ mod tests {
 
     #[test]
     fn draft_commit_root() {
-        let mut store = Store::<String>::new();
+        let mut store = Store::<Fractal<String>>::new();
         let fractal = test_fractal();
         let draft = Draft::root("initial", fractal);
         let commit = draft.commit(&mut store, test_committer(), TEST_TIMESTAMP);
@@ -346,7 +342,7 @@ mod tests {
 
     #[test]
     fn draft_commit_child() {
-        let mut store = Store::<String>::new();
+        let mut store = Store::<Fractal<String>>::new();
         let fractal = test_fractal();
         let root = Draft::root("root", fractal.clone()).commit(
             &mut store,
@@ -372,7 +368,7 @@ mod tests {
         let epoch: i64 = 1234567890;
 
         // In-memory via Draft::commit()
-        let mut store = Store::<String>::new();
+        let mut store = Store::<Fractal<String>>::new();
         let draft = Draft::root("test commit", fractal.clone()).authored(author);
         let mem_commit = draft.commit(&mut store, committer, timestamp);
 

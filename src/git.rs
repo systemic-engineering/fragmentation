@@ -31,13 +31,13 @@ pub fn read_witnessed(
     Ok((witnessed, message, commit.tree_id()))
 }
 
-/// Read a fragmentation commit. Returns Commit<String> (Root or Child) with full metadata.
+/// Read a fragmentation commit. Returns Commit<Fractal<String>> (Root or Child) with full metadata.
 /// Only works on commits written by write_commit (fragmentation-format trees).
 #[cfg(feature = "git")]
 pub fn read_commit(
     repo: &git2::Repository,
     oid: git2::Oid,
-) -> Result<crate::commit::Commit<String>, Box<dyn std::error::Error>> {
+) -> Result<crate::commit::Commit<Fractal<String>>, Box<dyn std::error::Error>> {
     use crate::commit::Parent;
     use crate::sha::Sha;
 

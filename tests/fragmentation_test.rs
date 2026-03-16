@@ -179,7 +179,10 @@ fn self_ref_shard() {
 fn self_ref_fragment() {
     let f = make_fractal("node", vec![]);
     let r = f.self_ref();
-    assert_eq!(r.sha, sha::Sha(fragment::tree_oid::<String>("node", &[])));
+    assert_eq!(
+        r.sha,
+        sha::Sha(fragment::tree_oid::<Fractal<String>>("node", &[]))
+    );
 }
 
 #[test]
@@ -236,27 +239,27 @@ fn content_oid_different_data() {
 
 #[test]
 fn store_new_is_empty() {
-    let s: Store<String> = Store::new();
+    let s: Store<Fractal<String>> = Store::new();
     assert_eq!(s.object_count(), 0);
 }
 
 #[test]
 fn store_write_and_read() {
     let frag = make_shard("hello");
-    let mut s: Store<String> = Store::new();
+    let mut s: Store<Fractal<String>> = Store::new();
     let oid = s.write_tree(&frag);
     assert_eq!(s.read_tree(&oid), Some(frag));
 }
 
 #[test]
 fn store_read_missing() {
-    let s: Store<String> = Store::new();
+    let s: Store<Fractal<String>> = Store::new();
     assert_eq!(s.read_tree("nonexistent"), None);
 }
 
 #[test]
 fn store_object_count() {
-    let mut s: Store<String> = Store::new();
+    let mut s: Store<Fractal<String>> = Store::new();
     assert_eq!(s.object_count(), 0);
     s.write_tree(&make_shard("a"));
     assert_eq!(s.object_count(), 1);
@@ -267,7 +270,7 @@ fn store_object_count() {
 #[test]
 fn store_write_idempotent() {
     let frag = make_shard("same");
-    let mut s: Store<String> = Store::new();
+    let mut s: Store<Fractal<String>> = Store::new();
     s.write_tree(&frag);
     s.write_tree(&frag);
     assert_eq!(s.object_count(), 1);
@@ -275,9 +278,9 @@ fn store_write_idempotent() {
 
 #[test]
 fn store_merge() {
-    let mut a: Store<String> = Store::new();
+    let mut a: Store<Fractal<String>> = Store::new();
     a.write_tree(&make_shard("alpha"));
-    let mut b: Store<String> = Store::new();
+    let mut b: Store<Fractal<String>> = Store::new();
     b.write_tree(&make_shard("beta"));
     a.merge(b);
     assert_eq!(a.object_count(), 2);
@@ -286,9 +289,9 @@ fn store_merge() {
 #[test]
 fn store_merge_dedup() {
     let frag = make_shard("shared");
-    let mut a: Store<String> = Store::new();
+    let mut a: Store<Fractal<String>> = Store::new();
     a.write_tree(&frag);
-    let mut b: Store<String> = Store::new();
+    let mut b: Store<Fractal<String>> = Store::new();
     b.write_tree(&frag);
     a.merge(b);
     assert_eq!(a.object_count(), 1);
@@ -298,7 +301,7 @@ fn store_merge_dedup() {
 fn store_keys_returns_oids() {
     let frag_a = make_shard("alpha");
     let frag_b = make_shard("beta");
-    let mut s: Store<String> = Store::new();
+    let mut s: Store<Fractal<String>> = Store::new();
     let oid_a = s.write_tree(&frag_a);
     let oid_b = s.write_tree(&frag_b);
     let keys = s.keys();
@@ -309,7 +312,7 @@ fn store_keys_returns_oids() {
 
 #[test]
 fn store_default_creates_empty() {
-    let s: Store<String> = Store::default();
+    let s: Store<Fractal<String>> = Store::default();
     assert_eq!(s.object_count(), 0);
 }
 
@@ -485,7 +488,7 @@ fn diff_summary() {
 
 #[test]
 fn diff_summary_empty() {
-    assert_eq!(diff::summary::<String>(&[]), (0, 0, 0, 0));
+    assert_eq!(diff::summary::<Fractal<String>>(&[]), (0, 0, 0, 0));
 }
 
 // ===========================================================================

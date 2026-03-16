@@ -1,33 +1,30 @@
-use crate::encoding::Encode;
-use crate::fragment::{self, Fractal, Fragmentable};
-
-use crate::fragment::Blob;
+use crate::fragment::{self, Fragmentable};
 
 /// A change between two fragment trees.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Change<E = Blob> {
-    /// Fragmentable exists only in the new tree.
-    Added(Fractal<E>),
-    /// Fragmentable exists only in the old tree.
-    Removed(Fractal<E>),
+pub enum Change<F> {
+    /// Node exists only in the new tree.
+    Added(F),
+    /// Node exists only in the old tree.
+    Removed(F),
     /// Same position, different content.
-    Modified { old: Fractal<E>, new: Fractal<E> },
+    Modified { old: F, new: F },
     /// Same ref, same content.
-    Unchanged(Fractal<E>),
+    Unchanged(F),
 }
 
 /// Diff two fragment trees by their roots.
 /// Compares structurally: same hash = unchanged, different hash = modified.
 /// Children compared positionally.
-pub fn diff<E: Encode + Clone>(old: &Fractal<E>, new: &Fractal<E>) -> Vec<Change<E>> {
+pub fn diff<F: Fragmentable + Clone>(old: &F, new: &F) -> Vec<Change<F>> {
     if fragment::content_oid(old) == fragment::content_oid(new) {
         vec![Change::Unchanged(old.clone())]
     } else {
-        diff_fractals(old, new)
+        diff_nodes(old, new)
     }
 }
 
-fn diff_fractals<E: Encode + Clone>(old: &Fractal<E>, new: &Fractal<E>) -> Vec<Change<E>> {
+fn diff_nodes<F: Fragmentable + Clone>(old: &F, new: &F) -> Vec<Change<F>> {
     let mut changes = vec![Change::Modified {
         old: old.clone(),
         new: new.clone(),
@@ -38,7 +35,7 @@ fn diff_fractals<E: Encode + Clone>(old: &Fractal<E>, new: &Fractal<E>) -> Vec<C
     changes
 }
 
-fn diff_children<E: Encode + Clone>(old: &[Fractal<E>], new: &[Fractal<E>]) -> Vec<Change<E>> {
+fn diff_children<F: Fragmentable + Clone>(old: &[F], new: &[F]) -> Vec<Change<F>> {
     let mut changes = Vec::new();
     let max_len = old.len().max(new.len());
 
@@ -55,7 +52,7 @@ fn diff_children<E: Encode + Clone>(old: &[Fractal<E>], new: &[Fractal<E>]) -> V
 }
 
 /// Summarize a list of changes: (added, removed, modified, unchanged).
-pub fn summary<E>(changes: &[Change<E>]) -> (usize, usize, usize, usize) {
+pub fn summary<F>(changes: &[Change<F>]) -> (usize, usize, usize, usize) {
     changes
         .iter()
         .fold((0, 0, 0, 0), |(a, r, m, u), change| match change {
