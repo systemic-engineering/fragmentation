@@ -2,6 +2,7 @@ use fragmentation::diff;
 use fragmentation::encoding::{Decode, Encode};
 use fragmentation::fragment::{self, Fractal, Fragmentable};
 use fragmentation::ref_::Ref;
+use fragmentation::repo::Repo;
 use fragmentation::sha;
 use fragmentation::store::Store;
 use fragmentation::walk;
@@ -189,21 +190,20 @@ fn walk_bytes_find() {
 // ===========================================================================
 
 #[test]
-fn store_bytes_put_and_get() {
+fn store_bytes_write_and_read() {
     let frag = make_bytes_shard(vec![0xBE, 0xEF]);
     let mut store: Store<Vec<u8>> = Store::new();
-    store.put(frag.clone());
-    let sha = &frag.self_ref().sha;
-    assert_eq!(store.get(sha), Some(&frag));
+    let oid = store.write_tree(&frag);
+    assert_eq!(store.read_tree(&oid), Some(frag));
 }
 
 #[test]
 fn store_bytes_dedup() {
     let frag = make_bytes_shard(vec![0xBE, 0xEF]);
     let mut store: Store<Vec<u8>> = Store::new();
-    store.put(frag.clone());
-    store.put(frag);
-    assert_eq!(store.size(), 1);
+    store.write_tree(&frag);
+    store.write_tree(&frag);
+    assert_eq!(store.object_count(), 1);
 }
 
 // ===========================================================================

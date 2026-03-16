@@ -293,33 +293,33 @@ fn encode_document_oid_matches_content_oid() {
 // ===========================================================================
 
 #[test]
-fn ingest_returns_root_and_store() {
-    let s: Store<String> = Store::new();
-    let (root, updated) = encoding::ingest("hello", s);
+fn ingest_returns_root() {
+    let mut store = Store::<String>::new();
+    let root = encoding::ingest("hello", &mut store);
     assert!(root.is_fractal());
-    assert!(updated.size() > 0);
+    assert!(store.object_count() > 0);
 }
 
 #[test]
 fn ingest_deduplicates_repeated_words() {
-    let s: Store<String> = Store::new();
-    let (_root, updated) = encoding::ingest("the the the", s);
-    assert_eq!(updated.size(), 7);
+    let mut store = Store::<String>::new();
+    let _root = encoding::ingest("the the the", &mut store);
+    assert_eq!(store.object_count(), 7);
 }
 
 #[test]
 fn ingest_all_unique_words() {
-    let s: Store<String> = Store::new();
-    let (_root, updated) = encoding::ingest("a b", s);
-    assert_eq!(updated.size(), 7);
+    let mut store = Store::<String>::new();
+    let _root = encoding::ingest("a b", &mut store);
+    assert_eq!(store.object_count(), 7);
 }
 
 #[test]
 fn ingest_preserves_existing_store() {
-    let s: Store<String> = Store::new();
-    let (_r1, s1) = encoding::ingest("hi", s);
-    let (_r2, s2) = encoding::ingest("hi there", s1);
-    assert_eq!(s2.size(), 13);
+    let mut store = Store::<String>::new();
+    let _r1 = encoding::ingest("hi", &mut store);
+    let _r2 = encoding::ingest("hi there", &mut store);
+    assert_eq!(store.object_count(), 13);
 }
 
 // ===========================================================================

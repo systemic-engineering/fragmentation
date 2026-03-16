@@ -1,6 +1,7 @@
 use fragmentation::diff::{self, Change};
 use fragmentation::fragment::{self, Fractal, Fragmentable};
 use fragmentation::ref_::Ref;
+use fragmentation::repo::Repo;
 use fragmentation::sha;
 use fragmentation::store::Store;
 use fragmentation::walk;
@@ -236,91 +237,80 @@ fn content_oid_different_data() {
 #[test]
 fn store_new_is_empty() {
     let s: Store<String> = Store::new();
-    assert_eq!(s.size(), 0);
+    assert_eq!(s.object_count(), 0);
 }
 
 #[test]
-fn store_put_and_get() {
+fn store_write_and_read() {
     let frag = make_shard("hello");
     let mut s: Store<String> = Store::new();
-    s.put(frag.clone());
-    let sha = &frag.self_ref().sha;
-    assert_eq!(s.get(sha), Some(&frag));
+    let oid = s.write_tree(&frag);
+    assert_eq!(s.read_tree(&oid), Some(frag));
 }
 
 #[test]
-fn store_has() {
-    let frag = make_shard("exists");
+fn store_read_missing() {
+    let s: Store<String> = Store::new();
+    assert_eq!(s.read_tree("nonexistent"), None);
+}
+
+#[test]
+fn store_object_count() {
     let mut s: Store<String> = Store::new();
-    s.put(frag.clone());
-    let sha = &frag.self_ref().sha;
-    assert!(s.has(sha));
-    assert!(!s.has(&sha::Sha("nonexistent".into())));
+    assert_eq!(s.object_count(), 0);
+    s.write_tree(&make_shard("a"));
+    assert_eq!(s.object_count(), 1);
+    s.write_tree(&make_shard("b"));
+    assert_eq!(s.object_count(), 2);
 }
 
 #[test]
-fn store_size() {
-    let mut s: Store<String> = Store::new();
-    assert_eq!(s.size(), 0);
-    s.put(make_shard("a"));
-    assert_eq!(s.size(), 1);
-    s.put(make_shard("b"));
-    assert_eq!(s.size(), 2);
-}
-
-#[test]
-fn store_put_idempotent() {
+fn store_write_idempotent() {
     let frag = make_shard("same");
     let mut s: Store<String> = Store::new();
-    s.put(frag.clone());
-    s.put(frag);
-    assert_eq!(s.size(), 1);
-}
-
-#[test]
-fn store_get_missing() {
-    let s: Store<String> = Store::new();
-    assert_eq!(s.get(&sha::Sha("nope".into())), None);
+    s.write_tree(&frag);
+    s.write_tree(&frag);
+    assert_eq!(s.object_count(), 1);
 }
 
 #[test]
 fn store_merge() {
     let mut a: Store<String> = Store::new();
-    a.put(make_shard("alpha"));
+    a.write_tree(&make_shard("alpha"));
     let mut b: Store<String> = Store::new();
-    b.put(make_shard("beta"));
+    b.write_tree(&make_shard("beta"));
     a.merge(b);
-    assert_eq!(a.size(), 2);
+    assert_eq!(a.object_count(), 2);
 }
 
 #[test]
 fn store_merge_dedup() {
     let frag = make_shard("shared");
     let mut a: Store<String> = Store::new();
-    a.put(frag.clone());
+    a.write_tree(&frag);
     let mut b: Store<String> = Store::new();
-    b.put(frag);
+    b.write_tree(&frag);
     a.merge(b);
-    assert_eq!(a.size(), 1);
+    assert_eq!(a.object_count(), 1);
 }
 
 #[test]
-fn store_keys_returns_shas() {
+fn store_keys_returns_oids() {
     let frag_a = make_shard("alpha");
     let frag_b = make_shard("beta");
     let mut s: Store<String> = Store::new();
-    s.put(frag_a.clone());
-    s.put(frag_b.clone());
+    let oid_a = s.write_tree(&frag_a);
+    let oid_b = s.write_tree(&frag_b);
     let keys = s.keys();
     assert_eq!(keys.len(), 2);
-    assert!(keys.iter().any(|k| *k == frag_a.self_ref().sha));
-    assert!(keys.iter().any(|k| *k == frag_b.self_ref().sha));
+    assert!(keys.contains(&oid_a));
+    assert!(keys.contains(&oid_b));
 }
 
 #[test]
 fn store_default_creates_empty() {
     let s: Store<String> = Store::default();
-    assert_eq!(s.size(), 0);
+    assert_eq!(s.object_count(), 0);
 }
 
 // ===========================================================================

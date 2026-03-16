@@ -1,6 +1,8 @@
-use crate::fragment::Fractal;
+use crate::encoding::Encode;
+use crate::fragment::{content_oid, tree_oid_bytes, Fractal};
+use crate::repo::Repo;
 use crate::sha::Sha;
-use crate::witnessed::{Author, Committer, Message, Witnessed};
+use crate::witnessed::{Author, Committer, Message, Timestamp, Witnessed};
 
 /// Typed reference to a parent commit. Not a raw SHA — a graph edge.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -78,19 +80,50 @@ impl<E> Draft<E> {
         self.author.as_ref()
     }
 
-    /// Commit this draft to an in-memory repo. No git2 dependency.
+    /// Commit this draft to a repo. Computes git-compatible commit SHA.
     ///
     /// `timestamp` is in git format: "{epoch} {tz_offset}", e.g. "1234567890 +0000".
     pub fn commit(
         self,
-        repo: &mut crate::repo::Repo<E>,
+        repo: &mut impl Repo<Element = E>,
         committer: Committer,
         timestamp: &str,
     ) -> Commit<E>
     where
-        E: crate::encoding::Encode + Clone,
+        E: Encode + Clone,
     {
-        repo.commit(self, committer, timestamp)
+        let author = self
+            .author
+            .unwrap_or_else(|| Author::new(&committer.name, &committer.email));
+
+        // Compute tree OID — shards get wrapped in a tree (matching git::write_commit)
+        let tree_oid = match &self.fractal {
+            Fractal::Shard { data, .. } => tree_oid_bytes(&data.encode(), &[] as &[Fractal<E>]),
+            Fractal::Fractal { .. } => content_oid(&self.fractal),
+        };
+
+        repo.write_tree(&self.fractal);
+
+        let commit_sha = compute_commit_sha(
+            &tree_oid,
+            self.parent.as_ref().map(|p| p.0 .0.as_str()),
+            &author,
+            &committer,
+            timestamp,
+            &self.message.0,
+        );
+
+        let sha = Sha(commit_sha);
+        let epoch = timestamp.split_whitespace().next().unwrap_or(timestamp);
+        let witnessed = Witnessed::new(author, committer, Timestamp(epoch.to_string()));
+
+        let commit = match self.parent {
+            None => Commit::full_root(self.fractal, witnessed, self.message, sha.clone()),
+            Some(p) => Commit::full_child(self.fractal, witnessed, self.message, p, sha.clone()),
+        };
+
+        repo.write_commit(commit.clone());
+        commit
     }
 
     /// Write this draft to a git repository.
@@ -102,7 +135,7 @@ impl<E> Draft<E> {
         committer: Committer,
     ) -> Result<Commit<E>, git2::Error>
     where
-        E: crate::encoding::Encode,
+        E: Encode,
     {
         let author = self
             .author
@@ -116,7 +149,7 @@ impl<E> Draft<E> {
             self.parent.as_ref().map(|p| &p.0),
         )?;
         let git_commit = repo.find_commit(oid)?;
-        let timestamp = crate::witnessed::Timestamp(git_commit.time().seconds().to_string());
+        let timestamp = Timestamp(git_commit.time().seconds().to_string());
         let witnessed = Witnessed::new(author, committer, timestamp);
         let sha = Sha(oid.to_string());
 
@@ -239,12 +272,55 @@ impl<E> Draftable for Commit<E> {
     }
 }
 
+/// Compute a git-compatible commit SHA from the raw commit object fields.
+///
+/// Mirrors git's commit object format exactly:
+/// ```text
+/// tree {tree_oid}\n
+/// [parent {parent_oid}\n]
+/// author {name} <{email}> {timestamp}\n
+/// committer {name} <{email}> {timestamp}\n
+/// \n
+/// {message}
+/// ```
+fn compute_commit_sha(
+    tree_oid: &str,
+    parent_sha: Option<&str>,
+    author: &Author,
+    committer: &Committer,
+    timestamp: &str,
+    message: &str,
+) -> String {
+    use sha1::{Digest, Sha1};
+
+    let mut content = String::new();
+    content.push_str(&format!("tree {}\n", tree_oid));
+    if let Some(parent) = parent_sha {
+        content.push_str(&format!("parent {}\n", parent));
+    }
+    content.push_str(&format!(
+        "author {} <{}> {}\n",
+        author.name, author.email, timestamp
+    ));
+    content.push_str(&format!(
+        "committer {} <{}> {}\n",
+        committer.name, committer.email, timestamp
+    ));
+    content.push_str(&format!("\n{}", message));
+
+    let header = format!("commit {}\0", content.len());
+    let mut hasher = Sha1::new();
+    hasher.update(header.as_bytes());
+    hasher.update(content.as_bytes());
+    hex::encode(hasher.finalize())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::encoding;
     use crate::fragment::Fractal;
-    use crate::repo::Repo;
+    use crate::store::Store;
 
     fn test_fractal() -> Fractal<String> {
         encoding::encode("hello world")
@@ -258,28 +334,28 @@ mod tests {
 
     #[test]
     fn draft_commit_root() {
-        let mut repo: Repo<String> = Repo::new();
+        let mut store = Store::<String>::new();
         let fractal = test_fractal();
         let draft = Draft::root("initial", fractal);
-        let commit = draft.commit(&mut repo, test_committer(), TEST_TIMESTAMP);
+        let commit = draft.commit(&mut store, test_committer(), TEST_TIMESTAMP);
         assert!(matches!(commit, Commit::Root { .. }));
         assert!(!commit.sha().0.is_empty());
-        // Commit should be retrievable from repo
-        assert!(repo.get_commit(commit.sha()).is_some());
+        // Commit should be retrievable from store
+        assert!(store.read_commit(commit.sha()).is_some());
     }
 
     #[test]
     fn draft_commit_child() {
-        let mut repo: Repo<String> = Repo::new();
+        let mut store = Store::<String>::new();
         let fractal = test_fractal();
         let root = Draft::root("root", fractal.clone()).commit(
-            &mut repo,
+            &mut store,
             test_committer(),
             TEST_TIMESTAMP,
         );
         let child =
             root.child("child", fractal)
-                .commit(&mut repo, test_committer(), "1234567891 +0000");
+                .commit(&mut store, test_committer(), "1234567891 +0000");
         assert!(matches!(child, Commit::Child { .. }));
         assert_ne!(child.sha(), root.sha());
     }
@@ -296,9 +372,9 @@ mod tests {
         let epoch: i64 = 1234567890;
 
         // In-memory via Draft::commit()
-        let mut mem_repo: Repo<String> = Repo::new();
+        let mut store = Store::<String>::new();
         let draft = Draft::root("test commit", fractal.clone()).authored(author);
-        let mem_commit = draft.commit(&mut mem_repo, committer, timestamp);
+        let mem_commit = draft.commit(&mut store, committer, timestamp);
 
         // git2 with matching fixed timestamp
         let tmp = tempfile::tempdir().unwrap();

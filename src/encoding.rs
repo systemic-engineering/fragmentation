@@ -2,9 +2,8 @@ use std::convert::Infallible;
 
 use crate::fragment::{self, Fractal, Fragmentable};
 use crate::ref_::Ref;
+use crate::repo::Repo;
 use crate::sha;
-use crate::store::Store;
-use crate::walk;
 
 // ===========================================================================
 // Encode / Decode traits
@@ -109,13 +108,11 @@ pub fn encode(text: &str) -> Fractal<String> {
     Fractal::new(r, text.to_string(), paragraphs)
 }
 
-/// Encode and store, returning root Fractal + updated Store (deduped).
-pub fn ingest(text: &str, mut store: Store<String>) -> (Fractal<String>, Store<String>) {
+/// Encode and store, returning root Fractal. Deduplicates via write_tree.
+pub fn ingest(text: &str, repo: &mut impl Repo<Element = String>) -> Fractal<String> {
     let root = encode(text);
-    for frag in walk::collect(&root) {
-        store.put(frag.clone());
-    }
-    (root, store)
+    repo.write_tree(&root);
+    root
 }
 
 /// Decode a Fractal tree back to text.

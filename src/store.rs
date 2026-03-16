@@ -1,56 +1,243 @@
 use std::collections::HashMap;
 
-use crate::fragment::{Blob, Fractal, Fragmentable};
+use crate::commit::Commit;
+use crate::encoding::Encode;
+use crate::fragment::{content_oid, Blob, Fractal};
+use crate::repo::Repo;
 use crate::sha::Sha;
 
-/// Content-addressed fragment store.
+/// In-memory content-addressed store.
 #[derive(Clone, Debug)]
 pub struct Store<E = Blob> {
-    fragments: HashMap<String, Fractal<E>>,
+    objects: HashMap<String, Fractal<E>>,
+    commits: HashMap<String, Commit<E>>,
+    refs: HashMap<String, Sha>,
 }
 
 impl<E> Store<E> {
     /// Create an empty store.
     pub fn new() -> Self {
         Store {
-            fragments: HashMap::new(),
+            objects: HashMap::new(),
+            commits: HashMap::new(),
+            refs: HashMap::new(),
         }
     }
 
-    /// Insert a fragment by its self-ref SHA.
-    pub fn put(&mut self, frag: Fractal<E>) {
-        let key = frag.self_ref().sha.0.clone();
-        self.fragments.insert(key, frag);
+    /// Number of stored objects (trees + blobs).
+    pub fn object_count(&self) -> usize {
+        self.objects.len()
     }
 
-    /// Look up a fragment by SHA.
-    pub fn get(&self, sha: &Sha) -> Option<&Fractal<E>> {
-        self.fragments.get(&sha.0)
-    }
-
-    /// Check if a fragment exists.
-    pub fn has(&self, sha: &Sha) -> bool {
-        self.fragments.contains_key(&sha.0)
-    }
-
-    /// Count fragments in the store.
-    pub fn size(&self) -> usize {
-        self.fragments.len()
-    }
-
-    /// Merge another store into this one. Same SHA = same content.
+    /// Merge another store into this one. Same OID = same content.
     pub fn merge(&mut self, other: Store<E>) {
-        self.fragments.extend(other.fragments);
+        self.objects.extend(other.objects);
+        self.commits.extend(other.commits);
+        self.refs.extend(other.refs);
     }
 
-    /// List all SHAs in the store.
-    pub fn keys(&self) -> Vec<Sha> {
-        self.fragments.keys().map(|k| Sha(k.clone())).collect()
+    /// List all object OIDs.
+    pub fn keys(&self) -> Vec<String> {
+        self.objects.keys().cloned().collect()
     }
 }
 
 impl<E> Default for Store<E> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl<E: Encode + Clone> Repo for Store<E> {
+    type Element = E;
+
+    fn write_tree(&mut self, fractal: &Fractal<E>) -> String {
+        if let Fractal::Fractal {
+            fractal: children, ..
+        } = fractal
+        {
+            for child in children {
+                self.write_tree(child);
+            }
+        }
+        let oid = content_oid(fractal);
+        self.objects
+            .entry(oid.clone())
+            .or_insert_with(|| fractal.clone());
+        oid
+    }
+
+    fn read_tree(&self, oid: &str) -> Option<Fractal<E>> {
+        self.objects.get(oid).cloned()
+    }
+
+    fn write_commit(&mut self, commit: Commit<E>) {
+        self.commits.insert(commit.sha().0.clone(), commit);
+    }
+
+    fn read_commit(&self, sha: &Sha) -> Option<Commit<E>> {
+        self.commits.get(&sha.0).cloned()
+    }
+
+    fn update_ref(&mut self, name: &str, sha: Sha) {
+        self.refs.insert(name.to_string(), sha);
+    }
+
+    fn resolve_ref(&self, name: &str) -> Option<Sha> {
+        self.refs.get(name).cloned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commit::Draft;
+    use crate::encoding;
+    use crate::witnessed::Committer;
+
+    #[cfg(feature = "git")]
+    use crate::witnessed::Author;
+
+    fn test_fractal() -> Fractal<String> {
+        encoding::encode("hello world")
+    }
+
+    fn test_committer() -> Committer {
+        Committer::new("Test", "test@test.com")
+    }
+
+    const TEST_TIMESTAMP: &str = "1234567890 +0000";
+
+    // -- Repo trait conformance --
+
+    fn uses_repo_trait(r: &mut impl Repo<Element = String>) {
+        let fractal = test_fractal();
+        let oid = r.write_tree(&fractal);
+        assert!(r.read_tree(&oid).is_some());
+    }
+
+    #[test]
+    fn store_implements_repo() {
+        let mut store = Store::<String>::new();
+        uses_repo_trait(&mut store);
+    }
+
+    // -- Basic operations --
+
+    #[test]
+    fn store_empty() {
+        let store = Store::<String>::new();
+        assert!(store.read_commit(&Sha("anything".into())).is_none());
+        assert!(store.resolve_ref("HEAD").is_none());
+    }
+
+    #[test]
+    fn store_write_read_tree() {
+        let mut store = Store::<String>::new();
+        let fractal = test_fractal();
+        let oid = store.write_tree(&fractal);
+        let read_back = store.read_tree(&oid).expect("should find tree");
+        assert_eq!(read_back, fractal);
+    }
+
+    #[test]
+    fn store_commit_root() {
+        let mut store = Store::<String>::new();
+        let fractal = test_fractal();
+        let draft = Draft::root("initial", fractal);
+        let commit = draft.commit(&mut store, test_committer(), TEST_TIMESTAMP);
+        assert!(matches!(commit, Commit::Root { .. }));
+        assert!(!commit.sha().0.is_empty());
+    }
+
+    #[test]
+    fn store_commit_child() {
+        let mut store = Store::<String>::new();
+        let fractal = test_fractal();
+        let root_draft = Draft::root("root", fractal.clone());
+        let root = root_draft.commit(&mut store, test_committer(), TEST_TIMESTAMP);
+        let child_draft = root.child("child", fractal);
+        let child = child_draft.commit(&mut store, test_committer(), "1234567891 +0000");
+        assert!(matches!(child, Commit::Child { .. }));
+        assert_ne!(child.sha(), root.sha());
+    }
+
+    #[cfg(feature = "git")]
+    #[test]
+    fn store_commit_sha_matches_git() {
+        let fractal = test_fractal();
+        let timestamp = "1234567890 +0000";
+        let author = Author::new("Test", "test@test.com");
+        let committer = Committer::new("Test", "test@test.com");
+
+        // In-memory
+        let mut store = Store::<String>::new();
+        let draft = Draft::root("test commit", fractal.clone()).authored(author.clone());
+        let mem_commit = draft.commit(&mut store, committer.clone(), timestamp);
+
+        // git2
+        let tmp = tempfile::tempdir().unwrap();
+        let git_repo = git2::Repository::init(tmp.path()).unwrap();
+        let tree_oid = crate::git::write_tree(&git_repo, &fractal).unwrap();
+        let tree = git_repo.find_tree(tree_oid).unwrap();
+        let epoch: i64 = 1234567890;
+        let git_sig =
+            git2::Signature::new("Test", "test@test.com", &git2::Time::new(epoch, 0)).unwrap();
+        let git_oid = git_repo
+            .commit(None, &git_sig, &git_sig, "test commit", &tree, &[])
+            .unwrap();
+
+        assert_eq!(mem_commit.sha().0, git_oid.to_string());
+    }
+
+    #[test]
+    fn store_refs() {
+        let mut store = Store::<String>::new();
+        let sha = Sha("abc123".into());
+        store.update_ref("refs/heads/main", sha.clone());
+        assert_eq!(store.resolve_ref("refs/heads/main"), Some(sha));
+        assert_eq!(store.resolve_ref("refs/heads/other"), None);
+    }
+
+    #[test]
+    fn store_commit_chain() {
+        let mut store = Store::<String>::new();
+        let fractal = test_fractal();
+
+        let c1 = Draft::root("first", fractal.clone()).commit(
+            &mut store,
+            test_committer(),
+            "1000000000 +0000",
+        );
+        let c2 = c1.child("second", fractal.clone()).commit(
+            &mut store,
+            test_committer(),
+            "1000000001 +0000",
+        );
+        let c3 =
+            c2.child("third", fractal)
+                .commit(&mut store, test_committer(), "1000000002 +0000");
+
+        assert!(matches!(
+            store.read_commit(c3.sha()),
+            Some(Commit::Child { .. })
+        ));
+        assert!(matches!(
+            store.read_commit(c2.sha()),
+            Some(Commit::Child { .. })
+        ));
+        assert!(matches!(
+            store.read_commit(c1.sha()),
+            Some(Commit::Root { .. })
+        ));
+    }
+
+    #[test]
+    fn store_deduplication() {
+        let mut store = Store::<String>::new();
+        let fractal = test_fractal();
+        let oid1 = store.write_tree(&fractal);
+        let oid2 = store.write_tree(&fractal);
+        assert_eq!(oid1, oid2);
     }
 }
