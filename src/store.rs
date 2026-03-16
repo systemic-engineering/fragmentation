@@ -1,20 +1,19 @@
 use std::collections::HashMap;
 
 use crate::commit::Commit;
-use crate::encoding::Encode;
-use crate::fragment::{content_oid, Blob, Fractal};
+use crate::fragment::{content_oid, Blob, Fractal, Fragmentable};
 use crate::repo::Repo;
 use crate::sha::Sha;
 
 /// In-memory content-addressed store.
 #[derive(Clone, Debug)]
-pub struct Store<E = Blob> {
-    objects: HashMap<String, Fractal<E>>,
-    commits: HashMap<String, Commit<E>>,
+pub struct Store<N: Fragmentable + Clone = Fractal<Blob>> {
+    objects: HashMap<String, N>,
+    commits: HashMap<String, Commit<N>>,
     refs: HashMap<String, Sha>,
 }
 
-impl<E> Store<E> {
+impl<N: Fragmentable + Clone> Store<N> {
     /// Create an empty store.
     pub fn new() -> Self {
         Store {
@@ -30,7 +29,7 @@ impl<E> Store<E> {
     }
 
     /// Merge another store into this one. Same OID = same content.
-    pub fn merge(&mut self, other: Store<E>) {
+    pub fn merge(&mut self, other: Store<N>) {
         self.objects.extend(other.objects);
         self.commits.extend(other.commits);
         self.refs.extend(other.refs);
@@ -42,40 +41,35 @@ impl<E> Store<E> {
     }
 }
 
-impl<E> Default for Store<E> {
+impl<N: Fragmentable + Clone> Default for Store<N> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<E: Encode + Clone> Repo for Store<E> {
-    type Element = E;
+impl<N: Fragmentable + Clone> Repo for Store<N> {
+    type Node = N;
 
-    fn write_tree(&mut self, fractal: &Fractal<E>) -> String {
-        if let Fractal::Fractal {
-            fractal: children, ..
-        } = fractal
-        {
-            for child in children {
-                self.write_tree(child);
-            }
+    fn write_tree(&mut self, node: &N) -> String {
+        for child in node.children() {
+            self.write_tree(child);
         }
-        let oid = content_oid(fractal);
+        let oid = content_oid(node);
         self.objects
             .entry(oid.clone())
-            .or_insert_with(|| fractal.clone());
+            .or_insert_with(|| node.clone());
         oid
     }
 
-    fn read_tree(&self, oid: &str) -> Option<Fractal<E>> {
+    fn read_tree(&self, oid: &str) -> Option<N> {
         self.objects.get(oid).cloned()
     }
 
-    fn write_commit(&mut self, commit: Commit<E>) {
+    fn write_commit(&mut self, commit: Commit<N>) {
         self.commits.insert(commit.sha().0.clone(), commit);
     }
 
-    fn read_commit(&self, sha: &Sha) -> Option<Commit<E>> {
+    fn read_commit(&self, sha: &Sha) -> Option<Commit<N>> {
         self.commits.get(&sha.0).cloned()
     }
 
@@ -110,7 +104,7 @@ mod tests {
 
     // -- Repo trait conformance --
 
-    fn uses_repo_trait(r: &mut impl Repo<Element = String>) {
+    fn uses_repo_trait(r: &mut impl Repo<Node = Fractal<String>>) {
         let fractal = test_fractal();
         let oid = r.write_tree(&fractal);
         assert!(r.read_tree(&oid).is_some());
@@ -118,7 +112,7 @@ mod tests {
 
     #[test]
     fn store_implements_repo() {
-        let mut store = Store::<String>::new();
+        let mut store = Store::<Fractal<String>>::new();
         uses_repo_trait(&mut store);
     }
 
@@ -126,14 +120,14 @@ mod tests {
 
     #[test]
     fn store_empty() {
-        let store = Store::<String>::new();
+        let store = Store::<Fractal<String>>::new();
         assert!(store.read_commit(&Sha("anything".into())).is_none());
         assert!(store.resolve_ref("HEAD").is_none());
     }
 
     #[test]
     fn store_write_read_tree() {
-        let mut store = Store::<String>::new();
+        let mut store = Store::<Fractal<String>>::new();
         let fractal = test_fractal();
         let oid = store.write_tree(&fractal);
         let read_back = store.read_tree(&oid).expect("should find tree");
@@ -142,7 +136,7 @@ mod tests {
 
     #[test]
     fn store_commit_root() {
-        let mut store = Store::<String>::new();
+        let mut store = Store::<Fractal<String>>::new();
         let fractal = test_fractal();
         let draft = Draft::root("initial", fractal);
         let commit = draft.commit(&mut store, test_committer(), TEST_TIMESTAMP);
@@ -152,7 +146,7 @@ mod tests {
 
     #[test]
     fn store_commit_child() {
-        let mut store = Store::<String>::new();
+        let mut store = Store::<Fractal<String>>::new();
         let fractal = test_fractal();
         let root_draft = Draft::root("root", fractal.clone());
         let root = root_draft.commit(&mut store, test_committer(), TEST_TIMESTAMP);
@@ -171,7 +165,7 @@ mod tests {
         let committer = Committer::new("Test", "test@test.com");
 
         // In-memory
-        let mut store = Store::<String>::new();
+        let mut store = Store::<Fractal<String>>::new();
         let draft = Draft::root("test commit", fractal.clone()).authored(author.clone());
         let mem_commit = draft.commit(&mut store, committer.clone(), timestamp);
 
@@ -192,7 +186,7 @@ mod tests {
 
     #[test]
     fn store_refs() {
-        let mut store = Store::<String>::new();
+        let mut store = Store::<Fractal<String>>::new();
         let sha = Sha("abc123".into());
         store.update_ref("refs/heads/main", sha.clone());
         assert_eq!(store.resolve_ref("refs/heads/main"), Some(sha));
@@ -201,7 +195,7 @@ mod tests {
 
     #[test]
     fn store_commit_chain() {
-        let mut store = Store::<String>::new();
+        let mut store = Store::<Fractal<String>>::new();
         let fractal = test_fractal();
 
         let c1 = Draft::root("first", fractal.clone()).commit(
@@ -234,7 +228,7 @@ mod tests {
 
     #[test]
     fn store_deduplication() {
-        let mut store = Store::<String>::new();
+        let mut store = Store::<Fractal<String>>::new();
         let fractal = test_fractal();
         let oid1 = store.write_tree(&fractal);
         let oid2 = store.write_tree(&fractal);

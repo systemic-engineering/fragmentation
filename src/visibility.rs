@@ -143,10 +143,10 @@ impl<K: Keys> Private<K> {
 }
 
 impl<K: Keys, T: crate::commit::Draftable> crate::commit::Draftable for Public<K, T> {
-    type Element = T::Element;
+    type Node = T::Node;
 
-    fn fractal(&self) -> &Fractal<Self::Element> {
-        self.inner.fractal()
+    fn node(&self) -> &Self::Node {
+        self.inner.node()
     }
 
     fn message(&self) -> &crate::witnessed::Message {

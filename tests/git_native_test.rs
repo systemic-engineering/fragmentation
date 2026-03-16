@@ -78,7 +78,7 @@ fn blob_oid_hello() {
 
 #[test]
 fn tree_oid_is_40_hex_chars() {
-    let oid = fragment::tree_oid::<String>("data", &[]);
+    let oid = fragment::tree_oid::<Fractal<String>>("data", &[]);
     assert_eq!(oid.len(), 40);
     assert!(oid.chars().all(|c| c.is_ascii_hexdigit()));
 }
@@ -375,8 +375,8 @@ mod git_native {
         let c = Draft::root("test", make_shard("payload"))
             .write(&repo, Committer::new("test", "test@test"))
             .unwrap();
-        let d: &dyn Draftable<Element = String> = &c;
-        assert_eq!(d.fractal().data(), "payload");
+        let d: &dyn Draftable<Node = Fractal<String>> = &c;
+        assert_eq!(d.node().data(), "payload");
     }
 
     #[test]
@@ -385,7 +385,7 @@ mod git_native {
         let c = Draft::root("the msg", make_shard("x"))
             .write(&repo, Committer::new("test", "test@test"))
             .unwrap();
-        let d: &dyn Draftable<Element = String> = &c;
+        let d: &dyn Draftable<Node = Fractal<String>> = &c;
         assert_eq!(d.message().0, "the msg");
     }
 
@@ -395,7 +395,7 @@ mod git_native {
         let c = Draft::root("test", make_shard("x"))
             .write(&repo, Committer::new("test", "test@test"))
             .unwrap();
-        let d: &dyn Draftable<Element = String> = &c;
+        let d: &dyn Draftable<Node = Fractal<String>> = &c;
         assert!(d.parent().is_none());
     }
 
@@ -410,7 +410,7 @@ mod git_native {
             .child("second", make_shard("second"))
             .write(&repo, committer)
             .unwrap();
-        let d: &dyn Draftable<Element = String> = &c2;
+        let d: &dyn Draftable<Node = Fractal<String>> = &c2;
         assert!(d.parent().is_some());
         assert_eq!(d.parent().unwrap().0, *c1.sha());
     }
@@ -443,7 +443,7 @@ mod git_native {
             .write(&repo, committer)
             .unwrap();
         // .message() via Draftable on Commit::Child → covers commit.rs:219
-        let d: &dyn Draftable<Element = String> = &c2;
+        let d: &dyn Draftable<Node = Fractal<String>> = &c2;
         assert_eq!(d.message().0, "second msg");
     }
 
@@ -550,7 +550,7 @@ mod git_native {
             "mara@systemic.engineer"
         );
         assert!(recovered.message().0.contains("roundtrip test"));
-        assert_eq!(recovered.fractal().data(), "roundtrip-commit");
+        assert_eq!(recovered.node().data(), "roundtrip-commit");
         assert!(recovered.parent().is_none());
         assert!(matches!(recovered, Commit::Root { .. }));
     }
@@ -571,7 +571,7 @@ mod git_native {
 
         let recovered = git::read_commit(&repo, git2::Oid::from_str(&c2.sha().0).unwrap()).unwrap();
         assert_eq!(recovered.parent().unwrap().0, *c1.sha());
-        assert_eq!(recovered.fractal().data(), "second");
+        assert_eq!(recovered.node().data(), "second");
         assert!(matches!(recovered, Commit::Child { .. }));
     }
 

@@ -37,6 +37,12 @@ impl Encode for String {
     }
 }
 
+impl Encode for () {
+    fn encode(&self) -> Vec<u8> {
+        Vec::new()
+    }
+}
+
 impl Decode for String {
     type Error = std::string::FromUtf8Error;
     fn decode(bytes: &[u8]) -> Result<Self, Self::Error> {
@@ -109,7 +115,7 @@ pub fn encode(text: &str) -> Fractal<String> {
 }
 
 /// Encode and store, returning root Fractal. Deduplicates via write_tree.
-pub fn ingest(text: &str, repo: &mut impl Repo<Element = String>) -> Fractal<String> {
+pub fn ingest(text: &str, repo: &mut impl Repo<Node = Fractal<String>>) -> Fractal<String> {
     let root = encode(text);
     repo.write_tree(&root);
     root

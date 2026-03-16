@@ -1,6 +1,6 @@
 use fragmentation::diff;
 use fragmentation::encoding;
-use fragmentation::fragment::{self, Fragmentable};
+use fragmentation::fragment::{self, Fractal, Fragmentable};
 use fragmentation::store::Store;
 
 // ===========================================================================
@@ -294,7 +294,7 @@ fn encode_document_oid_matches_content_oid() {
 
 #[test]
 fn ingest_returns_root() {
-    let mut store = Store::<String>::new();
+    let mut store = Store::<Fractal<String>>::new();
     let root = encoding::ingest("hello", &mut store);
     assert!(root.is_fractal());
     assert!(store.object_count() > 0);
@@ -302,21 +302,21 @@ fn ingest_returns_root() {
 
 #[test]
 fn ingest_deduplicates_repeated_words() {
-    let mut store = Store::<String>::new();
+    let mut store = Store::<Fractal<String>>::new();
     let _root = encoding::ingest("the the the", &mut store);
     assert_eq!(store.object_count(), 7);
 }
 
 #[test]
 fn ingest_all_unique_words() {
-    let mut store = Store::<String>::new();
+    let mut store = Store::<Fractal<String>>::new();
     let _root = encoding::ingest("a b", &mut store);
     assert_eq!(store.object_count(), 7);
 }
 
 #[test]
 fn ingest_preserves_existing_store() {
-    let mut store = Store::<String>::new();
+    let mut store = Store::<Fractal<String>>::new();
     let _r1 = encoding::ingest("hi", &mut store);
     let _r2 = encoding::ingest("hi there", &mut store);
     assert_eq!(store.object_count(), 13);

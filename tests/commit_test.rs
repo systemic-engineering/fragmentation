@@ -48,10 +48,10 @@ fn draft_with_parent() {
 }
 
 #[test]
-fn draft_fractal_accessor() {
+fn draft_node_accessor() {
     let shard = make_shard("payload");
     let draft = Draft::root("test", shard);
-    assert_eq!(draft.fractal().data(), "payload");
+    assert_eq!(draft.node().data(), "payload");
 }
 
 #[test]
@@ -94,10 +94,10 @@ fn authored_preserves_message() {
 }
 
 #[test]
-fn authored_preserves_fractal() {
+fn authored_preserves_node() {
     let draft = Draft::root("test", make_shard("payload"))
         .authored(Author::new("mara", "mara@systemic.engineer"));
-    assert_eq!(draft.fractal().data(), "payload");
+    assert_eq!(draft.node().data(), "payload");
 }
 
 #[test]
@@ -120,23 +120,23 @@ fn draft_implements_draftable() {
 }
 
 #[test]
-fn draftable_fractal() {
+fn draftable_node() {
     let draft = Draft::root("test", make_shard("payload"));
-    let d: &dyn Draftable<Element = String> = &draft;
-    assert_eq!(d.fractal().data(), "payload");
+    let d: &dyn Draftable<Node = Fractal<String>> = &draft;
+    assert_eq!(d.node().data(), "payload");
 }
 
 #[test]
 fn draftable_message() {
     let draft = Draft::root("the msg", make_shard("x"));
-    let d: &dyn Draftable<Element = String> = &draft;
+    let d: &dyn Draftable<Node = Fractal<String>> = &draft;
     assert_eq!(d.message().0, "the msg");
 }
 
 #[test]
 fn draftable_parent_none() {
     let draft = Draft::root("test", make_shard("x"));
-    let d: &dyn Draftable<Element = String> = &draft;
+    let d: &dyn Draftable<Node = Fractal<String>> = &draft;
     assert!(d.parent().is_none());
 }
 
@@ -144,6 +144,6 @@ fn draftable_parent_none() {
 fn draftable_parent_some() {
     let parent = Parent(sha::Sha("abc".into()));
     let draft = Draft::new("test", make_shard("x"), parent.clone());
-    let d: &dyn Draftable<Element = String> = &draft;
+    let d: &dyn Draftable<Node = Fractal<String>> = &draft;
     assert_eq!(d.parent(), Some(&parent));
 }
