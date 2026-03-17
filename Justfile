@@ -9,7 +9,7 @@ test:
     nix develop -c cargo test --features git,ssh,cli,fuse
 
 test-gleam:
-    nix develop -c sh -c 'cd gleam && gleam test'
+    nix develop -c sh -c 'cd "$(git rev-parse --show-toplevel)/gleam" && gleam test'
 
 test-mount:
     nix develop -c cargo test --all-features

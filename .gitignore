@@ -1,3 +1,4 @@
 target/
 .nix-cargo/
 .claude/
+gleam/build/
