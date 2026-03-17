@@ -15,6 +15,7 @@
             pkgs.cargo-llvm-cov pkgs.llvm
             pkgs.git pkgs.just
             pkgs.openssl pkgs.zlib
+            pkgs.gleam pkgs.erlang
           ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
             pkgs.libiconv
             pkgs.macfuse-stubs
