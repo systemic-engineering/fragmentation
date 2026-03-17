@@ -344,6 +344,188 @@ fn commit_chain_advances_ref_to_child() {
 }
 
 // ===========================================================================
+// commit — configurable namespace
+// ===========================================================================
+
+#[test]
+fn commit_uses_custom_namespace() {
+    let dir = init_repo();
+    let output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+        .args([
+            "commit",
+            "--repo",
+            dir.path().to_str().unwrap(),
+            "--message",
+            "test",
+            "--namespace",
+            "conversation",
+            "hello",
+        ])
+        .output()
+        .expect("failed to run fragmentation");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let sha = String::from_utf8(output.stdout).unwrap().trim().to_string();
+
+    let rev = Command::new("git")
+        .args([
+            "-C",
+            dir.path().to_str().unwrap(),
+            "rev-parse",
+            "refs/conversation/default",
+        ])
+        .output()
+        .unwrap();
+    assert!(rev.status.success(), "refs/conversation/default should exist");
+    let ref_sha = String::from_utf8(rev.stdout).unwrap().trim().to_string();
+    assert_eq!(ref_sha, sha);
+}
+
+#[test]
+fn commit_namespace_from_git_config() {
+    let dir = init_repo();
+    Command::new("git")
+        .args([
+            "-C",
+            dir.path().to_str().unwrap(),
+            "config",
+            "fragmentation.namespace",
+            "conversation",
+        ])
+        .output()
+        .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+        .args([
+            "commit",
+            "--repo",
+            dir.path().to_str().unwrap(),
+            "--message",
+            "test",
+            "hello",
+        ])
+        .output()
+        .expect("failed to run fragmentation");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let sha = String::from_utf8(output.stdout).unwrap().trim().to_string();
+
+    let rev = Command::new("git")
+        .args([
+            "-C",
+            dir.path().to_str().unwrap(),
+            "rev-parse",
+            "refs/conversation/default",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        rev.status.success(),
+        "refs/conversation/default should exist from git config"
+    );
+    let ref_sha = String::from_utf8(rev.stdout).unwrap().trim().to_string();
+    assert_eq!(ref_sha, sha);
+}
+
+#[test]
+fn commit_cli_flag_overrides_git_config() {
+    let dir = init_repo();
+    Command::new("git")
+        .args([
+            "-C",
+            dir.path().to_str().unwrap(),
+            "config",
+            "fragmentation.namespace",
+            "from-config",
+        ])
+        .output()
+        .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+        .args([
+            "commit",
+            "--repo",
+            dir.path().to_str().unwrap(),
+            "--message",
+            "test",
+            "--namespace",
+            "from-flag",
+            "hello",
+        ])
+        .output()
+        .expect("failed to run fragmentation");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let sha = String::from_utf8(output.stdout).unwrap().trim().to_string();
+
+    let rev_flag = Command::new("git")
+        .args([
+            "-C",
+            dir.path().to_str().unwrap(),
+            "rev-parse",
+            "refs/from-flag/default",
+        ])
+        .output()
+        .unwrap();
+    assert!(rev_flag.status.success(), "refs/from-flag/default should exist");
+    let ref_sha = String::from_utf8(rev_flag.stdout).unwrap().trim().to_string();
+    assert_eq!(ref_sha, sha);
+
+    let rev_config = Command::new("git")
+        .args([
+            "-C",
+            dir.path().to_str().unwrap(),
+            "rev-parse",
+            "refs/from-config/default",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        !rev_config.status.success(),
+        "refs/from-config/default should not exist when CLI flag overrides git config"
+    );
+}
+
+#[cfg(feature = "fuse-mount")]
+#[test]
+fn mount_uses_custom_namespace() {
+    // Verify --namespace is accepted by mount. The mount itself will fail
+    // (no FUSE device in CI), but the failure should not be "unknown argument".
+    let dir = init_repo();
+    let mountpoint = tempfile::tempdir().unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+        .args([
+            "mount",
+            "--repo",
+            dir.path().to_str().unwrap(),
+            "--namespace",
+            "conversation",
+            mountpoint.path().to_str().unwrap(),
+        ])
+        .output()
+        .expect("failed to spawn fragmentation");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("unexpected argument '--namespace'"),
+        "mount should accept --namespace flag; stderr: {}",
+        stderr
+    );
+}
+
+// ===========================================================================
 // sign — visibility layer
 // ===========================================================================
 
