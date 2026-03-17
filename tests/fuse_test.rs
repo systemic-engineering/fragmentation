@@ -495,27 +495,42 @@ mod fuse_state_tests {
 
     #[test]
     fn path_visibility_private() {
-        assert_eq!(fragmentation::fuse::path_visibility("private/keys/id.pub"), "private");
+        assert_eq!(
+            fragmentation::fuse::path_visibility("private/keys/id.pub"),
+            "private"
+        );
     }
 
     #[test]
     fn path_visibility_private_with_leading_slash() {
-        assert_eq!(fragmentation::fuse::path_visibility("/private/keys/id.pub"), "private");
+        assert_eq!(
+            fragmentation::fuse::path_visibility("/private/keys/id.pub"),
+            "private"
+        );
     }
 
     #[test]
     fn path_visibility_protected() {
-        assert_eq!(fragmentation::fuse::path_visibility("protected/blog/draft.md"), "protected");
+        assert_eq!(
+            fragmentation::fuse::path_visibility("protected/blog/draft.md"),
+            "protected"
+        );
     }
 
     #[test]
     fn path_visibility_protected_with_leading_slash() {
-        assert_eq!(fragmentation::fuse::path_visibility("/protected/blog/draft.md"), "protected");
+        assert_eq!(
+            fragmentation::fuse::path_visibility("/protected/blog/draft.md"),
+            "protected"
+        );
     }
 
     #[test]
     fn path_visibility_public_default() {
-        assert_eq!(fragmentation::fuse::path_visibility("songs/ballad.txt"), "public");
+        assert_eq!(
+            fragmentation::fuse::path_visibility("songs/ballad.txt"),
+            "public"
+        );
     }
 
     #[test]
@@ -658,14 +673,20 @@ mod fuse_state_tests {
         inner.flush(fh2, "fuse: read").unwrap();
 
         let head_after_read = inner.head().unwrap();
-        assert_ne!(head_after_write, head_after_read, "read annotation should create a new commit");
+        assert_ne!(
+            head_after_write, head_after_read,
+            "read annotation should create a new commit"
+        );
 
         // Verify @read tree is in the commit
         let repo = git2::Repository::open(dir.path()).unwrap();
         let commit = repo.find_commit(head_after_read).unwrap();
         let tree = commit.tree().unwrap();
         let read_entry = tree.get_name("@read");
-        assert!(read_entry.is_some(), "@read subtree should exist in committed tree");
+        assert!(
+            read_entry.is_some(),
+            "@read subtree should exist in committed tree"
+        );
     }
 
     #[test]
@@ -690,7 +711,10 @@ mod fuse_state_tests {
         let (_ino, fh) = inner.create_file(1, "a.txt").unwrap();
         // No write, no read — should be noop
         inner.flush(fh, "fuse: a.txt").unwrap();
-        assert!(inner.head().is_none(), "clean flush with no annotations should not commit");
+        assert!(
+            inner.head().is_none(),
+            "clean flush with no annotations should not commit"
+        );
     }
 
     #[test]
@@ -715,12 +739,21 @@ mod fuse_state_tests {
 
         // Should have .data and one annotation shard (0000)
         let ann_entry = read_tree.get_name("0000");
-        assert!(ann_entry.is_some(), "annotation shard 0000 should exist under @read");
+        assert!(
+            ann_entry.is_some(),
+            "annotation shard 0000 should exist under @read"
+        );
 
         let blob = repo.find_blob(ann_entry.unwrap().id()).unwrap();
         let content = std::str::from_utf8(blob.content()).unwrap();
-        assert!(content.contains("path=witness.txt"), "annotation should contain path");
-        assert!(content.contains("visibility=public"), "annotation should contain visibility");
+        assert!(
+            content.contains("path=witness.txt"),
+            "annotation should contain path"
+        );
+        assert!(
+            content.contains("visibility=public"),
+            "annotation should contain visibility"
+        );
         assert!(
             content.contains(&format!(
                 "content_hash={}",
@@ -728,6 +761,9 @@ mod fuse_state_tests {
             )),
             "annotation should contain content_hash",
         );
-        assert!(content.contains("timestamp="), "annotation should contain timestamp");
+        assert!(
+            content.contains("timestamp="),
+            "annotation should contain timestamp"
+        );
     }
 }

@@ -1,0 +1,1 @@
+-record(author, {self :: binary()}).

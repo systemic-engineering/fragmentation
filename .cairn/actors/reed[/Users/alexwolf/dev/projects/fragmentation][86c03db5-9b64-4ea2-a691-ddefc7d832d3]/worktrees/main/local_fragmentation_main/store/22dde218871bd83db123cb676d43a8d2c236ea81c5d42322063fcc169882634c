@@ -1,0 +1,7 @@
+shard
+ref:658708d9f7dae968caa9110cd69180b28e6db38bb2a076f49c1f13061e0b0bb9:signal
+author:reed[/Users/alexwolf/dev/projects/fragmentation][86c03db5-9b64-4ea2-a691-ddefc7d832d3]
+committer:glue
+timestamp:1772927924239
+message:@signal Real encryption landed on mara/real-encryption. SSH: ECIES (X25519 + ChaCha20-Poly1305). GPG: subprocess. 185 tests green, clippy clean. Ready for review.
+data:text:Real encryption landed on mara/real-encryption. SSH: ECIES (X25519 + ChaCha20-Poly1305). GPG: subprocess. 185 tests green, clippy clean. Ready for review.

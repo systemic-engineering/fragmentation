@@ -1,0 +1,1 @@
+-record(stop, {acc :: any()}).

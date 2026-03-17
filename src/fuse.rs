@@ -1,7 +1,7 @@
 //! FUSE filesystem backed by fragmentation.
 //!
 //! Every `flush()` on a written file creates a git commit at
-//! `refs/fragmentation/<ref_name>`. The filesystem state lives in an inode
+//! `refs/<namespace>/<ref_name>`. The filesystem state lives in an inode
 //! table; each flush snapshots the whole tree as a `Fractal<Vec<u8>>` and
 //! writes it through `write_tree_named`.
 //!

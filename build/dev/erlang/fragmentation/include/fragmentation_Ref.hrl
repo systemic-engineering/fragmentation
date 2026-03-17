@@ -1,0 +1,1 @@
+-record(ref, {sha :: fragmentation:sha(), label :: binary()}).

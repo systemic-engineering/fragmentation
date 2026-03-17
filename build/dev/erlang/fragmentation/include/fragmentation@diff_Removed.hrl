@@ -1,0 +1,1 @@
+-record(removed, {fragment :: fragmentation:fragment()}).

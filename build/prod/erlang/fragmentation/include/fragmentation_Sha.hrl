@@ -1,0 +1,1 @@
+-record(sha, {self :: binary()}).

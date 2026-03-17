@@ -380,7 +380,10 @@ fn commit_uses_custom_namespace() {
         ])
         .output()
         .unwrap();
-    assert!(rev.status.success(), "refs/conversation/default should exist");
+    assert!(
+        rev.status.success(),
+        "refs/conversation/default should exist"
+    );
     let ref_sha = String::from_utf8(rev.stdout).unwrap().trim().to_string();
     assert_eq!(ref_sha, sha);
 }
@@ -479,8 +482,14 @@ fn commit_cli_flag_overrides_git_config() {
         ])
         .output()
         .unwrap();
-    assert!(rev_flag.status.success(), "refs/from-flag/default should exist");
-    let ref_sha = String::from_utf8(rev_flag.stdout).unwrap().trim().to_string();
+    assert!(
+        rev_flag.status.success(),
+        "refs/from-flag/default should exist"
+    );
+    let ref_sha = String::from_utf8(rev_flag.stdout)
+        .unwrap()
+        .trim()
+        .to_string();
     assert_eq!(ref_sha, sha);
 
     let rev_config = Command::new("git")

@@ -1,0 +1,1 @@
+-record(committer, {self :: binary()}).
