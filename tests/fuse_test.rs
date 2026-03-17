@@ -382,7 +382,7 @@ mod fuse_state_tests {
 
     #[test]
     fn read_file_on_dir_returns_error() {
-        let (_dir, inner) = make_inner("refs/fragmentation/test");
+        let (_dir, mut inner) = make_inner("refs/fragmentation/test");
         assert!(inner.read_file(1, 0, 1024).is_err());
     }
 
@@ -487,5 +487,247 @@ mod fuse_state_tests {
         // skips body → line 368 is the false-branch → no-op.
         inner.truncate(dir_ino, 0);
         assert!(inner.is_dir(dir_ino));
+    }
+
+    // -----------------------------------------------------------------------
+    // @read annotation — path_visibility
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn path_visibility_private() {
+        assert_eq!(fragmentation::fuse::path_visibility("private/keys/id.pub"), "private");
+    }
+
+    #[test]
+    fn path_visibility_private_with_leading_slash() {
+        assert_eq!(fragmentation::fuse::path_visibility("/private/keys/id.pub"), "private");
+    }
+
+    #[test]
+    fn path_visibility_protected() {
+        assert_eq!(fragmentation::fuse::path_visibility("protected/blog/draft.md"), "protected");
+    }
+
+    #[test]
+    fn path_visibility_protected_with_leading_slash() {
+        assert_eq!(fragmentation::fuse::path_visibility("/protected/blog/draft.md"), "protected");
+    }
+
+    #[test]
+    fn path_visibility_public_default() {
+        assert_eq!(fragmentation::fuse::path_visibility("songs/ballad.txt"), "public");
+    }
+
+    #[test]
+    fn path_visibility_public_root_file() {
+        assert_eq!(fragmentation::fuse::path_visibility("README.md"), "public");
+    }
+
+    // -----------------------------------------------------------------------
+    // @read annotation — ino_path
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn ino_path_root_returns_none() {
+        let (_dir, inner) = make_inner("refs/fragmentation/test");
+        assert!(inner.ino_path(1).is_none(), "root inode has no path");
+    }
+
+    #[test]
+    fn ino_path_simple_file() {
+        let (_dir, mut inner) = make_inner("refs/fragmentation/test");
+        let (ino, _fh) = inner.create_file(1, "hello.txt").unwrap();
+        assert_eq!(inner.ino_path(ino).unwrap(), "hello.txt");
+    }
+
+    #[test]
+    fn ino_path_nested_file() {
+        let (_dir, mut inner) = make_inner("refs/fragmentation/test");
+        let dir_ino = inner.mkdir(1, "private").unwrap();
+        let (file_ino, _fh) = inner.create_file(dir_ino, "secret.txt").unwrap();
+        assert_eq!(inner.ino_path(file_ino).unwrap(), "private/secret.txt");
+    }
+
+    #[test]
+    fn ino_path_deeply_nested() {
+        let (_dir, mut inner) = make_inner("refs/fragmentation/test");
+        let a = inner.mkdir(1, "a").unwrap();
+        let b = inner.mkdir(a, "b").unwrap();
+        let (file_ino, _fh) = inner.create_file(b, "deep.txt").unwrap();
+        assert_eq!(inner.ino_path(file_ino).unwrap(), "a/b/deep.txt");
+    }
+
+    // -----------------------------------------------------------------------
+    // @read annotation — read_file creates annotations
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn read_file_creates_annotation() {
+        let (_dir, mut inner) = make_inner("refs/fragmentation/test");
+        let (ino, fh) = inner.create_file(1, "observed.txt").unwrap();
+        inner.write_to(fh, 0, b"witness me").unwrap();
+        assert!(inner.read_annotations().is_empty());
+
+        let _data = inner.read_file(ino, 0, 1024).unwrap();
+
+        assert_eq!(inner.read_annotations().len(), 1);
+        let ann = &inner.read_annotations()[0];
+        assert_eq!(ann.path, "observed.txt");
+        assert_eq!(ann.visibility, "public");
+        assert_eq!(
+            ann.content_hash,
+            fragmentation::fragment::blob_oid_bytes(b"witness me"),
+        );
+        assert!(!ann.timestamp.is_empty());
+    }
+
+    #[test]
+    fn read_file_private_path_annotated_as_private() {
+        let (_dir, mut inner) = make_inner("refs/fragmentation/test");
+        let dir_ino = inner.mkdir(1, "private").unwrap();
+        let (ino, fh) = inner.create_file(dir_ino, "secret.key").unwrap();
+        inner.write_to(fh, 0, b"key material").unwrap();
+
+        let _data = inner.read_file(ino, 0, 1024).unwrap();
+
+        assert_eq!(inner.read_annotations()[0].visibility, "private");
+        assert_eq!(inner.read_annotations()[0].path, "private/secret.key");
+    }
+
+    #[test]
+    fn read_file_protected_path_annotated_as_protected() {
+        let (_dir, mut inner) = make_inner("refs/fragmentation/test");
+        let dir_ino = inner.mkdir(1, "protected").unwrap();
+        let (ino, fh) = inner.create_file(dir_ino, "draft.md").unwrap();
+        inner.write_to(fh, 0, b"draft content").unwrap();
+
+        let _data = inner.read_file(ino, 0, 1024).unwrap();
+
+        assert_eq!(inner.read_annotations()[0].visibility, "protected");
+    }
+
+    #[test]
+    fn read_file_offset_beyond_end_no_annotation() {
+        let (_dir, mut inner) = make_inner("refs/fragmentation/test");
+        let (ino, fh) = inner.create_file(1, "short.txt").unwrap();
+        inner.write_to(fh, 0, b"hi").unwrap();
+
+        // Read past end returns empty — no annotation for empty read.
+        let data = inner.read_file(ino, 100, 1024).unwrap();
+        assert!(data.is_empty());
+        assert!(
+            inner.read_annotations().is_empty(),
+            "offset-past-end should not create an annotation",
+        );
+    }
+
+    #[test]
+    fn multiple_reads_accumulate_annotations() {
+        let (_dir, mut inner) = make_inner("refs/fragmentation/test");
+        let (ino, fh) = inner.create_file(1, "multi.txt").unwrap();
+        inner.write_to(fh, 0, b"data").unwrap();
+
+        inner.read_file(ino, 0, 1024).unwrap();
+        inner.read_file(ino, 0, 1024).unwrap();
+        inner.read_file(ino, 0, 1024).unwrap();
+
+        assert_eq!(inner.read_annotations().len(), 3);
+    }
+
+    // -----------------------------------------------------------------------
+    // @read annotation — flush commits annotations
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn flush_commits_read_annotations() {
+        let (dir, mut inner) = make_inner("refs/fragmentation/test");
+
+        // Write a file and flush to establish ref
+        let (ino, fh) = inner.create_file(1, "file.txt").unwrap();
+        inner.write_to(fh, 0, b"content").unwrap();
+        inner.flush(fh, "fuse: file.txt").unwrap();
+        inner.release(fh);
+        let head_after_write = inner.head().unwrap();
+
+        // Read the file — creates annotation
+        inner.read_file(ino, 0, 1024).unwrap();
+        assert_eq!(inner.read_annotations().len(), 1);
+
+        // Flush a clean handle — should still commit due to pending annotation
+        let fh2 = inner.open_existing(ino);
+        inner.flush(fh2, "fuse: read").unwrap();
+
+        let head_after_read = inner.head().unwrap();
+        assert_ne!(head_after_write, head_after_read, "read annotation should create a new commit");
+
+        // Verify @read tree is in the commit
+        let repo = git2::Repository::open(dir.path()).unwrap();
+        let commit = repo.find_commit(head_after_read).unwrap();
+        let tree = commit.tree().unwrap();
+        let read_entry = tree.get_name("@read");
+        assert!(read_entry.is_some(), "@read subtree should exist in committed tree");
+    }
+
+    #[test]
+    fn flush_clears_annotations_after_commit() {
+        let (_dir, mut inner) = make_inner("refs/fragmentation/test");
+        let (ino, fh) = inner.create_file(1, "file.txt").unwrap();
+        inner.write_to(fh, 0, b"content").unwrap();
+
+        inner.read_file(ino, 0, 1024).unwrap();
+        assert_eq!(inner.read_annotations().len(), 1);
+
+        inner.flush(fh, "fuse: file.txt").unwrap();
+        assert!(
+            inner.read_annotations().is_empty(),
+            "annotations should be cleared after flush",
+        );
+    }
+
+    #[test]
+    fn flush_noop_when_clean_and_no_annotations() {
+        let (_dir, mut inner) = make_inner("refs/fragmentation/test");
+        let (_ino, fh) = inner.create_file(1, "a.txt").unwrap();
+        // No write, no read — should be noop
+        inner.flush(fh, "fuse: a.txt").unwrap();
+        assert!(inner.head().is_none(), "clean flush with no annotations should not commit");
+    }
+
+    #[test]
+    fn flush_read_annotation_contains_serialized_data() {
+        let (dir, mut inner) = make_inner("refs/fragmentation/test");
+
+        let (ino, fh) = inner.create_file(1, "witness.txt").unwrap();
+        inner.write_to(fh, 0, b"observed").unwrap();
+
+        // Read creates annotation
+        inner.read_file(ino, 0, 1024).unwrap();
+
+        // Flush commits everything (dirty from write + annotation from read)
+        inner.flush(fh, "fuse: witness.txt").unwrap();
+
+        // Verify the @read subtree has annotation data
+        let repo = git2::Repository::open(dir.path()).unwrap();
+        let commit = repo.find_commit(inner.head().unwrap()).unwrap();
+        let tree = commit.tree().unwrap();
+        let read_entry = tree.get_name("@read").unwrap();
+        let read_tree = repo.find_tree(read_entry.id()).unwrap();
+
+        // Should have .data and one annotation shard (0000)
+        let ann_entry = read_tree.get_name("0000");
+        assert!(ann_entry.is_some(), "annotation shard 0000 should exist under @read");
+
+        let blob = repo.find_blob(ann_entry.unwrap().id()).unwrap();
+        let content = std::str::from_utf8(blob.content()).unwrap();
+        assert!(content.contains("path=witness.txt"), "annotation should contain path");
+        assert!(content.contains("visibility=public"), "annotation should contain visibility");
+        assert!(
+            content.contains(&format!(
+                "content_hash={}",
+                fragmentation::fragment::blob_oid_bytes(b"observed")
+            )),
+            "annotation should contain content_hash",
+        );
+        assert!(content.contains("timestamp="), "annotation should contain timestamp");
     }
 }
