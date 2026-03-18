@@ -97,8 +97,21 @@ pub fn write_tree<E: Encode>(
 
             builder.write()
         }
-        Fractal::Lens { .. } => {
-            todo!("write_tree Lens")
+        Fractal::Lens { data, target, .. } => {
+            let mut builder = repo.treebuilder(None)?;
+
+            let data_oid = repo.blob(&data.encode())?;
+            builder.insert(".data", data_oid, 0o100644)?;
+
+            let lens_content: String = target
+                .iter()
+                .map(|sha| sha.0.as_str())
+                .collect::<Vec<&str>>()
+                .join("\n");
+            let lens_oid = repo.blob(lens_content.as_bytes())?;
+            builder.insert(".lens", lens_oid, 0o100644)?;
+
+            builder.write()
         }
     }
 }
@@ -164,8 +177,21 @@ pub fn write_tree_named<E: crate::encoding::Encode>(
 
             builder.write()
         }
-        Fractal::Lens { .. } => {
-            todo!("write_tree_named Lens")
+        Fractal::Lens { data, target, .. } => {
+            let mut builder = repo.treebuilder(None)?;
+
+            let data_oid = repo.blob(&data.encode())?;
+            builder.insert(".data", data_oid, 0o100644)?;
+
+            let lens_content: String = target
+                .iter()
+                .map(|sha| sha.0.as_str())
+                .collect::<Vec<&str>>()
+                .join("\n");
+            let lens_oid = repo.blob(lens_content.as_bytes())?;
+            builder.insert(".lens", lens_oid, 0o100644)?;
+
+            builder.write()
         }
     }
 }
