@@ -1,3 +1,4 @@
+#[allow(unused_imports)]
 use fragmentation::fragment::{self, Fractal, Fragmentable};
 use fragmentation::ref_::Ref;
 use fragmentation::sha;
@@ -16,6 +17,7 @@ fn make_fractal(label: &str, data: &str, children: Vec<Fractal<String>>) -> Frac
     Fractal::new(Ref::new(sha::Sha(oid), label), data, children)
 }
 
+#[cfg(feature = "git")]
 fn make_lens(data: &str, targets: Vec<sha::Sha>) -> Fractal<String> {
     let oid = fragment::lens_oid_bytes(data.as_bytes(), &targets);
     Fractal::lens(Ref::new(sha::Sha(oid), "self"), data, targets)

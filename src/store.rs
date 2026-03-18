@@ -145,6 +145,19 @@ mod tests {
     }
 
     #[test]
+    fn store_commit_shard() {
+        let mut store = Store::<Fractal<String>>::new();
+        let shard = Fractal::shard(
+            crate::ref_::Ref::new(crate::sha::Sha(crate::fragment::blob_oid("leaf")), "self"),
+            "leaf",
+        );
+        let draft = Draft::root("shard commit", shard);
+        let commit = draft.commit(&mut store, test_committer(), TEST_TIMESTAMP);
+        assert!(matches!(commit, Commit::Root { .. }));
+        assert!(!commit.sha().0.is_empty());
+    }
+
+    #[test]
     fn store_commit_child() {
         let mut store = Store::<Fractal<String>>::new();
         let fractal = test_fractal();
