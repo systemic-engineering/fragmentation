@@ -870,7 +870,10 @@ mod fuse_state_tests {
         let (_dir, mut inner) = make_inner("refs/fragmentation/test");
         let (file_ino, _fh) = inner.create_file(1, "file.txt").unwrap();
         assert!(!inner.is_dir(file_ino), "file inode should not be a dir");
-        assert!(!inner.is_dir(99999), "non-existent inode should not be a dir");
+        assert!(
+            !inner.is_dir(99999),
+            "non-existent inode should not be a dir"
+        );
     }
 
     #[test]
