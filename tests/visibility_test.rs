@@ -477,3 +477,13 @@ fn mixed_bag_refs_match_originals() {
     assert_ne!(wrapped_refs[1].sha, wrapped_refs[2].sha);
     assert_ne!(wrapped_refs[0].sha, wrapped_refs[2].sha);
 }
+
+#[test]
+fn private_content_oid_exercises_unit_encode() {
+    // Private<K> has Data = (), exercising Encode for ()
+    let shard = make_shard("secret");
+    let sig = PlainKeys.sign(&shard).unwrap();
+    let private = Private::seal(&shard, sig);
+    let oid = fragment::content_oid(&private);
+    assert!(!oid.is_empty());
+}

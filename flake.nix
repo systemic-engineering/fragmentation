@@ -12,7 +12,7 @@
           buildInputs = [
             pkgs.rustc pkgs.cargo pkgs.clippy pkgs.rustfmt
             pkgs.rust-analyzer pkgs.pkg-config
-            pkgs.cargo-llvm-cov pkgs.llvm
+            pkgs.cargo-llvm-cov pkgs.llvmPackages.llvm
             pkgs.git pkgs.just
             pkgs.openssl pkgs.zlib
             pkgs.gleam pkgs.erlang
@@ -24,6 +24,8 @@
             export LANG=en_US.UTF-8
             export CARGO_HOME=$PWD/.nix-cargo
             export PATH=$CARGO_HOME/bin:$PATH
+            export LLVM_COV=${pkgs.llvmPackages.llvm}/bin/llvm-cov
+            export LLVM_PROFDATA=${pkgs.llvmPackages.llvm}/bin/llvm-profdata
           '';
         };
       });

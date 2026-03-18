@@ -35,7 +35,6 @@ pub trait Repo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::encoding::Encode;
     use crate::fragment::{content_oid, Fragmentable};
     use crate::ref_::Ref;
     use crate::sha;
@@ -108,5 +107,20 @@ mod tests {
         };
         let oid = content_oid(&node);
         assert!(!oid.is_empty());
+        // Exercise self_ref on a Leaf
+        assert_eq!(node.self_ref().label, "a");
+    }
+
+    #[test]
+    fn non_fractal_branch_self_ref_and_data() {
+        let branch = TestNode::Branch {
+            ref_: test_ref("root"),
+            data: "trunk".into(),
+            children: vec![],
+        };
+        assert_eq!(branch.self_ref().label, "root");
+        assert_eq!(branch.data(), "trunk");
+        // Exercise the default Fragmentable::targets() method (returns empty slice)
+        assert!(branch.targets().is_empty());
     }
 }

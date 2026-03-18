@@ -14,6 +14,7 @@ fn make_blob_shard(data: Vec<u8>) -> Fractal<Blob> {
     Fractal::shard_typed(r, data)
 }
 
+#[cfg(feature = "ssh")]
 fn make_string_shard(data: &str) -> Fractal<String> {
     let r = Ref::new(sha::Sha(fragment::blob_oid(data)), "self");
     Fractal::shard(r, data)

@@ -866,6 +866,23 @@ mod fuse_state_tests {
     }
 
     #[test]
+    fn is_dir_false_for_file_and_missing_inode() {
+        let (_dir, mut inner) = make_inner("refs/fragmentation/test");
+        let (file_ino, _fh) = inner.create_file(1, "file.txt").unwrap();
+        assert!(!inner.is_dir(file_ino), "file inode should not be a dir");
+        assert!(!inner.is_dir(99999), "non-existent inode should not be a dir");
+    }
+
+    #[test]
+    fn rmdir_under_lens_returns_read_only() {
+        let (_dir, mut inner) = make_lens_inner("refs/fragmentation/test");
+        let lens_ino = inner.lookup_child(1, "my-lens").unwrap();
+        let result = inner.rmdir(lens_ino, "greeting.txt");
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), FsError::ReadOnly));
+    }
+
+    #[test]
     fn fs_error_display_read_only() {
         assert_eq!(format!("{}", FsError::ReadOnly), "read-only filesystem");
     }
