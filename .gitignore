@@ -2,3 +2,5 @@ target/
 .nix-cargo/
 .claude/
 gleam/build/
+.direnv/
+erl_crash.dump
