@@ -74,9 +74,16 @@ type Ino = u64;
 type Fh = u64;
 
 enum Node {
-    Dir { children: HashMap<OsString, Ino> },
-    File { content: Vec<u8> },
-    Lens { targets: Vec<Sha>, children: HashMap<OsString, Ino> },
+    Dir {
+        children: HashMap<OsString, Ino>,
+    },
+    File {
+        content: Vec<u8>,
+    },
+    Lens {
+        targets: Vec<Sha>,
+        children: HashMap<OsString, Ino>,
+    },
 }
 
 struct OpenFileMeta {
@@ -228,7 +235,11 @@ impl FsInner {
                         children: HashMap::new(),
                     },
                 );
-                // TODO: load target trees
+                for target_sha in child.targets() {
+                    let target_oid = git2::Oid::from_str(&target_sha.0)?;
+                    let target_fractal = read_tree_named(&self.repo, target_oid)?;
+                    self.populate_from_fractal(&target_fractal, ino)?;
+                }
             } else {
                 self.inodes.insert(
                     ino,
@@ -325,8 +336,17 @@ impl FsInner {
     // Filesystem mutation API
     // -----------------------------------------------------------------------
 
-    fn is_under_lens(&self, _ino: Ino) -> bool {
-        false // TODO: walk parents upward
+    fn is_under_lens(&self, ino: Ino) -> bool {
+        let mut current = ino;
+        loop {
+            if matches!(self.inodes.get(&current), Some(Node::Lens { .. })) {
+                return true;
+            }
+            match self.parents.get(&current) {
+                Some((parent, _)) => current = *parent,
+                None => return false,
+            }
+        }
     }
 
     /// Create a new file in parent_ino. Returns (ino, fh).
@@ -598,10 +618,9 @@ impl FsInner {
                 let ref_ = Ref::new(Sha("0".to_string()), name);
                 Fractal::new_typed(ref_, vec![], child_fractals)
             }
-            Some(Node::Lens { .. }) => {
-                // TODO: reconstruct Lens variant
+            Some(Node::Lens { targets, .. }) => {
                 let ref_ = Ref::new(Sha("0".to_string()), name);
-                Fractal::new_typed(ref_, vec![], vec![])
+                Fractal::lens_typed(ref_, vec![], targets.clone())
             }
             None => panic!("inode {} not found", ino),
         }
@@ -736,9 +755,7 @@ impl FragmentFs {
         if let Some(children) = dir_children {
             for (name, &child_ino) in children {
                 let kind = match inner.inodes.get(&child_ino) {
-                    Some(Node::Dir { .. }) | Some(Node::Lens { .. }) => {
-                        fuser::FileType::Directory
-                    }
+                    Some(Node::Dir { .. }) | Some(Node::Lens { .. }) => fuser::FileType::Directory,
                     Some(Node::File { .. }) => fuser::FileType::RegularFile,
                     None => continue,
                 };

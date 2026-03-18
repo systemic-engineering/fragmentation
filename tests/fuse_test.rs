@@ -760,15 +760,8 @@ mod fuse_state_tests {
 
             let sig = git2::Signature::now("test", "test@test").unwrap();
             let tree = repo.find_tree(root_oid).unwrap();
-            repo.commit(
-                Some(ref_name),
-                &sig,
-                &sig,
-                "lens commit",
-                &tree,
-                &[],
-            )
-            .unwrap();
+            repo.commit(Some(ref_name), &sig, &sig, "lens commit", &tree, &[])
+                .unwrap();
         }
 
         let repo = git2::Repository::open(&repo_path).unwrap();
