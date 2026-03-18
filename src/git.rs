@@ -97,6 +97,22 @@ pub fn write_tree<E: Encode>(
 
             builder.write()
         }
+        Fractal::Lens { data, target, .. } => {
+            let mut builder = repo.treebuilder(None)?;
+
+            let data_oid = repo.blob(&data.encode())?;
+            builder.insert(".data", data_oid, 0o100644)?;
+
+            let lens_content: String = target
+                .iter()
+                .map(|sha| sha.0.as_str())
+                .collect::<Vec<&str>>()
+                .join("\n");
+            let lens_oid = repo.blob(lens_content.as_bytes())?;
+            builder.insert(".lens", lens_oid, 0o100644)?;
+
+            builder.write()
+        }
     }
 }
 
@@ -117,7 +133,7 @@ pub(crate) fn write_commit<E: Encode>(
             builder.insert(".data", blob_oid, 0o100644)?;
             builder.write()?
         }
-        Fractal::Fractal { .. } => write_tree(repo, fractal)?,
+        Fractal::Fractal { .. } | Fractal::Lens { .. } => write_tree(repo, fractal)?,
     };
     let tree = repo.find_tree(tree_oid)?;
 
@@ -161,6 +177,22 @@ pub fn write_tree_named<E: crate::encoding::Encode>(
 
             builder.write()
         }
+        Fractal::Lens { data, target, .. } => {
+            let mut builder = repo.treebuilder(None)?;
+
+            let data_oid = repo.blob(&data.encode())?;
+            builder.insert(".data", data_oid, 0o100644)?;
+
+            let lens_content: String = target
+                .iter()
+                .map(|sha| sha.0.as_str())
+                .collect::<Vec<&str>>()
+                .join("\n");
+            let lens_oid = repo.blob(lens_content.as_bytes())?;
+            builder.insert(".lens", lens_oid, 0o100644)?;
+
+            builder.write()
+        }
     }
 }
 
@@ -189,6 +221,19 @@ pub fn read_tree_named(
             let data_entry = tree.get_name(".data").ok_or("tree missing .data entry")?;
             let data_blob = repo.find_blob(data_entry.id())?;
             let data = data_blob.content().to_vec();
+
+            // Check for .lens entry — this is a Lens, not a Fractal
+            if let Some(lens_entry) = tree.get_name(".lens") {
+                let lens_blob = repo.find_blob(lens_entry.id())?;
+                let lens_content = std::str::from_utf8(lens_blob.content())?;
+                let targets: Vec<Sha> = lens_content
+                    .lines()
+                    .filter(|l| !l.is_empty())
+                    .map(|l| Sha(l.to_string()))
+                    .collect();
+                let ref_ = Ref::new(Sha(oid.to_string()), "self");
+                return Ok(crate::fragment::Fractal::lens_typed(ref_, data, targets));
+            }
 
             let mut children = Vec::new();
             for entry in tree.iter() {
@@ -228,6 +273,11 @@ fn relabel_named(
             data,
             fractal,
         },
+        crate::fragment::Fractal::Lens { ref_, data, target } => crate::fragment::Fractal::Lens {
+            ref_: Ref::new(ref_.sha, label),
+            data,
+            target,
+        },
     }
 }
 
@@ -256,6 +306,19 @@ pub fn read_tree(
             let data_entry = tree.get_name(".data").ok_or("tree missing .data entry")?;
             let data_blob = repo.find_blob(data_entry.id())?;
             let data = std::str::from_utf8(data_blob.content())?.to_string();
+
+            // Check for .lens entry — this is a Lens, not a Fractal
+            if let Some(lens_entry) = tree.get_name(".lens") {
+                let lens_blob = repo.find_blob(lens_entry.id())?;
+                let lens_content = std::str::from_utf8(lens_blob.content())?;
+                let targets: Vec<Sha> = lens_content
+                    .lines()
+                    .filter(|l| !l.is_empty())
+                    .map(|l| Sha(l.to_string()))
+                    .collect();
+                let ref_ = Ref::new(Sha(oid.to_string()), "self");
+                return Ok(Fractal::lens(ref_, data, targets));
+            }
 
             let mut child_entries: Vec<(String, git2::Oid)> = Vec::new();
             for entry in tree.iter() {

@@ -760,6 +760,323 @@ fn sign_fails_with_missing_ssh_key_file() {
     );
 }
 
+// ===========================================================================
+// frgmnt binary alias
+// ===========================================================================
+
+#[test]
+fn frgmnt_binary_shard_works() {
+    let output = Command::new(env!("CARGO_BIN_EXE_frgmnt"))
+        .args(["shard", "hello"])
+        .output()
+        .expect("failed to run frgmnt");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let oid = String::from_utf8(output.stdout).unwrap().trim().to_string();
+    assert_eq!(oid, fragment::blob_oid("hello"));
+}
+
+// ===========================================================================
+// link (ln) — content-addressed symlink
+// ===========================================================================
+
+#[test]
+fn link_creates_lens_from_commit_sha() {
+    let dir = init_repo();
+
+    // Create something to link TO
+    let root = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+        .args([
+            "commit",
+            "--repo",
+            dir.path().to_str().unwrap(),
+            "--message",
+            "target content",
+            "hello world",
+        ])
+        .output()
+        .unwrap();
+    assert!(root.status.success());
+    let target_sha = String::from_utf8(root.stdout).unwrap().trim().to_string();
+
+    // Create a link to that commit
+    let output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+        .args([
+            "link",
+            "--repo",
+            dir.path().to_str().unwrap(),
+            "--message",
+            "link to target",
+            "--data",
+            "link metadata",
+            &target_sha,
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let link_sha = String::from_utf8(output.stdout).unwrap().trim().to_string();
+    assert_eq!(link_sha.len(), 40, "expected SHA-1 hex, got: {}", link_sha);
+}
+
+#[test]
+fn ln_alias_works() {
+    let dir = init_repo();
+
+    let root = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+        .args([
+            "commit",
+            "--repo",
+            dir.path().to_str().unwrap(),
+            "--message",
+            "target",
+            "data",
+        ])
+        .output()
+        .unwrap();
+    assert!(root.status.success());
+    let target_sha = String::from_utf8(root.stdout).unwrap().trim().to_string();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+        .args([
+            "ln",
+            "--repo",
+            dir.path().to_str().unwrap(),
+            "--message",
+            "link",
+            "--data",
+            "meta",
+            &target_sha,
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn frgmnt_ln_works() {
+    let dir = init_repo();
+
+    let root = Command::new(env!("CARGO_BIN_EXE_frgmnt"))
+        .args([
+            "commit",
+            "--repo",
+            dir.path().to_str().unwrap(),
+            "--message",
+            "t",
+            "d",
+        ])
+        .output()
+        .unwrap();
+    assert!(root.status.success());
+    let target_sha = String::from_utf8(root.stdout).unwrap().trim().to_string();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_frgmnt"))
+        .args([
+            "ln",
+            "--repo",
+            dir.path().to_str().unwrap(),
+            "--message",
+            "link",
+            "--data",
+            "m",
+            &target_sha,
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn link_multiple_targets() {
+    let dir = init_repo();
+
+    let c1 = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+        .args([
+            "commit",
+            "--repo",
+            dir.path().to_str().unwrap(),
+            "--message",
+            "first",
+            "one",
+        ])
+        .output()
+        .unwrap();
+    assert!(c1.status.success());
+    let sha1 = String::from_utf8(c1.stdout).unwrap().trim().to_string();
+
+    let c2 = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+        .args([
+            "commit",
+            "--repo",
+            dir.path().to_str().unwrap(),
+            "--message",
+            "second",
+            "two",
+        ])
+        .output()
+        .unwrap();
+    assert!(c2.status.success());
+    let sha2 = String::from_utf8(c2.stdout).unwrap().trim().to_string();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+        .args([
+            "link",
+            "--repo",
+            dir.path().to_str().unwrap(),
+            "--message",
+            "multi-link",
+            "--data",
+            "two targets",
+            &sha1,
+            &sha2,
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn link_updates_namespace_ref() {
+    let dir = init_repo();
+
+    let root = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+        .args([
+            "commit",
+            "--repo",
+            dir.path().to_str().unwrap(),
+            "--message",
+            "target",
+            "data",
+        ])
+        .output()
+        .unwrap();
+    assert!(root.status.success());
+    let target_sha = String::from_utf8(root.stdout).unwrap().trim().to_string();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+        .args([
+            "link",
+            "--repo",
+            dir.path().to_str().unwrap(),
+            "--message",
+            "link",
+            "--ref",
+            "mylink",
+            "--data",
+            "meta",
+            &target_sha,
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let link_sha = String::from_utf8(output.stdout).unwrap().trim().to_string();
+
+    let rev = Command::new("git")
+        .args([
+            "-C",
+            dir.path().to_str().unwrap(),
+            "rev-parse",
+            "refs/fragmentation/mylink",
+        ])
+        .output()
+        .unwrap();
+    assert!(rev.status.success(), "ref should exist");
+    let ref_sha = String::from_utf8(rev.stdout).unwrap().trim().to_string();
+    assert_eq!(ref_sha, link_sha, "ref should point at link commit");
+}
+
+#[test]
+fn link_reads_data_from_stdin() {
+    let dir = init_repo();
+
+    let root = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+        .args([
+            "commit",
+            "--repo",
+            dir.path().to_str().unwrap(),
+            "--message",
+            "target",
+            "data",
+        ])
+        .output()
+        .unwrap();
+    assert!(root.status.success());
+    let target_sha = String::from_utf8(root.stdout).unwrap().trim().to_string();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+        .args([
+            "link",
+            "--repo",
+            dir.path().to_str().unwrap(),
+            "--message",
+            "link",
+            &target_sha,
+        ])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            use std::io::Write;
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(b"stdin metadata")
+                .unwrap();
+            child.wait_with_output()
+        })
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn link_fails_with_invalid_target() {
+    let dir = init_repo();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+        .args([
+            "link",
+            "--repo",
+            dir.path().to_str().unwrap(),
+            "--message",
+            "bad link",
+            "--data",
+            "meta",
+            "not_a_valid_ref_or_sha",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "should fail with invalid target ref"
+    );
+}
+
 #[cfg(feature = "ssh")]
 #[test]
 fn sign_with_ssh_key_produces_hex_output() {

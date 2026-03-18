@@ -717,6 +717,183 @@ mod fuse_state_tests {
         );
     }
 
+    // -----------------------------------------------------------------------
+    // Lens — helper
+    // -----------------------------------------------------------------------
+
+    fn make_lens_inner(ref_name: &str) -> (tempfile::TempDir, FsInner) {
+        use fragmentation::fragment::Fractal;
+        use fragmentation::git::write_tree_named;
+        use fragmentation::ref_::Ref;
+        use fragmentation::sha::Sha;
+
+        let dir = tempfile::tempdir().unwrap();
+        let repo_path = dir.path().to_owned();
+
+        {
+            let repo = git2::Repository::init(&repo_path).unwrap();
+
+            // Target tree with a file
+            let target_file = Fractal::<Vec<u8>>::shard_typed(
+                Ref::new(Sha("f".to_string()), "greeting.txt"),
+                b"hello from target".to_vec(),
+            );
+            let target_tree = Fractal::<Vec<u8>>::new_typed(
+                Ref::new(Sha("t".to_string()), "target"),
+                b"".to_vec(),
+                vec![target_file],
+            );
+            let target_oid = write_tree_named(&repo, &target_tree).unwrap();
+
+            // Root tree with a lens pointing to target
+            let lens = Fractal::<Vec<u8>>::lens_typed(
+                Ref::new(Sha("l".to_string()), "my-lens"),
+                b"".to_vec(),
+                vec![Sha(target_oid.to_string())],
+            );
+            let root = Fractal::<Vec<u8>>::new_typed(
+                Ref::new(Sha("r".to_string()), "/"),
+                b"".to_vec(),
+                vec![lens],
+            );
+            let root_oid = write_tree_named(&repo, &root).unwrap();
+
+            let sig = git2::Signature::now("test", "test@test").unwrap();
+            let tree = repo.find_tree(root_oid).unwrap();
+            repo.commit(Some(ref_name), &sig, &sig, "lens commit", &tree, &[])
+                .unwrap();
+        }
+
+        let repo = git2::Repository::open(&repo_path).unwrap();
+        let committer = Committer::new("test", "test@test");
+        let inner = FsInner::from_ref(repo, committer, ref_name.to_string()).unwrap();
+
+        (dir, inner)
+    }
+
+    // -----------------------------------------------------------------------
+    // Lens — populate + inspect (cycle 5)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn populate_lens_as_directory() {
+        let (_dir, inner) = make_lens_inner("refs/fragmentation/test");
+        let lens_ino = inner
+            .lookup_child(1, "my-lens")
+            .expect("my-lens should exist");
+        assert!(inner.is_dir(lens_ino), "lens should appear as directory");
+    }
+
+    #[test]
+    fn lens_is_dir() {
+        let (_dir, inner) = make_lens_inner("refs/fragmentation/test");
+        let lens_ino = inner.lookup_child(1, "my-lens").unwrap();
+        assert!(inner.is_dir(lens_ino));
+        assert!(inner.is_lens(lens_ino));
+    }
+
+    #[test]
+    fn lens_lookup_child() {
+        let (_dir, inner) = make_lens_inner("refs/fragmentation/test");
+        let lens_ino = inner.lookup_child(1, "my-lens").unwrap();
+        let file_ino = inner.lookup_child(lens_ino, "greeting.txt");
+        assert!(file_ino.is_some(), "greeting.txt should be inside lens");
+    }
+
+    #[test]
+    fn build_fractal_from_lens_node() {
+        let (dir, mut inner) = make_lens_inner("refs/fragmentation/test");
+        // Flush with a write to trigger commit
+        let (_ino, fh) = inner.create_file(1, "regular.txt").unwrap();
+        inner.write_to(fh, 0, b"regular content").unwrap();
+        inner.flush(fh, "fuse: mixed").unwrap();
+
+        // Verify lens is preserved in committed tree
+        let repo = git2::Repository::open(dir.path()).unwrap();
+        let commit = repo.find_commit(inner.head().unwrap()).unwrap();
+        let tree_oid = commit.tree_id();
+        let fractal = fragmentation::git::read_tree_named(&repo, tree_oid).unwrap();
+
+        use fragmentation::fragment::Fragmentable;
+        let lens_child = fractal
+            .children()
+            .iter()
+            .find(|c| c.self_ref().label == "my-lens");
+        assert!(lens_child.is_some(), "my-lens should be in committed tree");
+        assert!(lens_child.unwrap().is_lens());
+    }
+
+    // -----------------------------------------------------------------------
+    // Lens — read-only enforcement (cycle 6)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn create_file_in_lens_returns_read_only() {
+        let (_dir, mut inner) = make_lens_inner("refs/fragmentation/test");
+        let lens_ino = inner.lookup_child(1, "my-lens").unwrap();
+        let result = inner.create_file(lens_ino, "new-file.txt");
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), FsError::ReadOnly));
+    }
+
+    #[test]
+    fn mkdir_in_lens_returns_read_only() {
+        let (_dir, mut inner) = make_lens_inner("refs/fragmentation/test");
+        let lens_ino = inner.lookup_child(1, "my-lens").unwrap();
+        let result = inner.mkdir(lens_ino, "new-dir");
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), FsError::ReadOnly));
+    }
+
+    #[test]
+    fn write_under_lens_returns_read_only() {
+        let (_dir, mut inner) = make_lens_inner("refs/fragmentation/test");
+        let lens_ino = inner.lookup_child(1, "my-lens").unwrap();
+        let file_ino = inner.lookup_child(lens_ino, "greeting.txt").unwrap();
+        let fh = inner.open_existing(file_ino);
+        let result = inner.write_to(fh, 0, b"attempt write");
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), FsError::ReadOnly));
+    }
+
+    #[test]
+    fn unlink_in_lens_returns_read_only() {
+        let (_dir, mut inner) = make_lens_inner("refs/fragmentation/test");
+        let lens_ino = inner.lookup_child(1, "my-lens").unwrap();
+        let result = inner.unlink(lens_ino, "greeting.txt");
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), FsError::ReadOnly));
+    }
+
+    #[test]
+    fn is_dir_false_for_file_and_missing_inode() {
+        let (_dir, mut inner) = make_inner("refs/fragmentation/test");
+        let (file_ino, _fh) = inner.create_file(1, "file.txt").unwrap();
+        assert!(!inner.is_dir(file_ino), "file inode should not be a dir");
+        assert!(
+            !inner.is_dir(99999),
+            "non-existent inode should not be a dir"
+        );
+    }
+
+    #[test]
+    fn rmdir_under_lens_returns_read_only() {
+        let (_dir, mut inner) = make_lens_inner("refs/fragmentation/test");
+        let lens_ino = inner.lookup_child(1, "my-lens").unwrap();
+        let result = inner.rmdir(lens_ino, "greeting.txt");
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), FsError::ReadOnly));
+    }
+
+    #[test]
+    fn fs_error_display_read_only() {
+        assert_eq!(format!("{}", FsError::ReadOnly), "read-only filesystem");
+    }
+
+    // -----------------------------------------------------------------------
+    // @read annotation — flush commits annotations
+    // -----------------------------------------------------------------------
+
     #[test]
     fn flush_read_annotation_contains_serialized_data() {
         let (dir, mut inner) = make_inner("refs/fragmentation/test");

@@ -38,6 +38,7 @@ pub enum FsError {
     NotAFile,
     NotADir,
     NotEmpty,
+    ReadOnly,
     Git(git2::Error),
     Other(String),
 }
@@ -50,6 +51,7 @@ impl std::fmt::Display for FsError {
             FsError::NotAFile => write!(f, "not a file"),
             FsError::NotADir => write!(f, "not a directory"),
             FsError::NotEmpty => write!(f, "directory not empty"),
+            FsError::ReadOnly => write!(f, "read-only filesystem"),
             FsError::Git(e) => write!(f, "git error: {}", e),
             FsError::Other(s) => write!(f, "{}", s),
         }
@@ -72,8 +74,16 @@ type Ino = u64;
 type Fh = u64;
 
 enum Node {
-    Dir { children: HashMap<OsString, Ino> },
-    File { content: Vec<u8> },
+    Dir {
+        children: HashMap<OsString, Ino>,
+    },
+    File {
+        content: Vec<u8>,
+    },
+    Lens {
+        targets: Vec<Sha>,
+        children: HashMap<OsString, Ino>,
+    },
 }
 
 struct OpenFileMeta {
@@ -217,6 +227,19 @@ impl FsInner {
                         content: child.data().clone(),
                     },
                 );
+            } else if child.is_lens() {
+                self.inodes.insert(
+                    ino,
+                    Node::Lens {
+                        targets: child.targets().to_vec(),
+                        children: HashMap::new(),
+                    },
+                );
+                for target_sha in child.targets() {
+                    let target_oid = git2::Oid::from_str(&target_sha.0)?;
+                    let target_fractal = read_tree_named(&self.repo, target_oid)?;
+                    self.populate_from_fractal(&target_fractal, ino)?;
+                }
             } else {
                 self.inodes.insert(
                     ino,
@@ -228,8 +251,11 @@ impl FsInner {
             }
 
             self.parents.insert(ino, (parent_ino, name.clone()));
-            if let Some(Node::Dir { children }) = self.inodes.get_mut(&parent_ino) {
-                children.insert(name, ino);
+            match self.inodes.get_mut(&parent_ino) {
+                Some(Node::Dir { children }) | Some(Node::Lens { children, .. }) => {
+                    children.insert(name, ino);
+                }
+                _ => {}
             }
         }
         Ok(())
@@ -244,7 +270,14 @@ impl FsInner {
     }
 
     pub fn is_dir(&self, ino: Ino) -> bool {
-        matches!(self.inodes.get(&ino), Some(Node::Dir { .. }))
+        matches!(
+            self.inodes.get(&ino),
+            Some(Node::Dir { .. }) | Some(Node::Lens { .. })
+        )
+    }
+
+    pub fn is_lens(&self, ino: Ino) -> bool {
+        matches!(self.inodes.get(&ino), Some(Node::Lens { .. }))
     }
 
     pub fn head(&self) -> Option<git2::Oid> {
@@ -280,10 +313,11 @@ impl FsInner {
     }
 
     pub fn lookup_child(&self, parent_ino: Ino, name: &str) -> Option<Ino> {
-        if let Some(Node::Dir { children }) = self.inodes.get(&parent_ino) {
-            children.get(OsStr::new(name)).copied()
-        } else {
-            None
+        match self.inodes.get(&parent_ino) {
+            Some(Node::Dir { children }) | Some(Node::Lens { children, .. }) => {
+                children.get(OsStr::new(name)).copied()
+            }
+            _ => None,
         }
     }
 
@@ -302,8 +336,24 @@ impl FsInner {
     // Filesystem mutation API
     // -----------------------------------------------------------------------
 
+    fn is_under_lens(&self, ino: Ino) -> bool {
+        let mut current = ino;
+        loop {
+            if matches!(self.inodes.get(&current), Some(Node::Lens { .. })) {
+                return true;
+            }
+            match self.parents.get(&current) {
+                Some((parent, _)) => current = *parent,
+                None => return false,
+            }
+        }
+    }
+
     /// Create a new file in parent_ino. Returns (ino, fh).
     pub fn create_file(&mut self, parent_ino: Ino, name: &str) -> Result<(Ino, Fh), FsError> {
+        if self.is_under_lens(parent_ino) {
+            return Err(FsError::ReadOnly);
+        }
         if !matches!(self.inodes.get(&parent_ino), Some(Node::Dir { .. })) {
             return Err(FsError::NotADir);
         }
@@ -330,8 +380,11 @@ impl FsInner {
 
     /// Write data to an open file handle at offset.
     pub fn write_to(&mut self, fh: Fh, offset: i64, data: &[u8]) -> Result<(), FsError> {
-        let meta = self.open_files.get_mut(&fh).ok_or(FsError::BadFd)?;
-        let ino = meta.ino;
+        let ino = self.open_files.get(&fh).ok_or(FsError::BadFd)?.ino;
+        if self.is_under_lens(ino) {
+            return Err(FsError::ReadOnly);
+        }
+        let meta = self.open_files.get_mut(&fh).unwrap();
         meta.dirty = true;
 
         let offset = offset as usize;
@@ -456,6 +509,9 @@ impl FsInner {
 
     /// Create a directory in parent_ino. Returns new ino.
     pub fn mkdir(&mut self, parent_ino: Ino, name: &str) -> Result<Ino, FsError> {
+        if self.is_under_lens(parent_ino) {
+            return Err(FsError::ReadOnly);
+        }
         if !matches!(self.inodes.get(&parent_ino), Some(Node::Dir { .. })) {
             return Err(FsError::NotADir);
         }
@@ -476,6 +532,9 @@ impl FsInner {
 
     /// Remove a file from its parent directory.
     pub fn unlink(&mut self, parent_ino: Ino, name: &str) -> Result<(), FsError> {
+        if self.is_under_lens(parent_ino) {
+            return Err(FsError::ReadOnly);
+        }
         let ino = {
             match self.inodes.get(&parent_ino) {
                 Some(Node::Dir { children }) => {
@@ -494,6 +553,9 @@ impl FsInner {
 
     /// Remove an empty directory from its parent.
     pub fn rmdir(&mut self, parent_ino: Ino, name: &str) -> Result<(), FsError> {
+        if self.is_under_lens(parent_ino) {
+            return Err(FsError::ReadOnly);
+        }
         let ino = {
             match self.inodes.get(&parent_ino) {
                 Some(Node::Dir { children }) => {
@@ -555,6 +617,10 @@ impl FsInner {
                     .collect();
                 let ref_ = Ref::new(Sha("0".to_string()), name);
                 Fractal::new_typed(ref_, vec![], child_fractals)
+            }
+            Some(Node::Lens { targets, .. }) => {
+                let ref_ = Ref::new(Sha("0".to_string()), name);
+                Fractal::lens_typed(ref_, vec![], targets.clone())
             }
             None => panic!("inode {} not found", ino),
         }
@@ -652,6 +718,23 @@ impl FragmentFs {
                 blksize: 512,
                 flags: 0,
             },
+            Some(Node::Lens { children, .. }) => fuser::FileAttr {
+                ino,
+                size: 0,
+                blocks: 0,
+                atime: now,
+                mtime: now,
+                ctime: now,
+                crtime: now,
+                kind: fuser::FileType::Directory,
+                perm: 0o555,
+                nlink: 2 + children.len() as u32,
+                uid: 0,
+                gid: 0,
+                rdev: 0,
+                blksize: 512,
+                flags: 0,
+            },
             None => panic!("inode {} not found", ino),
         }
     }
@@ -664,10 +747,15 @@ impl FragmentFs {
             (parent_ino, fuser::FileType::Directory, OsString::from("..")),
         ];
 
-        if let Some(Node::Dir { children }) = inner.inodes.get(&ino) {
+        let dir_children = match inner.inodes.get(&ino) {
+            Some(Node::Dir { children }) => Some(children),
+            Some(Node::Lens { children, .. }) => Some(children),
+            _ => None,
+        };
+        if let Some(children) = dir_children {
             for (name, &child_ino) in children {
                 let kind = match inner.inodes.get(&child_ino) {
-                    Some(Node::Dir { .. }) => fuser::FileType::Directory,
+                    Some(Node::Dir { .. }) | Some(Node::Lens { .. }) => fuser::FileType::Directory,
                     Some(Node::File { .. }) => fuser::FileType::RegularFile,
                     None => continue,
                 };
@@ -731,6 +819,10 @@ impl fuser::Filesystem for FragmentFs {
     ) {
         let mut inner = self.inner.lock().unwrap();
         if let Some(sz) = size {
+            if inner.is_under_lens(ino) {
+                reply.error(libc::EROFS);
+                return;
+            }
             inner.truncate(ino, sz as usize);
         }
         if inner.has_inode(ino) {
@@ -775,6 +867,7 @@ impl fuser::Filesystem for FragmentFs {
                 let attr = Self::make_attr(&inner, ino);
                 reply.created(&std::time::Duration::ZERO, &attr, 0, fh, 0);
             }
+            Err(FsError::ReadOnly) => reply.error(libc::EROFS),
             Err(_) => reply.error(libc::EIO),
         }
     }
@@ -819,6 +912,7 @@ impl fuser::Filesystem for FragmentFs {
         let n = data.len() as u32;
         match inner.write_to(fh, offset, data) {
             Ok(()) => reply.written(n),
+            Err(FsError::ReadOnly) => reply.error(libc::EROFS),
             Err(_) => reply.error(libc::EIO),
         }
     }
@@ -872,6 +966,7 @@ impl fuser::Filesystem for FragmentFs {
                 let attr = Self::make_attr(&inner, ino);
                 reply.entry(&std::time::Duration::ZERO, &attr, 0);
             }
+            Err(FsError::ReadOnly) => reply.error(libc::EROFS),
             Err(_) => reply.error(libc::EIO),
         }
     }
@@ -886,6 +981,7 @@ impl fuser::Filesystem for FragmentFs {
         let mut inner = self.inner.lock().unwrap();
         match inner.rmdir(parent, name.to_str().unwrap_or("")) {
             Ok(()) => reply.ok(),
+            Err(FsError::ReadOnly) => reply.error(libc::EROFS),
             Err(_) => reply.error(libc::EIO),
         }
     }
@@ -900,6 +996,7 @@ impl fuser::Filesystem for FragmentFs {
         let mut inner = self.inner.lock().unwrap();
         match inner.unlink(parent, name.to_str().unwrap_or("")) {
             Ok(()) => reply.ok(),
+            Err(FsError::ReadOnly) => reply.error(libc::EROFS),
             Err(_) => reply.error(libc::EIO),
         }
     }

@@ -492,6 +492,125 @@ fn diff_summary_empty() {
 }
 
 // ===========================================================================
+// Lens variant
+// ===========================================================================
+
+fn make_lens(data: &str, targets: Vec<sha::Sha>) -> Fractal<String> {
+    let r = Ref::new(
+        sha::Sha(fragment::lens_oid_bytes(data.as_bytes(), &targets)),
+        "self",
+    );
+    Fractal::lens(r, data, targets)
+}
+
+#[test]
+fn lens_is_lens() {
+    let l = make_lens("lens-data", vec![sha::Sha("abc123".into())]);
+    assert!(l.is_lens());
+    assert!(!l.is_shard());
+    assert!(!l.is_fractal());
+}
+
+#[test]
+fn lens_has_no_children() {
+    let l = make_lens("lens-data", vec![sha::Sha("abc123".into())]);
+    assert!(l.children().is_empty());
+}
+
+#[test]
+fn lens_self_ref() {
+    let targets = vec![sha::Sha("target1".into())];
+    let l = make_lens("lens-data", targets.clone());
+    let r = l.self_ref();
+    assert_eq!(
+        r.sha,
+        sha::Sha(fragment::lens_oid_bytes("lens-data".as_bytes(), &targets))
+    );
+}
+
+#[test]
+fn lens_data() {
+    let l = make_lens("payload", vec![]);
+    assert_eq!(l.data(), "payload");
+}
+
+#[test]
+fn lens_targets() {
+    let t1 = sha::Sha("aaa".into());
+    let t2 = sha::Sha("bbb".into());
+    let l = make_lens("x", vec![t1.clone(), t2.clone()]);
+    assert_eq!(l.targets(), &[t1, t2]);
+}
+
+#[test]
+fn shard_targets_empty() {
+    let s = make_shard("x");
+    assert!(s.targets().is_empty());
+}
+
+#[test]
+fn fractal_targets_empty() {
+    let f = make_fractal("x", vec![]);
+    assert!(f.targets().is_empty());
+}
+
+#[test]
+fn lens_is_not_shard() {
+    assert!(!make_lens("x", vec![]).is_shard());
+}
+
+#[test]
+fn shard_is_not_lens() {
+    assert!(!make_shard("x").is_lens());
+}
+
+#[test]
+fn fractal_is_not_lens() {
+    assert!(!make_fractal("x", vec![]).is_lens());
+}
+
+// ===========================================================================
+// Lens content OID
+// ===========================================================================
+
+#[test]
+fn content_oid_lens_is_40_hex() {
+    let l = make_lens("lens-test", vec![sha::Sha("abc123".into())]);
+    let oid = fragment::content_oid(&l);
+    assert_eq!(oid.len(), 40);
+    assert!(oid.chars().all(|c| c.is_ascii_hexdigit()));
+}
+
+#[test]
+fn content_oid_lens_differs_from_shard() {
+    let s = make_shard("same-data");
+    let l = make_lens("same-data", vec![]);
+    assert_ne!(fragment::content_oid(&s), fragment::content_oid(&l));
+}
+
+#[test]
+fn content_oid_lens_differs_from_fractal() {
+    let f = make_fractal("same-data", vec![]);
+    let l = make_lens("same-data", vec![]);
+    assert_ne!(fragment::content_oid(&f), fragment::content_oid(&l));
+}
+
+#[test]
+fn content_oid_lens_different_targets_different_oid() {
+    let l1 = make_lens("data", vec![sha::Sha("target-a".into())]);
+    let l2 = make_lens("data", vec![sha::Sha("target-b".into())]);
+    assert_ne!(fragment::content_oid(&l1), fragment::content_oid(&l2));
+}
+
+#[test]
+fn content_oid_lens_deterministic() {
+    let l = make_lens("data", vec![sha::Sha("target".into())]);
+    let oid1 = fragment::content_oid(&l);
+    let oid2 = fragment::content_oid(&l);
+    assert_eq!(oid1, oid2);
+}
+
+// ===========================================================================
 // Trace patterns
 // ===========================================================================
 

@@ -1,5 +1,6 @@
 use crate::encoding::Encode;
 use crate::ref_::Ref;
+use crate::sha::Sha;
 
 /// Raw bytes. The default data type for fragments.
 pub type Blob = Vec<u8>;
@@ -25,6 +26,15 @@ pub trait Fragmentable {
     {
         !self.children().is_empty()
     }
+    fn is_lens(&self) -> bool
+    where
+        Self: Sized,
+    {
+        false
+    }
+    fn targets(&self) -> &[Sha] {
+        &[]
+    }
 }
 
 /// A node in the possibility space.
@@ -37,6 +47,12 @@ pub enum Fractal<E = Blob> {
         ref_: Ref,
         data: E,
         fractal: Vec<Fractal<E>>,
+    },
+    /// Lens: carries data, references external trees by OID. Edges, not containment.
+    Lens {
+        ref_: Ref,
+        data: E,
+        target: Vec<Sha>,
     },
 }
 
@@ -57,6 +73,15 @@ impl Fractal<String> {
             fractal,
         }
     }
+
+    /// Create a lens from string-like data. References external trees by OID.
+    pub fn lens(ref_: Ref, data: impl Into<String>, target: Vec<Sha>) -> Self {
+        Fractal::Lens {
+            ref_,
+            data: data.into(),
+            target,
+        }
+    }
 }
 
 impl<E> Fractal<E> {
@@ -73,6 +98,11 @@ impl<E> Fractal<E> {
             fractal,
         }
     }
+
+    /// Create a lens with typed data. References external trees by OID.
+    pub fn lens_typed(ref_: Ref, data: E, target: Vec<Sha>) -> Self {
+        Fractal::Lens { ref_, data, target }
+    }
 }
 
 impl<E: Encode> Fragmentable for Fractal<E> {
@@ -82,6 +112,7 @@ impl<E: Encode> Fragmentable for Fractal<E> {
         match self {
             Fractal::Shard { ref_, .. } => ref_,
             Fractal::Fractal { ref_, .. } => ref_,
+            Fractal::Lens { ref_, .. } => ref_,
         }
     }
 
@@ -89,6 +120,7 @@ impl<E: Encode> Fragmentable for Fractal<E> {
         match self {
             Fractal::Shard { data, .. } => data,
             Fractal::Fractal { data, .. } => data,
+            Fractal::Lens { data, .. } => data,
         }
     }
 
@@ -96,6 +128,7 @@ impl<E: Encode> Fragmentable for Fractal<E> {
         match self {
             Fractal::Shard { .. } => &[],
             Fractal::Fractal { fractal, .. } => fractal,
+            Fractal::Lens { .. } => &[],
         }
     }
 
@@ -106,17 +139,74 @@ impl<E: Encode> Fragmentable for Fractal<E> {
     fn is_fractal(&self) -> bool {
         matches!(self, Fractal::Fractal { .. })
     }
+
+    fn is_lens(&self) -> bool {
+        matches!(self, Fractal::Lens { .. })
+    }
+
+    fn targets(&self) -> &[Sha] {
+        match self {
+            Fractal::Lens { target, .. } => target,
+            _ => &[],
+        }
+    }
 }
 
 /// Compute a git-compatible content OID for any Fragmentable.
-/// Shard -> blob OID, Fractal -> tree OID.
+/// Shard -> blob OID, Fractal -> tree OID, Lens -> tree OID (.data + .lens).
 /// Witness metadata is NOT included -- same content = same OID.
 pub fn content_oid<F: Fragmentable>(frag: &F) -> String {
     if frag.is_shard() {
         blob_oid_bytes(&frag.data().encode())
+    } else if frag.is_lens() {
+        lens_oid_bytes(&frag.data().encode(), frag.targets())
     } else {
         tree_oid_bytes(&frag.data().encode(), frag.children())
     }
+}
+
+/// Compute the git tree OID for a Lens with data and target OIDs.
+/// Builds a git tree with `.data` blob + `.lens` blob (newline-separated hex OIDs).
+pub fn lens_oid_bytes(data: &[u8], targets: &[Sha]) -> String {
+    use sha1::{Digest, Sha1};
+
+    let tree_bytes = build_lens_tree_bytes(data, targets);
+    let header = format!("tree {}\0", tree_bytes.len());
+    let mut hasher = Sha1::new();
+    hasher.update(header.as_bytes());
+    hasher.update(&tree_bytes);
+    hex::encode(hasher.finalize())
+}
+
+/// Build the raw bytes of a git tree object for a Lens (without header).
+/// Entries: ".data" blob + ".lens" blob (newline-separated hex target OIDs).
+fn build_lens_tree_bytes(data: &[u8], targets: &[Sha]) -> Vec<u8> {
+    let mut entries: Vec<(String, u32, [u8; 20])> = Vec::new();
+
+    // .data entry
+    let data_oid_hex = blob_oid_bytes(data);
+    let data_oid_bytes = hex_to_bytes20(&data_oid_hex);
+    entries.push((".data".to_string(), 0o100644, data_oid_bytes));
+
+    // .lens entry — newline-separated hex target OIDs
+    let lens_content: String = targets
+        .iter()
+        .map(|sha| sha.0.as_str())
+        .collect::<Vec<&str>>()
+        .join("\n");
+    let lens_oid_hex = blob_oid_bytes(lens_content.as_bytes());
+    let lens_oid_raw = hex_to_bytes20(&lens_oid_hex);
+    entries.push((".lens".to_string(), 0o100644, lens_oid_raw));
+
+    // Git sorts tree entries by name (byte order)
+    entries.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
+
+    let mut buf = Vec::new();
+    for (name, mode, oid) in &entries {
+        buf.extend_from_slice(format!("{} {}\0", mode_to_string(*mode), name).as_bytes());
+        buf.extend_from_slice(oid);
+    }
+    buf
 }
 
 /// Compute the git blob OID for string data.

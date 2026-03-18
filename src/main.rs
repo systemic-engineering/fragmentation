@@ -86,6 +86,33 @@ enum Command {
         #[arg(long = "namespace")]
         namespace: Option<String>,
     },
+    /// Create a content-addressed link (Lens) to one or more git objects.
+    /// Resolves targets by SHA or git ref (branch, tag, HEAD, etc.).
+    #[cfg(feature = "git")]
+    #[command(alias = "ln")]
+    Link {
+        /// Target SHAs or git refs to link to.
+        #[arg(required = true)]
+        targets: Vec<String>,
+        /// Metadata for the link. Reads stdin if omitted.
+        #[arg(short, long)]
+        data: Option<String>,
+        /// Commit message.
+        #[arg(short, long)]
+        message: String,
+        /// Path to git repository. Defaults to current directory.
+        #[arg(short, long)]
+        repo: Option<String>,
+        /// Parent commit SHA. Omit for root commit.
+        #[arg(short, long)]
+        parent: Option<String>,
+        /// Ref name under refs/<namespace>/. Defaults to "default".
+        #[arg(long = "ref", default_value = "default")]
+        ref_name: String,
+        /// Ref namespace. Overrides git config fragmentation.namespace.
+        #[arg(long = "namespace")]
+        namespace: Option<String>,
+    },
     /// Run as a git smudge/clean filter (identity transform).
     #[cfg(feature = "fuse-mount")]
     Filter {
@@ -284,6 +311,83 @@ fn main() {
             std::io::stdout()
                 .write_all(decrypted.data().as_bytes())
                 .expect("failed to write plaintext");
+        }
+        #[cfg(feature = "git")]
+        Command::Link {
+            targets,
+            data,
+            message,
+            repo,
+            parent,
+            ref_name,
+            namespace,
+        } => {
+            let repository = open_repo(repo);
+
+            let resolved_targets: Vec<fragmentation::sha::Sha> = targets
+                .iter()
+                .map(|t| {
+                    let obj = repository.revparse_single(t).unwrap_or_else(|e| {
+                        eprintln!("failed to resolve target '{}': {}", t, e);
+                        std::process::exit(1);
+                    });
+                    fragmentation::sha::Sha(obj.id().to_string())
+                })
+                .collect();
+
+            let input = read_input(data);
+            let lens = fragment::Fractal::lens(
+                fragmentation::ref_::Ref::new(
+                    fragmentation::sha::Sha(fragment::lens_oid_bytes(
+                        input.as_bytes(),
+                        &resolved_targets,
+                    )),
+                    "self",
+                ),
+                &input,
+                resolved_targets,
+            );
+
+            let config = repository.config().expect("failed to read git config");
+            let name = config
+                .get_string("user.name")
+                .expect("git config user.name not set");
+            let email = config
+                .get_string("user.email")
+                .expect("git config user.email not set");
+
+            let author = fragmentation::witnessed::Author::new(&name, &email);
+            let committer = fragmentation::witnessed::Committer::new(&name, &email);
+
+            let parent_sha = parent.map(fragmentation::sha::Sha);
+            let draft = match parent_sha {
+                None => fragmentation::commit::Draft::root(&message, lens),
+                Some(ref p) => fragmentation::commit::Draft::new(
+                    &message,
+                    lens,
+                    fragmentation::commit::Parent(p.clone()),
+                ),
+            };
+
+            let commit = draft
+                .authored(author)
+                .write(&repository, committer)
+                .unwrap_or_else(|e| {
+                    eprintln!("failed to write commit: {}", e);
+                    std::process::exit(1);
+                });
+
+            let ns = resolve_namespace(&repository, namespace);
+            let full_ref = format!("refs/{}/{}", ns, ref_name);
+            let oid = git2::Oid::from_str(&commit.sha().0).expect("invalid oid");
+            repository
+                .reference(&full_ref, oid, true, "fragmentation link")
+                .unwrap_or_else(|e| {
+                    eprintln!("failed to update ref: {}", e);
+                    std::process::exit(1);
+                });
+
+            println!("{}", commit.sha().0);
         }
         #[cfg(feature = "fuse-mount")]
         Command::Mount {
