@@ -222,6 +222,19 @@ pub fn read_tree_named(
             let data_blob = repo.find_blob(data_entry.id())?;
             let data = data_blob.content().to_vec();
 
+            // Check for .lens entry — this is a Lens, not a Fractal
+            if let Some(lens_entry) = tree.get_name(".lens") {
+                let lens_blob = repo.find_blob(lens_entry.id())?;
+                let lens_content = std::str::from_utf8(lens_blob.content())?;
+                let targets: Vec<Sha> = lens_content
+                    .lines()
+                    .filter(|l| !l.is_empty())
+                    .map(|l| Sha(l.to_string()))
+                    .collect();
+                let ref_ = Ref::new(Sha(oid.to_string()), "self");
+                return Ok(crate::fragment::Fractal::lens_typed(ref_, data, targets));
+            }
+
             let mut children = Vec::new();
             for entry in tree.iter() {
                 let name = entry.name().unwrap_or("").to_string();
@@ -293,6 +306,19 @@ pub fn read_tree(
             let data_entry = tree.get_name(".data").ok_or("tree missing .data entry")?;
             let data_blob = repo.find_blob(data_entry.id())?;
             let data = std::str::from_utf8(data_blob.content())?.to_string();
+
+            // Check for .lens entry — this is a Lens, not a Fractal
+            if let Some(lens_entry) = tree.get_name(".lens") {
+                let lens_blob = repo.find_blob(lens_entry.id())?;
+                let lens_content = std::str::from_utf8(lens_blob.content())?;
+                let targets: Vec<Sha> = lens_content
+                    .lines()
+                    .filter(|l| !l.is_empty())
+                    .map(|l| Sha(l.to_string()))
+                    .collect();
+                let ref_ = Ref::new(Sha(oid.to_string()), "self");
+                return Ok(Fractal::lens(ref_, data, targets));
+            }
 
             let mut child_entries: Vec<(String, git2::Oid)> = Vec::new();
             for entry in tree.iter() {
