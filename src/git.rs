@@ -97,6 +97,9 @@ pub fn write_tree<E: Encode>(
 
             builder.write()
         }
+        Fractal::Lens { .. } => {
+            todo!("write_tree Lens")
+        }
     }
 }
 
@@ -117,7 +120,7 @@ pub(crate) fn write_commit<E: Encode>(
             builder.insert(".data", blob_oid, 0o100644)?;
             builder.write()?
         }
-        Fractal::Fractal { .. } => write_tree(repo, fractal)?,
+        Fractal::Fractal { .. } | Fractal::Lens { .. } => write_tree(repo, fractal)?,
     };
     let tree = repo.find_tree(tree_oid)?;
 
@@ -160,6 +163,9 @@ pub fn write_tree_named<E: crate::encoding::Encode>(
             }
 
             builder.write()
+        }
+        Fractal::Lens { .. } => {
+            todo!("write_tree_named Lens")
         }
     }
 }
@@ -227,6 +233,11 @@ fn relabel_named(
             ref_: Ref::new(ref_.sha, label),
             data,
             fractal,
+        },
+        crate::fragment::Fractal::Lens { ref_, data, target } => crate::fragment::Fractal::Lens {
+            ref_: Ref::new(ref_.sha, label),
+            data,
+            target,
         },
     }
 }

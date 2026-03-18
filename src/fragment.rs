@@ -1,5 +1,6 @@
 use crate::encoding::Encode;
 use crate::ref_::Ref;
+use crate::sha::Sha;
 
 /// Raw bytes. The default data type for fragments.
 pub type Blob = Vec<u8>;
@@ -25,6 +26,15 @@ pub trait Fragmentable {
     {
         !self.children().is_empty()
     }
+    fn is_lens(&self) -> bool
+    where
+        Self: Sized,
+    {
+        false
+    }
+    fn targets(&self) -> &[Sha] {
+        &[]
+    }
 }
 
 /// A node in the possibility space.
@@ -37,6 +47,12 @@ pub enum Fractal<E = Blob> {
         ref_: Ref,
         data: E,
         fractal: Vec<Fractal<E>>,
+    },
+    /// Lens: carries data, references external trees by OID. Edges, not containment.
+    Lens {
+        ref_: Ref,
+        data: E,
+        target: Vec<Sha>,
     },
 }
 
@@ -57,6 +73,15 @@ impl Fractal<String> {
             fractal,
         }
     }
+
+    /// Create a lens from string-like data. References external trees by OID.
+    pub fn lens(ref_: Ref, data: impl Into<String>, target: Vec<Sha>) -> Self {
+        Fractal::Lens {
+            ref_,
+            data: data.into(),
+            target,
+        }
+    }
 }
 
 impl<E> Fractal<E> {
@@ -73,6 +98,11 @@ impl<E> Fractal<E> {
             fractal,
         }
     }
+
+    /// Create a lens with typed data. References external trees by OID.
+    pub fn lens_typed(ref_: Ref, data: E, target: Vec<Sha>) -> Self {
+        Fractal::Lens { ref_, data, target }
+    }
 }
 
 impl<E: Encode> Fragmentable for Fractal<E> {
@@ -82,6 +112,7 @@ impl<E: Encode> Fragmentable for Fractal<E> {
         match self {
             Fractal::Shard { ref_, .. } => ref_,
             Fractal::Fractal { ref_, .. } => ref_,
+            Fractal::Lens { ref_, .. } => ref_,
         }
     }
 
@@ -89,6 +120,7 @@ impl<E: Encode> Fragmentable for Fractal<E> {
         match self {
             Fractal::Shard { data, .. } => data,
             Fractal::Fractal { data, .. } => data,
+            Fractal::Lens { data, .. } => data,
         }
     }
 
@@ -96,6 +128,7 @@ impl<E: Encode> Fragmentable for Fractal<E> {
         match self {
             Fractal::Shard { .. } => &[],
             Fractal::Fractal { fractal, .. } => fractal,
+            Fractal::Lens { .. } => &[],
         }
     }
 
@@ -106,17 +139,28 @@ impl<E: Encode> Fragmentable for Fractal<E> {
     fn is_fractal(&self) -> bool {
         matches!(self, Fractal::Fractal { .. })
     }
+
+    // is_lens: uses default (false) — todo
+    // targets: uses default (&[]) — todo
 }
 
 /// Compute a git-compatible content OID for any Fragmentable.
-/// Shard -> blob OID, Fractal -> tree OID.
+/// Shard -> blob OID, Fractal -> tree OID, Lens -> tree OID (.data + .lens).
 /// Witness metadata is NOT included -- same content = same OID.
 pub fn content_oid<F: Fragmentable>(frag: &F) -> String {
     if frag.is_shard() {
         blob_oid_bytes(&frag.data().encode())
+    } else if frag.is_lens() {
+        todo!("Lens content_oid dispatch")
     } else {
         tree_oid_bytes(&frag.data().encode(), frag.children())
     }
+}
+
+/// Compute the git tree OID for a Lens with data and target OIDs.
+/// Builds a git tree with `.data` blob + `.lens` blob (newline-separated hex OIDs).
+pub fn lens_oid_bytes(_data: &[u8], _targets: &[Sha]) -> String {
+    todo!("lens_oid_bytes")
 }
 
 /// Compute the git blob OID for string data.
