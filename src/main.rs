@@ -38,9 +38,12 @@ enum Command {
         /// Parent commit SHA. Omit for root commit.
         #[arg(short, long)]
         parent: Option<String>,
-        /// Ref name under refs/fragmentation/. Defaults to "default".
+        /// Ref name under refs/<namespace>/. Defaults to "default".
         #[arg(long = "ref", default_value = "default")]
         ref_name: String,
+        /// Ref namespace. Overrides git config fragmentation.namespace.
+        #[arg(long = "namespace")]
+        namespace: Option<String>,
     },
     /// Sign a shard. Prints signature bytes as hex.
     #[cfg(feature = "git")]
@@ -76,9 +79,12 @@ enum Command {
         /// Path to git repository. Defaults to current directory.
         #[arg(short, long)]
         repo: Option<String>,
-        /// Ref name under refs/fragmentation/. Defaults to "default".
+        /// Ref name under refs/<namespace>/. Defaults to "default".
         #[arg(long = "ref", default_value = "default")]
         ref_name: String,
+        /// Ref namespace. Overrides git config fragmentation.namespace.
+        #[arg(long = "namespace")]
+        namespace: Option<String>,
     },
     /// Run as a git smudge/clean filter (identity transform).
     #[cfg(feature = "fuse-mount")]
@@ -93,6 +99,16 @@ enum Command {
         #[arg(short, long)]
         repo: Option<String>,
     },
+}
+
+#[cfg(feature = "git")]
+fn resolve_namespace(repo: &git2::Repository, cli_override: Option<String>) -> String {
+    cli_override.unwrap_or_else(|| {
+        repo.config()
+            .ok()
+            .and_then(|cfg| cfg.get_string("fragmentation.namespace").ok())
+            .unwrap_or_else(|| "fragmentation".to_string())
+    })
 }
 
 #[cfg(feature = "git")]
@@ -153,6 +169,7 @@ fn main() {
             repo,
             parent,
             ref_name,
+            namespace,
         } => {
             let input = read_input(data);
             let tree = encoding::encode(&input);
@@ -187,7 +204,8 @@ fn main() {
                     std::process::exit(1);
                 });
 
-            let full_ref = format!("refs/fragmentation/{}", ref_name);
+            let ns = resolve_namespace(&repository, namespace);
+            let full_ref = format!("refs/{}/{}", ns, ref_name);
             let oid = git2::Oid::from_str(&commit.sha().0).expect("invalid oid");
             repository
                 .reference(&full_ref, oid, true, "fragmentation commit")
@@ -272,6 +290,7 @@ fn main() {
             mountpoint,
             repo,
             ref_name,
+            namespace,
         } => {
             let repository = open_repo(repo);
             let config = repository.config().expect("failed to read git config");
@@ -282,7 +301,8 @@ fn main() {
                 .get_string("user.email")
                 .expect("git config user.email not set");
             let committer = fragmentation::witnessed::Committer::new(&name, &email);
-            let full_ref = format!("refs/fragmentation/{}", ref_name);
+            let ns = resolve_namespace(&repository, namespace);
+            let full_ref = format!("refs/{}/{}", ns, ref_name);
             let fs = fragmentation::fuse::FragmentFs::open(repository, committer, full_ref);
             fuser::mount2(
                 fs,

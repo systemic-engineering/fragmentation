@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "gall": {
+      "type": "stdio",
+      "command": "bash",
+      "args": [
+        "-c",
+        "cd /Users/alexwolf/dev/projects/gall && exec nix develop .#default --command gleam run --module gall/daemon"
+      ],
+      "env": {
+        "GALL_WORKTREE": "/Users/alexwolf/dev/projects/fragmentation"
+      }
+    }
+  }
+}

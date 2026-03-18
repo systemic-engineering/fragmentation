@@ -1,9 +1,15 @@
 //! FUSE filesystem backed by fragmentation.
 //!
 //! Every `flush()` on a written file creates a git commit at
-//! `refs/fragmentation/<ref_name>`. The filesystem state lives in an inode
+//! `refs/<namespace>/<ref_name>`. The filesystem state lives in an inode
 //! table; each flush snapshots the whole tree as a `Fractal<Vec<u8>>` and
 //! writes it through `write_tree_named`.
+//!
+//! Reads are witnessed too. Every `read_file()` call creates a `ReadAnnotation`
+//! recording the path, visibility tier, and content hash of the data served.
+//! Pending annotations are committed on the next `flush()` as `@read` shards
+//! alongside the filesystem tree. An actor reading identity files through the
+//! mount produces a witnessed trace automatically — the read cannot be un-read.
 //!
 //! `refs/heads/main` is never touched. The fragmentation commit chain lives
 //! in its own namespace coexisting with regular git history.
@@ -76,6 +82,42 @@ struct OpenFileMeta {
 }
 
 // ---------------------------------------------------------------------------
+// @read annotation — witnessed reads
+// ---------------------------------------------------------------------------
+
+/// A record of a file read through the FUSE mount.
+///
+/// Created eagerly in `read_file()`, committed on the next `flush()`.
+/// The annotation cannot be un-read: once the bytes are served, the
+/// record exists.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReadAnnotation {
+    /// Path relative to mount root (e.g. "private/keys/id.pub").
+    pub path: String,
+    /// Visibility tier derived from path prefix: "private", "protected", or "public".
+    pub visibility: &'static str,
+    /// SHA of the content that was served (blob OID of the full file content).
+    pub content_hash: String,
+    /// When the read occurred (opaque string, typically seconds since epoch).
+    pub timestamp: String,
+}
+
+/// Derive visibility tier from a path relative to the mount root.
+///
+/// Paths under `private/` are private. Paths under `protected/` are protected.
+/// Everything else is public. Leading slashes are tolerated.
+pub fn path_visibility(path: &str) -> &'static str {
+    let p = path.strip_prefix('/').unwrap_or(path);
+    if p.starts_with("private/") {
+        "private"
+    } else if p.starts_with("protected/") {
+        "protected"
+    } else {
+        "public"
+    }
+}
+
+// ---------------------------------------------------------------------------
 // FsInner — the actual filesystem state (no FUSE dependency)
 // ---------------------------------------------------------------------------
 
@@ -89,6 +131,7 @@ pub struct FsInner {
     next_fh: Fh,
     head: Option<git2::Oid>,
     ref_name: String,
+    read_annotations: Vec<ReadAnnotation>,
 }
 
 impl FsInner {
@@ -112,6 +155,7 @@ impl FsInner {
             next_fh: 1,
             head: None,
             ref_name,
+            read_annotations: Vec::new(),
         }
     }
 
@@ -142,6 +186,7 @@ impl FsInner {
             next_fh: 1,
             head: Some(commit_oid),
             ref_name,
+            read_annotations: Vec::new(),
         };
 
         inner.inodes.insert(
@@ -210,6 +255,28 @@ impl FsInner {
         let head_oid = self.head?;
         let commit = self.repo.find_commit(head_oid).ok()?;
         commit.parent_id(0).ok()
+    }
+
+    /// Pending read annotations accumulated since last flush.
+    pub fn read_annotations(&self) -> &[ReadAnnotation] {
+        &self.read_annotations
+    }
+
+    /// Reconstruct the path of an inode by walking the parents map to root.
+    /// Returns a path relative to the mount root, e.g. "private/keys/id.pub".
+    /// Returns None if the inode has no parents entry (root directory).
+    pub fn ino_path(&self, ino: Ino) -> Option<String> {
+        let mut segments = Vec::new();
+        let mut current = ino;
+        while let Some((parent, name)) = self.parents.get(&current) {
+            segments.push(name.to_str().unwrap_or("").to_string());
+            current = *parent;
+        }
+        if segments.is_empty() {
+            return None;
+        }
+        segments.reverse();
+        Some(segments.join("/"))
     }
 
     pub fn lookup_child(&self, parent_ino: Ino, name: &str) -> Option<Ino> {
@@ -283,7 +350,11 @@ impl FsInner {
     }
 
     /// Read from a file inode. Returns bytes from offset up to size.
-    pub fn read_file(&self, ino: Ino, offset: i64, size: u32) -> Result<Vec<u8>, FsError> {
+    ///
+    /// Also creates a `ReadAnnotation` recording the path, visibility, and
+    /// content hash of the file that was read. The annotation is accumulated
+    /// and committed on the next `flush()`.
+    pub fn read_file(&mut self, ino: Ino, offset: i64, size: u32) -> Result<Vec<u8>, FsError> {
         match self.inodes.get(&ino) {
             Some(Node::File { content }) => {
                 let offset = offset as usize;
@@ -291,22 +362,85 @@ impl FsInner {
                     return Ok(Vec::new());
                 }
                 let end = std::cmp::min(offset + size as usize, content.len());
-                Ok(content[offset..end].to_vec())
+                let data = content[offset..end].to_vec();
+
+                // Witness the read: eager annotation before the response.
+                let content_hash = crate::fragment::blob_oid_bytes(content);
+                if let Some(path) = self.ino_path(ino) {
+                    let visibility = path_visibility(&path);
+                    let timestamp = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs().to_string())
+                        .unwrap_or_else(|_| "0".to_string());
+                    self.read_annotations.push(ReadAnnotation {
+                        path,
+                        visibility,
+                        content_hash,
+                        timestamp,
+                    });
+                }
+
+                Ok(data)
             }
             _ => Err(FsError::NotAFile),
         }
     }
 
-    /// Commit the current filesystem snapshot if the file handle is dirty.
-    /// Builds a complete Fractal from the inode table and writes to the ref.
+    /// Commit the current filesystem snapshot if the file handle is dirty
+    /// or there are pending read annotations.
+    ///
+    /// Builds a complete Fractal from the inode table. If there are pending
+    /// `@read` annotations, they are included as shards under a `@read`
+    /// subtree alongside the filesystem content.
     pub fn flush(&mut self, fh: Fh, message: &str) -> Result<(), FsError> {
         let dirty = self.open_files.get(&fh).map(|m| m.dirty).unwrap_or(false);
-        if !dirty {
+        let has_annotations = !self.read_annotations.is_empty();
+
+        if !dirty && !has_annotations {
             return Ok(());
         }
 
-        let root_fractal = self.build_fractal_for_ino(1, "/");
-        let commit_oid = self.write_commit_internal(&root_fractal, message)?;
+        let mut root_fractal = self.build_fractal_for_ino(1, "/");
+
+        // Attach @read annotations as shards under a @read subtree.
+        if has_annotations {
+            let annotation_shards: Vec<Fractal<Vec<u8>>> = self
+                .read_annotations
+                .iter()
+                .enumerate()
+                .map(|(i, ann)| {
+                    let serialized = format!(
+                        "path={}\nvisibility={}\ncontent_hash={}\ntimestamp={}",
+                        ann.path, ann.visibility, ann.content_hash, ann.timestamp,
+                    );
+                    let bytes = serialized.into_bytes();
+                    let sha = crate::fragment::blob_oid_bytes(&bytes);
+                    let label = format!("{:04}", i);
+                    let ref_ = Ref::new(Sha(sha), label);
+                    Fractal::shard_typed(ref_, bytes)
+                })
+                .collect();
+
+            let read_ref = Ref::new(Sha("0".to_string()), "@read");
+            let read_fractal = Fractal::new_typed(read_ref, vec![], annotation_shards);
+
+            // Inject @read subtree into root fractal's children.
+            if let Fractal::Fractal { fractal, .. } = &mut root_fractal {
+                fractal.push(read_fractal);
+            }
+
+            self.read_annotations.clear();
+        }
+
+        let commit_msg = if dirty && has_annotations {
+            message.to_string()
+        } else if has_annotations {
+            "fuse: @read".to_string()
+        } else {
+            message.to_string()
+        };
+
+        let commit_oid = self.write_commit_internal(&root_fractal, &commit_msg)?;
 
         self.head = Some(commit_oid);
         if let Some(meta) = self.open_files.get_mut(&fh) {
@@ -662,7 +796,7 @@ impl fuser::Filesystem for FragmentFs {
         _lock_owner: Option<u64>,
         reply: fuser::ReplyData,
     ) {
-        let inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap();
         match inner.read_file(ino, offset, size) {
             Ok(data) => reply.data(&data),
             Err(_) => reply.error(libc::EIO),

@@ -1,0 +1,1 @@
+-record(store, {fragments :: gleam@dict:dict(binary(), fragmentation:fragment())}).
