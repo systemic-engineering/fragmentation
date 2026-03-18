@@ -16,6 +16,11 @@ fn make_fractal(label: &str, data: &str, children: Vec<Fractal<String>>) -> Frac
     Fractal::new(Ref::new(sha::Sha(oid), label), data, children)
 }
 
+fn make_lens(data: &str, targets: Vec<sha::Sha>) -> Fractal<String> {
+    let oid = fragment::lens_oid_bytes(data.as_bytes(), &targets);
+    Fractal::lens(Ref::new(sha::Sha(oid), "self"), data, targets)
+}
+
 // ===========================================================================
 // content_oid — in-memory git-compatible OID computation
 // ===========================================================================
@@ -739,6 +744,107 @@ mod git_native {
         let recovered = git::read_tree_named(&repo, oid).unwrap();
 
         assert_eq!(recovered.data(), &dir_data);
+    }
+
+    // =================================================================
+    // write_tree — Lens variant
+    // =================================================================
+
+    #[test]
+    fn write_tree_lens_creates_tree() {
+        let (_dir, repo) = init_repo();
+        let lens = make_lens("lens-data", vec![sha::Sha("a".repeat(40))]);
+        let oid = git::write_tree(&repo, &lens).unwrap();
+        let obj = repo.find_object(oid, None).unwrap();
+        assert_eq!(obj.kind(), Some(git2::ObjectType::Tree));
+    }
+
+    #[test]
+    fn write_tree_lens_has_data_and_lens_entries() {
+        let (_dir, repo) = init_repo();
+        let lens = make_lens("lens-data", vec![sha::Sha("a".repeat(40))]);
+        let oid = git::write_tree(&repo, &lens).unwrap();
+        let tree = repo.find_tree(oid).unwrap();
+        assert!(tree.get_name(".data").is_some());
+        assert!(tree.get_name(".lens").is_some());
+        assert_eq!(tree.len(), 2);
+    }
+
+    #[test]
+    fn write_tree_lens_oid_matches_content_oid() {
+        let (_dir, repo) = init_repo();
+        let lens = make_lens("verify-lens", vec![sha::Sha("a".repeat(40))]);
+        let git_oid = git::write_tree(&repo, &lens).unwrap();
+        let mem_oid = fragment::content_oid(&lens);
+        assert_eq!(git_oid.to_string(), mem_oid);
+    }
+
+    #[test]
+    fn write_tree_lens_data_contains_target_oids() {
+        let (_dir, repo) = init_repo();
+        let target1 = sha::Sha("a".repeat(40));
+        let target2 = sha::Sha("b".repeat(40));
+        let lens = make_lens("lens", vec![target1.clone(), target2.clone()]);
+        let oid = git::write_tree(&repo, &lens).unwrap();
+        let tree = repo.find_tree(oid).unwrap();
+        let lens_entry = tree.get_name(".lens").unwrap();
+        let lens_blob = repo.find_blob(lens_entry.id()).unwrap();
+        let content = std::str::from_utf8(lens_blob.content()).unwrap();
+        assert!(content.contains(&target1.0));
+        assert!(content.contains(&target2.0));
+    }
+
+    // =================================================================
+    // read_tree — Lens roundtrip
+    // =================================================================
+
+    #[test]
+    fn read_tree_roundtrip_lens() {
+        let (_dir, repo) = init_repo();
+        let target = sha::Sha("a".repeat(40));
+        let lens = make_lens("lens-data", vec![target.clone()]);
+        let oid = git::write_tree(&repo, &lens).unwrap();
+        let recovered = git::read_tree(&repo, oid).unwrap();
+        assert!(recovered.is_lens());
+        assert_eq!(recovered.data(), "lens-data");
+        assert_eq!(recovered.targets().len(), 1);
+        assert_eq!(recovered.targets()[0], target);
+    }
+
+    #[test]
+    fn read_tree_lens_multiple_targets() {
+        let (_dir, repo) = init_repo();
+        let targets = vec![
+            sha::Sha("a".repeat(40)),
+            sha::Sha("b".repeat(40)),
+            sha::Sha("c".repeat(40)),
+        ];
+        let lens = make_lens("multi", targets.clone());
+        let oid = git::write_tree(&repo, &lens).unwrap();
+        let recovered = git::read_tree(&repo, oid).unwrap();
+        assert!(recovered.is_lens());
+        assert_eq!(recovered.targets().len(), 3);
+        for (expected, actual) in targets.iter().zip(recovered.targets()) {
+            assert_eq!(expected, actual);
+        }
+    }
+
+    #[test]
+    fn read_tree_named_roundtrip_lens() {
+        let (_dir, repo) = init_repo();
+        use fragmentation::fragment::Fractal;
+        let target = sha::Sha("b".repeat(40));
+        let lens = Fractal::<Vec<u8>>::lens_typed(
+            Ref::new(sha::Sha("x".to_string()), "my-lens"),
+            b"lens-bytes".to_vec(),
+            vec![target.clone()],
+        );
+        let oid = git::write_tree_named(&repo, &lens).unwrap();
+        let recovered = git::read_tree_named(&repo, oid).unwrap();
+        assert!(recovered.is_lens());
+        assert_eq!(recovered.data(), b"lens-bytes");
+        assert_eq!(recovered.targets().len(), 1);
+        assert_eq!(recovered.targets()[0], target);
     }
 
     #[test]
