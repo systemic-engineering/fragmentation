@@ -1,15 +1,38 @@
+use std::fmt;
+use std::hash;
+
 use sha2::{Digest, Sha256};
 
-/// Content-addressed hash.
+/// Trait for pluggable hash algorithms.
+///
+/// Downstream crates can implement this for their own hash types.
+/// The default throughout fragmentation is [`Sha`] (SHA-256).
+pub trait HashAlg: Clone + fmt::Debug + PartialEq + Eq + hash::Hash {
+    /// Hash raw bytes, returning a new instance of this hash type.
+    fn hash(data: &[u8]) -> Self;
+    /// View the hash as a hex string.
+    fn as_str(&self) -> &str;
+}
+
+/// Content-addressed hash (SHA-256).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Sha(pub String);
 
-/// Raw SHA-256 hash of a string.
+impl HashAlg for Sha {
+    fn hash(data: &[u8]) -> Self {
+        let mut hasher = Sha256::new();
+        hasher.update(data);
+        Sha(hex::encode(hasher.finalize()))
+    }
+
+    fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Raw SHA-256 hash of a string. Convenience wrapper around `HashAlg::hash`.
 pub fn hash(data: &str) -> Sha {
-    let mut hasher = Sha256::new();
-    hasher.update(data.as_bytes());
-    let result = hasher.finalize();
-    Sha(hex::encode(result))
+    Sha::hash(data.as_bytes())
 }
 
 #[cfg(test)]
