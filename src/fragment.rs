@@ -290,3 +290,75 @@ fn hex_to_bytes20(hex_str: &str) -> [u8; 20] {
     arr.copy_from_slice(&bytes);
     arr
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sha::{HashAlg, Sha};
+
+    /// A mock hash type to prove the generics work.
+    #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+    struct MockHash(String);
+
+    impl HashAlg for MockHash {
+        fn hash(data: &[u8]) -> Self {
+            // Simple mock: just hex-encode the first 8 bytes
+            let truncated = &data[..data.len().min(8)];
+            MockHash(hex::encode(truncated))
+        }
+
+        fn as_str(&self) -> &str {
+            &self.0
+        }
+    }
+
+    #[test]
+    fn fractal_with_custom_hash() {
+        // A Fractal using a non-default hash type should compile and work.
+        let r = Ref::<MockHash>::new(MockHash("abc".into()), "test");
+        let shard: Fractal<String, MockHash> = Fractal::Shard {
+            ref_: r,
+            data: "hello".into(),
+        };
+        assert!(shard.is_shard());
+    }
+
+    #[test]
+    fn fractal_default_hash_is_sha() {
+        // Fractal<String> should still default to Sha as hash type.
+        let r = Ref::new(Sha("abc".into()), "test");
+        let shard: Fractal<String> = Fractal::Shard {
+            ref_: r,
+            data: "hello".into(),
+        };
+        assert!(shard.is_shard());
+    }
+
+    #[test]
+    fn lens_with_custom_hash_targets() {
+        let r = Ref::<MockHash>::new(MockHash("abc".into()), "test");
+        let targets = vec![MockHash("t1".into()), MockHash("t2".into())];
+        let lens: Fractal<String, MockHash> = Fractal::Lens {
+            ref_: r,
+            data: "link".into(),
+            target: targets,
+        };
+        assert!(lens.is_lens());
+        assert_eq!(lens.targets().len(), 2);
+        assert_eq!(lens.targets()[0].as_str(), "t1");
+    }
+
+    #[test]
+    fn fragmentable_targets_returns_hash_type() {
+        let r = Ref::<MockHash>::new(MockHash("abc".into()), "test");
+        let targets = vec![MockHash("t1".into())];
+        let lens: Fractal<String, MockHash> = Fractal::Lens {
+            ref_: r,
+            data: "link".into(),
+            target: targets,
+        };
+        // The targets() method should return &[MockHash], not &[Sha]
+        let t: &[MockHash] = lens.targets();
+        assert_eq!(t.len(), 1);
+    }
+}
