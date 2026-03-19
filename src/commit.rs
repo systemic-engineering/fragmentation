@@ -1,54 +1,55 @@
 use crate::encoding::Encode;
 use crate::fragment::{content_oid, tree_oid_bytes, Fragmentable};
 use crate::repo::Repo;
-use crate::sha::Sha;
+use crate::sha::{HashAlg, Sha};
 use crate::witnessed::{Author, Committer, Message, Timestamp, Witnessed};
 
 /// Typed reference to a parent commit. Not a raw SHA — a graph edge.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Parent(pub Sha);
+pub struct Parent<H: HashAlg = Sha>(pub H);
 
 /// The commit graph interface. Draft and Commit both implement this.
 /// A signed commit (Public<K, T: Draftable>) also implements it.
 pub trait Draftable {
     type Node;
+    type Hash: HashAlg;
     fn node(&self) -> &Self::Node;
     fn message(&self) -> &Message;
-    fn parent(&self) -> Option<&Parent>;
+    fn parent(&self) -> Option<&Parent<Self::Hash>>;
 }
 
 /// A commit before it has been written to git.
 /// Has content and intent, but no SHA and no witnessed metadata.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Draft<N> {
+pub struct Draft<N, H: HashAlg = Sha> {
     node: N,
     message: Message,
-    parent: Option<Parent>,
+    parent: Option<Parent<H>>,
     author: Option<Author>,
 }
 
 /// A commit that has been written to git.
 /// Root has no parent. Child has a parent. The enum discriminant carries the distinction.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Commit<N> {
+pub enum Commit<N, H: HashAlg = Sha> {
     /// Terminal in the commit graph. No parent.
     Root {
         node: N,
         witnessed: Witnessed,
         message: Message,
-        sha: Sha,
+        sha: H,
     },
     /// Has a parent. Always.
     Child {
         node: N,
         witnessed: Witnessed,
         message: Message,
-        parent: Parent,
-        sha: Sha,
+        parent: Parent<H>,
+        sha: H,
     },
 }
 
-impl<N> Draft<N> {
+impl<N, H: HashAlg> Draft<N, H> {
     /// Create a root draft (no parent).
     pub fn root(message: impl Into<String>, node: N) -> Self {
         Draft {
@@ -60,7 +61,7 @@ impl<N> Draft<N> {
     }
 
     /// Create a draft with a parent.
-    pub fn new(message: impl Into<String>, node: N, parent: Parent) -> Self {
+    pub fn new(message: impl Into<String>, node: N, parent: Parent<H>) -> Self {
         Draft {
             node,
             message: Message(message.into()),
@@ -85,12 +86,12 @@ impl<N> Draft<N> {
     /// `timestamp` is in git format: "{epoch} {tz_offset}", e.g. "1234567890 +0000".
     pub fn commit(
         self,
-        repo: &mut impl Repo<Node = N>,
+        repo: &mut impl Repo<Node = N, Hash = H>,
         committer: Committer,
         timestamp: &str,
-    ) -> Commit<N>
+    ) -> Commit<N, H>
     where
-        N: Fragmentable + Clone,
+        N: Fragmentable<Hash = H> + Clone,
     {
         let author = self
             .author
@@ -107,14 +108,14 @@ impl<N> Draft<N> {
 
         let commit_sha = compute_commit_sha(
             &tree_oid,
-            self.parent.as_ref().map(|p| p.0 .0.as_str()),
+            self.parent.as_ref().map(|p| p.0.as_str()),
             &author,
             &committer,
             timestamp,
             &self.message.0,
         );
 
-        let sha = Sha(commit_sha);
+        let sha = H::from_hex(commit_sha);
         let epoch = timestamp.split_whitespace().next().unwrap_or(timestamp);
         let witnessed = Witnessed::new(author, committer, Timestamp(epoch.to_string()));
 
@@ -172,8 +173,9 @@ impl<E: Encode> Draft<crate::fragment::Fractal<E>> {
     }
 }
 
-impl<N> Draftable for Draft<N> {
+impl<N, H: HashAlg> Draftable for Draft<N, H> {
     type Node = N;
+    type Hash = H;
 
     fn node(&self) -> &N {
         &self.node
@@ -183,14 +185,14 @@ impl<N> Draftable for Draft<N> {
         &self.message
     }
 
-    fn parent(&self) -> Option<&Parent> {
+    fn parent(&self) -> Option<&Parent<H>> {
         self.parent.as_ref()
     }
 }
 
-impl<N> Commit<N> {
-    /// This commit's SHA.
-    pub fn sha(&self) -> &Sha {
+impl<N, H: HashAlg> Commit<N, H> {
+    /// This commit's hash.
+    pub fn sha(&self) -> &H {
         match self {
             Commit::Root { sha, .. } => sha,
             Commit::Child { sha, .. } => sha,
@@ -206,7 +208,7 @@ impl<N> Commit<N> {
     }
 
     /// Create a child draft from this commit.
-    pub fn child(&self, message: impl Into<String>, node: N) -> Draft<N> {
+    pub fn child(&self, message: impl Into<String>, node: N) -> Draft<N, H> {
         Draft {
             node,
             message: Message(message.into()),
@@ -216,7 +218,7 @@ impl<N> Commit<N> {
     }
 
     /// Construct a Root with full metadata.
-    pub(crate) fn full_root(node: N, witnessed: Witnessed, message: Message, sha: Sha) -> Self {
+    pub(crate) fn full_root(node: N, witnessed: Witnessed, message: Message, sha: H) -> Self {
         Commit::Root {
             node,
             witnessed,
@@ -230,8 +232,8 @@ impl<N> Commit<N> {
         node: N,
         witnessed: Witnessed,
         message: Message,
-        parent: Parent,
-        sha: Sha,
+        parent: Parent<H>,
+        sha: H,
     ) -> Self {
         Commit::Child {
             node,
@@ -243,8 +245,9 @@ impl<N> Commit<N> {
     }
 }
 
-impl<N> Draftable for Commit<N> {
+impl<N, H: HashAlg> Draftable for Commit<N, H> {
     type Node = N;
+    type Hash = H;
 
     fn node(&self) -> &N {
         match self {
@@ -260,7 +263,7 @@ impl<N> Draftable for Commit<N> {
         }
     }
 
-    fn parent(&self) -> Option<&Parent> {
+    fn parent(&self) -> Option<&Parent<H>> {
         match self {
             Commit::Root { .. } => None,
             Commit::Child { parent, .. } => Some(parent),

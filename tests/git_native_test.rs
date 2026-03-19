@@ -382,7 +382,7 @@ mod git_native {
         let c = Draft::root("test", make_shard("payload"))
             .write(&repo, Committer::new("test", "test@test"))
             .unwrap();
-        let d: &dyn Draftable<Node = Fractal<String>> = &c;
+        let d: &dyn Draftable<Node = Fractal<String>, Hash = sha::Sha> = &c;
         assert_eq!(d.node().data(), "payload");
     }
 
@@ -392,7 +392,7 @@ mod git_native {
         let c = Draft::root("the msg", make_shard("x"))
             .write(&repo, Committer::new("test", "test@test"))
             .unwrap();
-        let d: &dyn Draftable<Node = Fractal<String>> = &c;
+        let d: &dyn Draftable<Node = Fractal<String>, Hash = sha::Sha> = &c;
         assert_eq!(d.message().0, "the msg");
     }
 
@@ -402,7 +402,7 @@ mod git_native {
         let c = Draft::root("test", make_shard("x"))
             .write(&repo, Committer::new("test", "test@test"))
             .unwrap();
-        let d: &dyn Draftable<Node = Fractal<String>> = &c;
+        let d: &dyn Draftable<Node = Fractal<String>, Hash = sha::Sha> = &c;
         assert!(d.parent().is_none());
     }
 
@@ -417,7 +417,7 @@ mod git_native {
             .child("second", make_shard("second"))
             .write(&repo, committer)
             .unwrap();
-        let d: &dyn Draftable<Node = Fractal<String>> = &c2;
+        let d: &dyn Draftable<Node = Fractal<String>, Hash = sha::Sha> = &c2;
         assert!(d.parent().is_some());
         assert_eq!(d.parent().unwrap().0, *c1.sha());
     }
@@ -450,7 +450,7 @@ mod git_native {
             .write(&repo, committer)
             .unwrap();
         // .message() via Draftable on Commit::Child → covers commit.rs:219
-        let d: &dyn Draftable<Node = Fractal<String>> = &c2;
+        let d: &dyn Draftable<Node = Fractal<String>, Hash = sha::Sha> = &c2;
         assert_eq!(d.message().0, "second msg");
     }
 

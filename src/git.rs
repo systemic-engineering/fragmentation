@@ -81,6 +81,8 @@ pub fn write_tree<E: Encode>(
     repo: &git2::Repository,
     fragment: &Fractal<E>,
 ) -> Result<git2::Oid, git2::Error> {
+    use crate::sha::HashAlg;
+
     match fragment {
         Fractal::Shard { data, .. } => repo.blob(&data.encode()),
         Fractal::Fractal { data, fractal, .. } => {
@@ -105,7 +107,7 @@ pub fn write_tree<E: Encode>(
 
             let lens_content: String = target
                 .iter()
-                .map(|sha| sha.0.as_str())
+                .map(|sha| sha.as_str())
                 .collect::<Vec<&str>>()
                 .join("\n");
             let lens_oid = repo.blob(lens_content.as_bytes())?;
@@ -160,6 +162,8 @@ pub fn write_tree_named<E: crate::encoding::Encode>(
     repo: &git2::Repository,
     fragment: &Fractal<E>,
 ) -> Result<git2::Oid, git2::Error> {
+    use crate::sha::HashAlg;
+
     match fragment {
         Fractal::Shard { data, .. } => repo.blob(&data.encode()),
         Fractal::Fractal { data, fractal, .. } => {
@@ -185,7 +189,7 @@ pub fn write_tree_named<E: crate::encoding::Encode>(
 
             let lens_content: String = target
                 .iter()
-                .map(|sha| sha.0.as_str())
+                .map(|sha| sha.as_str())
                 .collect::<Vec<&str>>()
                 .join("\n");
             let lens_oid = repo.blob(lens_content.as_bytes())?;

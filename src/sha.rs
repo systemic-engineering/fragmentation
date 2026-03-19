@@ -10,6 +10,8 @@ use sha2::{Digest, Sha256};
 pub trait HashAlg: Clone + fmt::Debug + PartialEq + Eq + hash::Hash {
     /// Hash raw bytes, returning a new instance of this hash type.
     fn hash(data: &[u8]) -> Self;
+    /// Construct from an existing hex string (e.g., a git commit SHA).
+    fn from_hex(hex: impl Into<String>) -> Self;
     /// View the hash as a hex string.
     fn as_str(&self) -> &str;
 }
@@ -23,6 +25,10 @@ impl HashAlg for Sha {
         let mut hasher = Sha256::new();
         hasher.update(data);
         Sha(hex::encode(hasher.finalize()))
+    }
+
+    fn from_hex(hex: impl Into<String>) -> Self {
+        Sha(hex.into())
     }
 
     fn as_str(&self) -> &str {

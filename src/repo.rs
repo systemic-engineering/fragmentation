@@ -5,13 +5,14 @@
 
 use crate::commit::Commit;
 use crate::fragment::Fragmentable;
-use crate::sha::Sha;
+use crate::sha::HashAlg;
 
 /// Content-addressed repository.
 ///
 /// Owned returns — Store clones from HashMaps, a git2 backend would construct fresh.
 pub trait Repo {
     type Node: Fragmentable + Clone;
+    type Hash: HashAlg;
 
     /// Store all nodes of a tree recursively. Returns the root content OID.
     fn write_tree(&mut self, node: &Self::Node) -> String;
@@ -20,16 +21,16 @@ pub trait Repo {
     fn read_tree(&self, oid: &str) -> Option<Self::Node>;
 
     /// Store a commit.
-    fn write_commit(&mut self, commit: Commit<Self::Node>);
+    fn write_commit(&mut self, commit: Commit<Self::Node, Self::Hash>);
 
-    /// Look up a commit by its SHA.
-    fn read_commit(&self, sha: &Sha) -> Option<Commit<Self::Node>>;
+    /// Look up a commit by its hash.
+    fn read_commit(&self, sha: &Self::Hash) -> Option<Commit<Self::Node, Self::Hash>>;
 
-    /// Point a ref at a commit SHA.
-    fn update_ref(&mut self, name: &str, sha: Sha);
+    /// Point a ref at a commit hash.
+    fn update_ref(&mut self, name: &str, sha: Self::Hash);
 
-    /// Resolve a ref to a commit SHA.
-    fn resolve_ref(&self, name: &str) -> Option<Sha>;
+    /// Resolve a ref to a commit hash.
+    fn resolve_ref(&self, name: &str) -> Option<Self::Hash>;
 }
 
 #[cfg(test)]
@@ -37,7 +38,7 @@ mod tests {
     use super::*;
     use crate::fragment::{content_oid, Fragmentable};
     use crate::ref_::Ref;
-    use crate::sha;
+    use crate::sha::{self, Sha};
     use crate::store::Store;
 
     /// A non-Fractal type that implements Fragmentable.
@@ -57,6 +58,7 @@ mod tests {
 
     impl Fragmentable for TestNode {
         type Data = String;
+        type Hash = Sha;
 
         fn self_ref(&self) -> &Ref {
             match self {

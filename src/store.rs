@@ -3,17 +3,17 @@ use std::collections::HashMap;
 use crate::commit::Commit;
 use crate::fragment::{content_oid, Blob, Fractal, Fragmentable};
 use crate::repo::Repo;
-use crate::sha::Sha;
+use crate::sha::{HashAlg, Sha};
 
 /// In-memory content-addressed store.
 #[derive(Clone, Debug)]
-pub struct Store<N: Fragmentable + Clone = Fractal<Blob>> {
+pub struct Store<N: Fragmentable + Clone = Fractal<Blob>, H: HashAlg = Sha> {
     objects: HashMap<String, N>,
-    commits: HashMap<String, Commit<N>>,
-    refs: HashMap<String, Sha>,
+    commits: HashMap<String, Commit<N, H>>,
+    refs: HashMap<String, H>,
 }
 
-impl<N: Fragmentable + Clone> Store<N> {
+impl<N: Fragmentable + Clone, H: HashAlg> Store<N, H> {
     /// Create an empty store.
     pub fn new() -> Self {
         Store {
@@ -29,7 +29,7 @@ impl<N: Fragmentable + Clone> Store<N> {
     }
 
     /// Merge another store into this one. Same OID = same content.
-    pub fn merge(&mut self, other: Store<N>) {
+    pub fn merge(&mut self, other: Store<N, H>) {
         self.objects.extend(other.objects);
         self.commits.extend(other.commits);
         self.refs.extend(other.refs);
@@ -46,14 +46,15 @@ impl<N: Fragmentable + Clone> Store<N> {
     }
 }
 
-impl<N: Fragmentable + Clone> Default for Store<N> {
+impl<N: Fragmentable + Clone, H: HashAlg> Default for Store<N, H> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<N: Fragmentable + Clone> Repo for Store<N> {
+impl<N: Fragmentable + Clone, H: HashAlg> Repo for Store<N, H> {
     type Node = N;
+    type Hash = H;
 
     fn write_tree(&mut self, node: &N) -> String {
         for child in node.children() {
@@ -70,19 +71,20 @@ impl<N: Fragmentable + Clone> Repo for Store<N> {
         self.objects.get(oid).cloned()
     }
 
-    fn write_commit(&mut self, commit: Commit<N>) {
-        self.commits.insert(commit.sha().0.clone(), commit);
+    fn write_commit(&mut self, commit: Commit<N, H>) {
+        self.commits
+            .insert(commit.sha().as_str().to_string(), commit);
     }
 
-    fn read_commit(&self, sha: &Sha) -> Option<Commit<N>> {
-        self.commits.get(&sha.0).cloned()
+    fn read_commit(&self, sha: &H) -> Option<Commit<N, H>> {
+        self.commits.get(sha.as_str()).cloned()
     }
 
-    fn update_ref(&mut self, name: &str, sha: Sha) {
+    fn update_ref(&mut self, name: &str, sha: H) {
         self.refs.insert(name.to_string(), sha);
     }
 
-    fn resolve_ref(&self, name: &str) -> Option<Sha> {
+    fn resolve_ref(&self, name: &str) -> Option<H> {
         self.refs.get(name).cloned()
     }
 }

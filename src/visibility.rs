@@ -2,6 +2,7 @@ use crate::encoding::{Decode, Encode};
 use crate::fragment::{Fractal, Fragmentable};
 use crate::keys::{Encrypted, Keys, Signature};
 use crate::ref_::Ref;
+use crate::sha::Sha;
 
 /// Visible, attributed, proven content. Signature carries both key and proof.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -32,8 +33,9 @@ impl<K: Keys, T> Public<K, T> {
     }
 }
 
-impl<K: Keys, T: Fragmentable> Fragmentable for Public<K, T> {
+impl<K: Keys, T: Fragmentable<Hash = Sha>> Fragmentable for Public<K, T> {
     type Data = T::Data;
+    type Hash = Sha;
 
     fn self_ref(&self) -> &Ref {
         self.inner.self_ref()
@@ -100,6 +102,7 @@ impl<K: Keys> Protected<K> {
 
 impl<K: Keys> Fragmentable for Protected<K> {
     type Data = Vec<u8>;
+    type Hash = Sha;
 
     fn self_ref(&self) -> &Ref {
         &self.ref_
@@ -134,7 +137,7 @@ impl<K: Keys> Private<K> {
         self.signature.key()
     }
 
-    pub fn seal<T: Fragmentable>(fragment: &T, signature: Signature<K>) -> Self {
+    pub fn seal<T: Fragmentable<Hash = Sha>>(fragment: &T, signature: Signature<K>) -> Self {
         Private {
             ref_: fragment.self_ref().clone(),
             signature,
@@ -144,6 +147,7 @@ impl<K: Keys> Private<K> {
 
 impl<K: Keys, T: crate::commit::Draftable> crate::commit::Draftable for Public<K, T> {
     type Node = T::Node;
+    type Hash = T::Hash;
 
     fn node(&self) -> &Self::Node {
         self.inner.node()
@@ -153,13 +157,14 @@ impl<K: Keys, T: crate::commit::Draftable> crate::commit::Draftable for Public<K
         self.inner.message()
     }
 
-    fn parent(&self) -> Option<&crate::commit::Parent> {
+    fn parent(&self) -> Option<&crate::commit::Parent<Self::Hash>> {
         self.inner.parent()
     }
 }
 
 impl<K: Keys> Fragmentable for Private<K> {
     type Data = ();
+    type Hash = Sha;
 
     fn self_ref(&self) -> &Ref {
         &self.ref_

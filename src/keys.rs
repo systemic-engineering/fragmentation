@@ -4,7 +4,7 @@ use std::fmt;
 use crate::encoding::{Decode, Encode};
 use crate::fragment::{self, Fractal, Fragmentable};
 use crate::ref_::Ref;
-use crate::sha::Sha;
+use crate::sha::{HashAlg, Sha};
 
 /// Encrypted content: opaque bytes and who it's encrypted for.
 /// No type parameter for the content — it's opaque until decrypted.
@@ -145,13 +145,13 @@ impl Keys for Local {
             Local::None => Ok(Signature::new(Local::None, vec![])),
             #[cfg(feature = "ssh")]
             Local::Ssh(ssh_key) => {
-                let sha_bytes = fragment.self_ref().sha.0.as_bytes();
+                let sha_bytes = fragment.self_ref().sha.as_str().as_bytes();
                 let sig_bytes = ssh_key.sign_bytes(sha_bytes)?;
                 Ok(Signature::new(self.clone(), sig_bytes))
             }
             #[cfg(feature = "gpg")]
             Local::Gpg(gpg_key) => {
-                let sha_bytes = fragment.self_ref().sha.0.as_bytes();
+                let sha_bytes = fragment.self_ref().sha.as_str().as_bytes();
                 let sig_bytes = gpg_key.sign_bytes(sha_bytes)?;
                 Ok(Signature::new(self.clone(), sig_bytes))
             }

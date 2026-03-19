@@ -1,6 +1,6 @@
 use crate::encoding::Encode;
 use crate::ref_::Ref;
-use crate::sha::Sha;
+use crate::sha::{HashAlg, Sha};
 
 /// Raw bytes. The default data type for fragments.
 pub type Blob = Vec<u8>;
@@ -9,7 +9,8 @@ pub type Blob = Vec<u8>;
 /// Turtles all the way down: your children are yourself.
 pub trait Fragmentable {
     type Data: Encode;
-    fn self_ref(&self) -> &Ref;
+    type Hash: HashAlg;
+    fn self_ref(&self) -> &Ref<Self::Hash>;
     fn data(&self) -> &Self::Data;
     fn children(&self) -> &[Self]
     where
@@ -32,33 +33,33 @@ pub trait Fragmentable {
     {
         false
     }
-    fn targets(&self) -> &[Sha] {
+    fn targets(&self) -> &[Self::Hash] {
         &[]
     }
 }
 
 /// A node in the possibility space.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Fractal<E = Blob> {
+pub enum Fractal<E = Blob, H: HashAlg = Sha> {
     /// Terminal: self-addressed, carries data, stops.
-    Shard { ref_: Ref, data: E },
+    Shard { ref_: Ref<H>, data: E },
     /// Self-similar: self-addressed, carries data, contains fractal children.
     Fractal {
-        ref_: Ref,
+        ref_: Ref<H>,
         data: E,
-        fractal: Vec<Fractal<E>>,
+        fractal: Vec<Fractal<E, H>>,
     },
     /// Lens: carries data, references external trees by OID. Edges, not containment.
     Lens {
-        ref_: Ref,
+        ref_: Ref<H>,
         data: E,
-        target: Vec<Sha>,
+        target: Vec<H>,
     },
 }
 
-impl Fractal<String> {
+impl<H: HashAlg> Fractal<String, H> {
     /// Create a shard from string-like data. Terminal fragment.
-    pub fn shard(ref_: Ref, data: impl Into<String>) -> Self {
+    pub fn shard(ref_: Ref<H>, data: impl Into<String>) -> Self {
         Fractal::Shard {
             ref_,
             data: data.into(),
@@ -66,7 +67,7 @@ impl Fractal<String> {
     }
 
     /// Create a fractal from string-like data. Self-similar, contains other fragments.
-    pub fn new(ref_: Ref, data: impl Into<String>, fractal: Vec<Fractal<String>>) -> Self {
+    pub fn new(ref_: Ref<H>, data: impl Into<String>, fractal: Vec<Fractal<String, H>>) -> Self {
         Fractal::Fractal {
             ref_,
             data: data.into(),
@@ -75,7 +76,7 @@ impl Fractal<String> {
     }
 
     /// Create a lens from string-like data. References external trees by OID.
-    pub fn lens(ref_: Ref, data: impl Into<String>, target: Vec<Sha>) -> Self {
+    pub fn lens(ref_: Ref<H>, data: impl Into<String>, target: Vec<H>) -> Self {
         Fractal::Lens {
             ref_,
             data: data.into(),
@@ -84,14 +85,14 @@ impl Fractal<String> {
     }
 }
 
-impl<E> Fractal<E> {
+impl<E, H: HashAlg> Fractal<E, H> {
     /// Create a shard with typed data. Terminal fragment.
-    pub fn shard_typed(ref_: Ref, data: E) -> Self {
+    pub fn shard_typed(ref_: Ref<H>, data: E) -> Self {
         Fractal::Shard { ref_, data }
     }
 
     /// Create a fractal with typed data. Self-similar, contains other fragments.
-    pub fn new_typed(ref_: Ref, data: E, fractal: Vec<Fractal<E>>) -> Self {
+    pub fn new_typed(ref_: Ref<H>, data: E, fractal: Vec<Fractal<E, H>>) -> Self {
         Fractal::Fractal {
             ref_,
             data,
@@ -100,15 +101,16 @@ impl<E> Fractal<E> {
     }
 
     /// Create a lens with typed data. References external trees by OID.
-    pub fn lens_typed(ref_: Ref, data: E, target: Vec<Sha>) -> Self {
+    pub fn lens_typed(ref_: Ref<H>, data: E, target: Vec<H>) -> Self {
         Fractal::Lens { ref_, data, target }
     }
 }
 
-impl<E: Encode> Fragmentable for Fractal<E> {
+impl<E: Encode, H: HashAlg> Fragmentable for Fractal<E, H> {
     type Data = E;
+    type Hash = H;
 
-    fn self_ref(&self) -> &Ref {
+    fn self_ref(&self) -> &Ref<H> {
         match self {
             Fractal::Shard { ref_, .. } => ref_,
             Fractal::Fractal { ref_, .. } => ref_,
@@ -124,7 +126,7 @@ impl<E: Encode> Fragmentable for Fractal<E> {
         }
     }
 
-    fn children(&self) -> &[Fractal<E>] {
+    fn children(&self) -> &[Fractal<E, H>] {
         match self {
             Fractal::Shard { .. } => &[],
             Fractal::Fractal { fractal, .. } => fractal,
@@ -144,7 +146,7 @@ impl<E: Encode> Fragmentable for Fractal<E> {
         matches!(self, Fractal::Lens { .. })
     }
 
-    fn targets(&self) -> &[Sha] {
+    fn targets(&self) -> &[H] {
         match self {
             Fractal::Lens { target, .. } => target,
             _ => &[],
@@ -167,7 +169,7 @@ pub fn content_oid<F: Fragmentable>(frag: &F) -> String {
 
 /// Compute the git tree OID for a Lens with data and target OIDs.
 /// Builds a git tree with `.data` blob + `.lens` blob (newline-separated hex OIDs).
-pub fn lens_oid_bytes(data: &[u8], targets: &[Sha]) -> String {
+pub fn lens_oid_bytes<H: HashAlg>(data: &[u8], targets: &[H]) -> String {
     use sha1::{Digest, Sha1};
 
     let tree_bytes = build_lens_tree_bytes(data, targets);
@@ -180,7 +182,7 @@ pub fn lens_oid_bytes(data: &[u8], targets: &[Sha]) -> String {
 
 /// Build the raw bytes of a git tree object for a Lens (without header).
 /// Entries: ".data" blob + ".lens" blob (newline-separated hex target OIDs).
-fn build_lens_tree_bytes(data: &[u8], targets: &[Sha]) -> Vec<u8> {
+fn build_lens_tree_bytes<H: HashAlg>(data: &[u8], targets: &[H]) -> Vec<u8> {
     let mut entries: Vec<(String, u32, [u8; 20])> = Vec::new();
 
     // .data entry
@@ -191,7 +193,7 @@ fn build_lens_tree_bytes(data: &[u8], targets: &[Sha]) -> Vec<u8> {
     // .lens entry — newline-separated hex target OIDs
     let lens_content: String = targets
         .iter()
-        .map(|sha| sha.0.as_str())
+        .map(|h| h.as_str())
         .collect::<Vec<&str>>()
         .join("\n");
     let lens_oid_hex = blob_oid_bytes(lens_content.as_bytes());
@@ -305,6 +307,10 @@ mod tests {
             // Simple mock: just hex-encode the first 8 bytes
             let truncated = &data[..data.len().min(8)];
             MockHash(hex::encode(truncated))
+        }
+
+        fn from_hex(hex: impl Into<String>) -> Self {
+            MockHash(hex.into())
         }
 
         fn as_str(&self) -> &str {
