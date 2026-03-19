@@ -39,6 +39,11 @@ impl<N: Fragmentable + Clone> Store<N> {
     pub fn keys(&self) -> Vec<String> {
         self.objects.keys().cloned().collect()
     }
+
+    /// List all ref names.
+    pub fn ref_names(&self) -> Vec<&str> {
+        self.refs.keys().map(|s| s.as_str()).collect()
+    }
 }
 
 impl<N: Fragmentable + Clone> Default for Store<N> {
@@ -237,6 +242,17 @@ mod tests {
             store.read_commit(c1.sha()),
             Some(Commit::Root { .. })
         ));
+    }
+
+    #[test]
+    fn store_ref_names() {
+        let mut store = Store::<Fractal<String>>::new();
+        assert!(store.ref_names().is_empty());
+        store.update_ref("refs/heads/main", Sha("abc".into()));
+        store.update_ref("grammar/test", Sha("def".into()));
+        let mut names = store.ref_names();
+        names.sort();
+        assert_eq!(names, vec!["grammar/test", "refs/heads/main"]);
     }
 
     #[test]
