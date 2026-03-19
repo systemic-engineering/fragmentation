@@ -11,3 +11,43 @@ pub fn hash(data: &str) -> Sha {
     let result = hasher.finalize();
     Sha(hex::encode(result))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sha_implements_hash_alg() {
+        let h = Sha::hash(b"hello");
+        assert!(!h.as_str().is_empty());
+        // SHA-256 produces 64 hex chars
+        assert_eq!(h.as_str().len(), 64);
+    }
+
+    #[test]
+    fn hash_alg_deterministic() {
+        let a = Sha::hash(b"test");
+        let b = Sha::hash(b"test");
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn hash_alg_different_input_different_output() {
+        let a = Sha::hash(b"hello");
+        let b = Sha::hash(b"world");
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn hash_alg_as_str_matches_inner() {
+        let h = Sha::hash(b"test");
+        assert_eq!(h.as_str(), h.0.as_str());
+    }
+
+    #[test]
+    fn hash_convenience_still_works() {
+        // The old `hash()` function still works
+        let h = hash("hello");
+        assert_eq!(h.as_str().len(), 64);
+    }
+}
