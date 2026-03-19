@@ -4,7 +4,9 @@ use std::fmt;
 use crate::encoding::{Decode, Encode};
 use crate::fragment::{self, Fractal, Fragmentable};
 use crate::ref_::Ref;
-use crate::sha::{HashAlg, Sha};
+#[cfg(any(feature = "ssh", feature = "gpg"))]
+use crate::sha::HashAlg;
+use crate::sha::Sha;
 
 /// Encrypted content: opaque bytes and who it's encrypted for.
 /// No type parameter for the content — it's opaque until decrypted.
