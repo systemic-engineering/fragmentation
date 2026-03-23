@@ -143,6 +143,10 @@ impl Keys for TestKeys {
         let ref_ = Ref::new(sha::Sha(sha_str), "decrypted");
         Ok(Fractal::shard_typed(ref_, data))
     }
+
+    fn fingerprint(&self) -> String {
+        todo!()
+    }
 }
 
 #[test]
@@ -477,5 +481,61 @@ mod from_repo_tests {
 
         let keys = Local::from_repo(&repo).unwrap();
         assert!(matches!(keys, Local::Gpg(_)));
+    }
+}
+
+// ===========================================================================
+// Fingerprint tests
+// ===========================================================================
+
+#[test]
+fn fingerprint_plain_keys_returns_plain() {
+    assert_eq!(PlainKeys.fingerprint(), "plain");
+}
+
+#[test]
+fn fingerprint_plain_keys_deterministic() {
+    assert_eq!(PlainKeys.fingerprint(), PlainKeys.fingerprint());
+}
+
+#[test]
+fn fingerprint_local_none() {
+    assert_eq!(Local::None.fingerprint(), "none");
+}
+
+#[test]
+fn fingerprint_custom_keys() {
+    let keys = TestKeys {
+        label: "test".into(),
+    };
+    assert_eq!(keys.fingerprint(), "test:test");
+}
+
+#[cfg(feature = "ssh")]
+mod ssh_fingerprint_tests {
+    use super::*;
+    use fragmentation::keys::SSH;
+
+    #[test]
+    fn fingerprint_ssh_not_empty() {
+        let key = SSH::generate_ed25519().expect("generate test key");
+        let local = Local::Ssh(Box::new(key));
+        assert!(!local.fingerprint().is_empty());
+    }
+
+    #[test]
+    fn fingerprint_ssh_deterministic() {
+        let key = SSH::generate_ed25519().expect("generate test key");
+        let local = Local::Ssh(Box::new(key));
+        assert_eq!(local.fingerprint(), local.fingerprint());
+    }
+
+    #[test]
+    fn fingerprint_ssh_different_keys_differ() {
+        let key1 = SSH::generate_ed25519().expect("generate test key");
+        let key2 = SSH::generate_ed25519().expect("generate test key");
+        let local1 = Local::Ssh(Box::new(key1));
+        let local2 = Local::Ssh(Box::new(key2));
+        assert_ne!(local1.fingerprint(), local2.fingerprint());
     }
 }

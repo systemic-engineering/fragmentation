@@ -73,6 +73,10 @@ pub trait Keys: Sized + Clone {
 
     /// Decrypt an encrypted fragment.
     fn decrypt<E: Decode>(&self, encrypted: &Encrypted<Self>) -> Result<Fractal<E>, Self::Error>;
+
+    /// Content-addressable identity of this key.
+    /// Deterministic, stable, unique per key.
+    fn fingerprint(&self) -> String;
 }
 
 /// No-op keys: empty signatures, no encryption.
@@ -97,6 +101,10 @@ impl Keys for PlainKeys {
         let sha = Sha(fragment::blob_oid_bytes(&encrypted.ciphertext));
         let ref_ = Ref::new(sha, "decrypted");
         Ok(Fractal::shard_typed(ref_, data))
+    }
+
+    fn fingerprint(&self) -> String {
+        todo!()
     }
 }
 
@@ -184,6 +192,10 @@ impl Keys for Local {
         let sha = Sha(fragment::blob_oid_bytes(&plaintext));
         let ref_ = Ref::new(sha, "decrypted");
         Ok(Fractal::shard_typed(ref_, data))
+    }
+
+    fn fingerprint(&self) -> String {
+        todo!()
     }
 }
 
