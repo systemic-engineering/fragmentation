@@ -891,11 +891,14 @@ mod fuse_state_tests {
     }
 
     // -----------------------------------------------------------------------
-    // @read annotation — flush commits annotations
+    // @read annotation — flush commits annotations as Lens nodes
     // -----------------------------------------------------------------------
 
     #[test]
-    fn flush_read_annotation_contains_serialized_data() {
+    fn flush_read_annotation_is_lens_node() {
+        // Portal read annotations are Lens observations. The @read subtree
+        // should contain Lens nodes targeting the content hash of what was
+        // read — structurally identical to collapse Lenses.
         let (dir, mut inner) = make_inner("refs/fragmentation/test");
 
         let (ino, fh) = inner.create_file(1, "witness.txt").unwrap();
@@ -910,37 +913,209 @@ mod fuse_state_tests {
         // Verify the @read subtree has annotation data
         let repo = git2::Repository::open(dir.path()).unwrap();
         let commit = repo.find_commit(inner.head().unwrap()).unwrap();
-        let tree = commit.tree().unwrap();
-        let read_entry = tree.get_name("@read").unwrap();
-        let read_tree = repo.find_tree(read_entry.id()).unwrap();
+        let tree_oid = commit.tree_id();
 
-        // Should have .data and one annotation shard (0000)
-        let ann_entry = read_tree.get_name("0000");
+        let fractal = fragmentation::git::read_tree_named(&repo, tree_oid).unwrap();
+
+        // Find the @read subtree
+        use fragmentation::fragment::Fragmentable;
+        let read_subtree = fractal
+            .children()
+            .iter()
+            .find(|c| c.self_ref().label == "@read");
         assert!(
-            ann_entry.is_some(),
-            "annotation shard 0000 should exist under @read"
+            read_subtree.is_some(),
+            "@read subtree should exist in committed tree"
         );
 
-        let blob = repo.find_blob(ann_entry.unwrap().id()).unwrap();
-        let content = std::str::from_utf8(blob.content()).unwrap();
+        let read_subtree = read_subtree.unwrap();
+        assert_eq!(
+            read_subtree.children().len(),
+            1,
+            "@read should have one annotation"
+        );
+
+        // The annotation node must be a Lens, not a Shard
+        let annotation = &read_subtree.children()[0];
         assert!(
-            content.contains("path=witness.txt"),
-            "annotation should contain path"
+            annotation.is_lens(),
+            "read annotation should be a Lens node, not a Shard"
+        );
+    }
+
+    #[test]
+    fn read_annotation_lens_targets_content_hash() {
+        // The Lens target is the content OID of what was read — the
+        // same target a collapse Lens would use. The observation and
+        // the collapse use the same type for pointing back to content.
+        let (dir, mut inner) = make_inner("refs/fragmentation/test");
+
+        let (ino, fh) = inner.create_file(1, "observed.txt").unwrap();
+        inner.write_to(fh, 0, b"the interior").unwrap();
+
+        let expected_hash = fragmentation::fragment::blob_oid_bytes(b"the interior");
+
+        inner.read_file(ino, 0, 1024).unwrap();
+        inner.flush(fh, "fuse: observed.txt").unwrap();
+
+        let repo = git2::Repository::open(dir.path()).unwrap();
+        let commit = repo.find_commit(inner.head().unwrap()).unwrap();
+        let tree_oid = commit.tree_id();
+
+        let fractal = fragmentation::git::read_tree_named(&repo, tree_oid).unwrap();
+        use fragmentation::fragment::Fragmentable;
+
+        let read_subtree = fractal
+            .children()
+            .iter()
+            .find(|c| c.self_ref().label == "@read")
+            .expect("@read subtree should exist");
+
+        let annotation = &read_subtree.children()[0];
+        let targets = annotation.targets();
+        assert_eq!(targets.len(), 1, "annotation Lens should have one target");
+        assert_eq!(
+            targets[0].0, expected_hash,
+            "Lens target should be the content hash of what was read"
+        );
+    }
+
+    #[test]
+    fn read_annotation_lens_data_carries_path() {
+        // The Lens data carries the full path -- where the observation happened.
+        // The path lives in data (not the label) because git tree entry names
+        // cannot contain slashes. The Lens target carries the content hash.
+        let (dir, mut inner) = make_inner("refs/fragmentation/test");
+
+        let dir_ino = inner.mkdir(1, "protected").unwrap();
+        let (ino, fh) = inner.create_file(dir_ino, "draft.md").unwrap();
+        inner.write_to(fh, 0, b"draft content").unwrap();
+
+        inner.read_file(ino, 0, 1024).unwrap();
+        inner.flush(fh, "fuse: read").unwrap();
+
+        let repo = git2::Repository::open(dir.path()).unwrap();
+        let commit = repo.find_commit(inner.head().unwrap()).unwrap();
+        let tree_oid = commit.tree_id();
+
+        let fractal = fragmentation::git::read_tree_named(&repo, tree_oid).unwrap();
+        use fragmentation::fragment::Fragmentable;
+
+        let read_subtree = fractal
+            .children()
+            .iter()
+            .find(|c| c.self_ref().label == "@read")
+            .expect("@read subtree should exist");
+
+        let annotation = &read_subtree.children()[0];
+        let data = std::str::from_utf8(annotation.data()).unwrap();
+        assert!(
+            data.contains("path=protected/draft.md"),
+            "Lens data should contain the full observation path"
+        );
+
+        // The Lens target should be the content hash of what was observed
+        let expected_hash = fragmentation::fragment::blob_oid_bytes(b"draft content");
+        assert_eq!(
+            annotation.targets()[0].0,
+            expected_hash,
+            "Lens target should be the content hash of what was observed"
+        );
+    }
+
+    #[test]
+    fn read_annotation_lens_data_carries_metadata() {
+        // The Lens data carries the observation metadata: visibility + timestamp.
+        // This is the witness record: who, when, what tier.
+        let (dir, mut inner) = make_inner("refs/fragmentation/test");
+
+        let dir_ino = inner.mkdir(1, "private").unwrap();
+        let (ino, fh) = inner.create_file(dir_ino, "secret.key").unwrap();
+        inner.write_to(fh, 0, b"key material").unwrap();
+
+        inner.read_file(ino, 0, 1024).unwrap();
+        inner.flush(fh, "fuse: read").unwrap();
+
+        let repo = git2::Repository::open(dir.path()).unwrap();
+        let commit = repo.find_commit(inner.head().unwrap()).unwrap();
+        let tree_oid = commit.tree_id();
+
+        let fractal = fragmentation::git::read_tree_named(&repo, tree_oid).unwrap();
+        use fragmentation::fragment::Fragmentable;
+
+        let read_subtree = fractal
+            .children()
+            .iter()
+            .find(|c| c.self_ref().label == "@read")
+            .expect("@read subtree should exist");
+
+        let annotation = &read_subtree.children()[0];
+        let data = std::str::from_utf8(annotation.data()).unwrap();
+        assert!(
+            data.contains("visibility=private"),
+            "Lens data should contain visibility tier"
         );
         assert!(
-            content.contains("visibility=public"),
-            "annotation should contain visibility"
+            data.contains("timestamp="),
+            "Lens data should contain timestamp"
+        );
+    }
+
+    #[test]
+    fn multiple_read_annotations_produce_lens_chain() {
+        // Multiple reads produce multiple Lens nodes in the @read subtree.
+        // This is the Hawking radiation chain: each read is a partial
+        // observation, and the full chain encodes the reading pattern.
+        let (dir, mut inner) = make_inner("refs/fragmentation/test");
+
+        let (ino1, fh1) = inner.create_file(1, "a.txt").unwrap();
+        inner.write_to(fh1, 0, b"alpha").unwrap();
+
+        let (ino2, fh2) = inner.create_file(1, "b.txt").unwrap();
+        inner.write_to(fh2, 0, b"beta").unwrap();
+
+        // Read both files
+        inner.read_file(ino1, 0, 1024).unwrap();
+        inner.read_file(ino2, 0, 1024).unwrap();
+
+        // Flush via any dirty handle
+        inner.flush(fh1, "fuse: reads").unwrap();
+
+        let repo = git2::Repository::open(dir.path()).unwrap();
+        let commit = repo.find_commit(inner.head().unwrap()).unwrap();
+        let tree_oid = commit.tree_id();
+
+        let fractal = fragmentation::git::read_tree_named(&repo, tree_oid).unwrap();
+        use fragmentation::fragment::Fragmentable;
+
+        let read_subtree = fractal
+            .children()
+            .iter()
+            .find(|c| c.self_ref().label == "@read")
+            .expect("@read subtree should exist");
+
+        assert_eq!(
+            read_subtree.children().len(),
+            2,
+            "two reads should produce two Lens nodes"
+        );
+
+        // Both must be Lens nodes
+        assert!(
+            read_subtree.children()[0].is_lens(),
+            "first annotation should be a Lens"
         );
         assert!(
-            content.contains(&format!(
-                "content_hash={}",
-                fragmentation::fragment::blob_oid_bytes(b"observed")
-            )),
-            "annotation should contain content_hash",
+            read_subtree.children()[1].is_lens(),
+            "second annotation should be a Lens"
         );
-        assert!(
-            content.contains("timestamp="),
-            "annotation should contain timestamp"
+
+        // They should target different content hashes (different files)
+        let t0 = &read_subtree.children()[0].targets()[0].0;
+        let t1 = &read_subtree.children()[1].targets()[0].0;
+        assert_ne!(
+            t0, t1,
+            "different files should produce different Lens targets"
         );
     }
 }

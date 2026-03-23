@@ -455,22 +455,30 @@ impl FsInner {
 
         let mut root_fractal = self.build_fractal_for_ino(1, "/");
 
-        // Attach @read annotations as shards under a @read subtree.
+        // Attach @read annotations as Lens nodes under a @read subtree.
+        // Each annotation is a Lens targeting the content hash of what was
+        // read — structurally identical to a collapse Lens. The label is
+        // the path (where the observation happened). The data carries
+        // visibility + timestamp metadata.
         if has_annotations {
             let annotation_shards: Vec<Fractal<Vec<u8>>> = self
                 .read_annotations
                 .iter()
                 .enumerate()
                 .map(|(i, ann)| {
-                    let serialized = format!(
-                        "path={}\nvisibility={}\ncontent_hash={}\ntimestamp={}",
-                        ann.path, ann.visibility, ann.content_hash, ann.timestamp,
+                    // The Lens data carries the full observation metadata:
+                    // path, visibility, and timestamp. The path lives in data
+                    // (not the label) because git tree entry names cannot
+                    // contain slashes.
+                    let metadata = format!(
+                        "path={}\nvisibility={}\ntimestamp={}",
+                        ann.path, ann.visibility, ann.timestamp,
                     );
-                    let bytes = serialized.into_bytes();
-                    let sha = crate::fragment::blob_oid_bytes(&bytes);
+                    let data = metadata.into_bytes();
+                    let target = vec![Sha(ann.content_hash.clone())];
                     let label = format!("{:04}", i);
-                    let ref_ = Ref::new(Sha(sha), label);
-                    Fractal::shard_typed(ref_, bytes)
+                    let ref_ = Ref::new(Sha(ann.content_hash.clone()), label);
+                    Fractal::lens_typed(ref_, data, target)
                 })
                 .collect();
 
