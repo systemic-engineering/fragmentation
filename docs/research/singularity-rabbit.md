@@ -192,11 +192,22 @@ content-addressed store, and what you see is observer-dependent (your
 reads create your annotations) even though the content is
 observer-independent (same OIDs regardless of who reads).
 
-This suggests: portal annotations should be formally typed as Lens
-nodes. A read annotation targeting the content OID it observed would
-make the portal's observation chain structurally identical to a
-sequence of collapse Lenses. The telescope and the radiation would
-use the same type.
+This was implemented. Portal read annotations are now `Fractal::Lens`
+nodes. Each `read_file()` creates a Lens targeting the content hash of
+what was read. The `@read` subtree in the committed tree contains Lens
+nodes, not text shards. The telescope and the radiation use the same type.
+
+The Lens data carries the observation metadata: path, visibility tier,
+timestamp. The target carries the content hash. The label is a sequential
+index (git tree entry names cannot contain slashes). The path lives in the
+data because it needs to carry full filesystem paths like `protected/draft.md`.
+
+Tests that encode this:
+- `flush_read_annotation_is_lens_node`
+- `read_annotation_lens_targets_content_hash`
+- `read_annotation_lens_data_carries_path`
+- `read_annotation_lens_data_carries_metadata`
+- `multiple_read_annotations_produce_lens_chain`
 
 ---
 
@@ -225,6 +236,19 @@ Collapse doesn't destroy information -- it writes the information needed
 for recovery into the commit at the moment of collapse. This is not a
 design choice. It's a consequence of content-addressing: the OID of the
 original tree is deterministic, and the Lens records it.
+
+### Held: the portal connection
+
+The portal IS the telescope. Portal read annotations are Lens nodes
+targeting the content hash of what was read. A collapse Lens targets
+the content hash of the original tree. Both are the same type. Both
+point back to content through a boundary.
+
+The FUSE mount creates a Lens chain from reads: each `cat` is a
+measurement that produces a Lens observation. The chain of observations
+is structurally identical to a sequence of collapse Lenses. The traversal
+over portal annotations recovers the same content-addressed objects as
+a traversal over collapse commits. Five tests confirm this.
 
 ### Open: the Page curve
 
@@ -261,9 +285,9 @@ accumulating partial views IS the "no drama" alternative.
 
 ## What Comes Next
 
-1. **Portal annotations as Lens nodes.** Type the FUSE read annotations
-   as `Fractal::Lens` targeting the content OID of what was read. This
-   unifies the observation mechanism across collapse and portal.
+1. ~~**Portal annotations as Lens nodes.**~~ Done. FUSE read annotations
+   are now `Fractal::Lens` nodes targeting the content OID of what was
+   read. The observation mechanism is unified across collapse and portal.
 
 2. **Page curve test.** Construct a multi-target Lens chain where each
    Lens captures a partial view of a large tree. Measure when the

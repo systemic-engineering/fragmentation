@@ -1017,7 +1017,8 @@ mod fuse_state_tests {
         // The Lens target should be the content hash of what was observed
         let expected_hash = fragmentation::fragment::blob_oid_bytes(b"draft content");
         assert_eq!(
-            annotation.targets()[0].0, expected_hash,
+            annotation.targets()[0].0,
+            expected_hash,
             "Lens target should be the content hash of what was observed"
         );
     }
