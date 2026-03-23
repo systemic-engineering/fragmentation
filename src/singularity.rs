@@ -18,10 +18,10 @@ impl<E: Clone, H: HashAlg> Singularity for Fractal<E, H> {
     type Error = Infallible;
 
     fn collapse(&self) -> Result<Self, Infallible> {
-        todo!()
+        Ok(self.clone())
     }
 
-    fn refract(_artifact: &Self) -> Result<Self, Infallible> {
-        todo!()
+    fn refract(artifact: &Self) -> Result<Self, Infallible> {
+        Ok(artifact.clone())
     }
 }
