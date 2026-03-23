@@ -24,6 +24,7 @@ pub mod keys;
 pub mod ref_;
 pub mod repo;
 pub mod sha;
+pub mod singularity;
 pub mod store;
 pub mod visibility;
 pub mod walk;
