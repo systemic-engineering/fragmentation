@@ -1,5 +1,6 @@
 import fragmentation
 import fragmentation/git
+import gleam/int
 import gleeunit/should
 import simplifile
 
@@ -12,6 +13,18 @@ fn make_shard(data: String) -> fragmentation.Fragment(String) {
   fragmentation.shard(r, data)
 }
 
+/// Create a fresh temp directory unique to this test run.
+/// Uses erlang:unique_integer to avoid collisions with other users/runs.
+fn fresh_dir(prefix: String) -> String {
+  let dir = prefix <> "_" <> int.to_string(unique_integer())
+  let _ = simplifile.delete(dir)
+  let assert Ok(_) = simplifile.create_directory(dir)
+  dir
+}
+
+@external(erlang, "erlang", "unique_integer")
+fn unique_integer() -> Int
+
 // ---------------------------------------------------------------------------
 // write_fragment_creates_file_test
 //
@@ -19,8 +32,7 @@ fn make_shard(data: String) -> fragmentation.Fragment(String) {
 // ---------------------------------------------------------------------------
 
 pub fn write_fragment_creates_file_test() {
-  let dir = "/tmp/fragmentation_git_test_write"
-  let _ = simplifile.create_directory(dir)
+  let dir = fresh_dir("/tmp/fragmentation_git_test_write")
   let frag = make_shard("hello-world")
   let sha = fragmentation.hash_string_fragment(frag)
 
@@ -38,8 +50,7 @@ pub fn write_fragment_creates_file_test() {
 // ---------------------------------------------------------------------------
 
 pub fn write_fragment_idempotent_test() {
-  let dir = "/tmp/fragmentation_git_test_idempotent"
-  let _ = simplifile.create_directory(dir)
+  let dir = fresh_dir("/tmp/fragmentation_git_test_idempotent")
   let frag = make_shard("idempotent-shard")
   let sha = fragmentation.hash_string_fragment(frag)
 
@@ -60,8 +71,7 @@ pub fn write_fragment_idempotent_test() {
 // ---------------------------------------------------------------------------
 
 pub fn write_two_fragments_test() {
-  let dir = "/tmp/fragmentation_git_test_two"
-  let _ = simplifile.create_directory(dir)
+  let dir = fresh_dir("/tmp/fragmentation_git_test_two")
   let frag_a = make_shard("fragment-alpha")
   let frag_b = make_shard("fragment-beta")
   let sha_a = fragmentation.hash_string_fragment(frag_a)

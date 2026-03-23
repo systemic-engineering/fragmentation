@@ -4,8 +4,20 @@ import fragmentation/encoding
 import fragmentation/git
 import fragmentation/store
 import fragmentation/walk
+import gleam/int
 import gleam/list
 import simplifile
+
+@external(erlang, "erlang", "unique_integer")
+fn unique_integer() -> Int
+
+/// Create a fresh temp directory unique to this test run.
+fn fresh_dir(prefix: String) -> String {
+  let dir = prefix <> "_" <> int.to_string(unique_integer())
+  let _ = simplifile.delete(dir)
+  let assert Ok(_) = simplifile.create_directory(dir)
+  dir
+}
 
 // ===========================================================================
 // Round 1: Character → Shard
@@ -334,10 +346,7 @@ pub fn diff_added_paragraph_test() {
 // ===========================================================================
 
 pub fn persist_encoding_to_disk_test() {
-  let dir = "/tmp/fragmentation_encoding_persist"
-  let _ = simplifile.create_directory(dir)
-  let _ = simplifile.delete(dir)
-  let _ = simplifile.create_directory(dir)
+  let dir = fresh_dir("/tmp/fragmentation_encoding_persist")
 
   let #(root, s) = encoding.ingest("hi reed", store.new())
 
@@ -356,9 +365,7 @@ pub fn persist_encoding_to_disk_test() {
 }
 
 pub fn persist_deduped_encoding_test() {
-  let dir = "/tmp/fragmentation_encoding_dedup_persist"
-  let _ = simplifile.delete(dir)
-  let _ = simplifile.create_directory(dir)
+  let dir = fresh_dir("/tmp/fragmentation_encoding_dedup_persist")
 
   let #(root, s) = encoding.ingest("the the", store.new())
 
