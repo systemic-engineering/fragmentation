@@ -145,7 +145,7 @@ impl Keys for TestKeys {
     }
 
     fn fingerprint(&self) -> String {
-        todo!()
+        format!("test:{}", self.label)
     }
 }
 

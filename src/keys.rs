@@ -104,7 +104,7 @@ impl Keys for PlainKeys {
     }
 
     fn fingerprint(&self) -> String {
-        todo!()
+        "plain".to_string()
     }
 }
 
@@ -195,7 +195,13 @@ impl Keys for Local {
     }
 
     fn fingerprint(&self) -> String {
-        todo!()
+        match self {
+            Local::None => "none".to_string(),
+            #[cfg(feature = "ssh")]
+            Local::Ssh(ssh) => ssh.fingerprint(),
+            #[cfg(feature = "gpg")]
+            Local::Gpg(gpg) => gpg.key_id.clone(),
+        }
     }
 }
 
@@ -230,6 +236,14 @@ impl SSH {
     pub fn write_to_file(&self, path: impl AsRef<std::path::Path>) -> Result<(), ssh_key::Error> {
         self.key
             .write_openssh_file(path.as_ref(), ssh_key::LineEnding::LF)
+    }
+
+    /// Content-addressable identity: SHA-256 fingerprint of the public key.
+    pub fn fingerprint(&self) -> String {
+        self.key
+            .public_key()
+            .fingerprint(ssh_key::HashAlg::Sha256)
+            .to_string()
     }
 
     /// Sign raw bytes, returning the PEM-encoded SSH signature.
