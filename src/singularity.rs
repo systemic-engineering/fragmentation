@@ -1,6 +1,6 @@
 use std::convert::Infallible;
 
-use crate::commit::{Commit, Draftable, Draft};
+use crate::commit::{Commit, Draft, Draftable};
 use crate::fragment::{Fractal, Fragmentable};
 use crate::ref_::Ref;
 use crate::repo::Repo;
@@ -122,11 +122,7 @@ impl<'a, H: HashAlg, R: Repo<Node = Fractal<String, H>, Hash = H>> WitnessedSing
         // 4. Create a draft commit containing the Lens, and commit it.
         //    The commit SHA depends on the observer (committer).
         let draft = Draft::root(&message, lens);
-        let commit = draft.commit(
-            self.repo,
-            self.committer.clone(),
-            &self.timestamp,
-        );
+        let commit = draft.commit(self.repo, self.committer.clone(), &self.timestamp);
 
         Ok(commit)
     }
@@ -156,6 +152,31 @@ impl<'a, H: HashAlg, R: Repo<Node = Fractal<String, H>, Hash = H>> WitnessedSing
         let target_oid = targets[0].as_str();
         repo.read_tree(target_oid)
             .ok_or_else(|| SingularityError::TargetNotFound(target_oid.to_string()))
+    }
+
+    /// Prism: partial measurement. Attempts to refract but returns Option,
+    /// not Result. You might see through the Lens. You might not.
+    /// A single Hawking quantum — one partial observation.
+    pub fn prism(
+        repo: &R,
+        commit: &Commit<Fractal<String, H>, H>,
+    ) -> Option<Fractal<String, H>> {
+        Self::refract(repo, commit).ok()
+    }
+
+    /// Traversal: multi-site observation. Given a sequence of collapse commits,
+    /// refract each one and collect the results. Partial failures are skipped —
+    /// the traversal accumulates what it can observe.
+    ///
+    /// The full chain of Lenses collectively encodes the interior of the
+    /// collapsed space, even when individual observations fail. This is
+    /// Hawking radiation: partial information leaking through the boundary,
+    /// one quantum at a time.
+    pub fn traversal(
+        repo: &R,
+        commits: &[Commit<Fractal<String, H>, H>],
+    ) -> Vec<Fractal<String, H>> {
+        todo!()
     }
 }
 
@@ -444,5 +465,149 @@ mod tests {
         let r2 = WitnessedSingularity::<Sha, Store<Fractal<String>>>::refract(&store, &c2).unwrap();
         assert_eq!(content_oid(&r1), content_oid(&tree));
         assert_eq!(content_oid(&r2), content_oid(&tree2));
+    }
+
+    // ====================================================================
+    // Prism: partial measurement — Option, not Result
+    // ====================================================================
+
+    #[test]
+    fn prism_returns_some_for_valid_collapse() {
+        let mut store = Store::<Fractal<String>>::new();
+        let tree = test_tree();
+
+        let mut singularity =
+            WitnessedSingularity::<Sha, _>::new(&mut store, mara(), TIMESTAMP);
+        let commit = singularity.collapse(&tree, "collapse").unwrap();
+
+        // Prism succeeds — we can see through this Lens
+        let result = WitnessedSingularity::<Sha, Store<Fractal<String>>>::prism(&store, &commit);
+        assert!(result.is_some());
+        assert_eq!(content_oid(&result.unwrap()), content_oid(&tree));
+    }
+
+    #[test]
+    fn prism_returns_none_for_non_lens() {
+        // A commit whose node is not a Lens — the Prism can't see through it
+        let mut store = Store::<Fractal<String>>::new();
+        let tree = test_tree();
+        let commit = Draft::root("not a collapse", tree).commit(&mut store, mara(), TIMESTAMP);
+
+        let result = WitnessedSingularity::<Sha, Store<Fractal<String>>>::prism(&store, &commit);
+        assert!(result.is_none(), "Prism should return None for non-Lens commit");
+    }
+
+    // ====================================================================
+    // Traversal: multi-site observation — accumulated partial views
+    // ====================================================================
+
+    #[test]
+    fn traversal_collects_all_refracted_trees() {
+        // Collapse three different trees. The traversal should recover all three.
+        // This is the full Hawking radiation chain — enough partial observations
+        // to collectively encode the interior.
+        let mut store = Store::<Fractal<String>>::new();
+
+        let tree1 = encoding::encode("first observation");
+        let tree2 = encoding::encode("second observation");
+        let tree3 = encoding::encode("third observation");
+
+        let oid1 = content_oid(&tree1);
+        let oid2 = content_oid(&tree2);
+        let oid3 = content_oid(&tree3);
+
+        let mut s1 =
+            WitnessedSingularity::<Sha, _>::new(&mut store, mara(), "1000000000 +0000");
+        let c1 = s1.collapse(&tree1, "first").unwrap();
+
+        let mut s2 =
+            WitnessedSingularity::<Sha, _>::new(&mut store, mara(), "1000000001 +0000");
+        let c2 = s2.collapse(&tree2, "second").unwrap();
+
+        let mut s3 =
+            WitnessedSingularity::<Sha, _>::new(&mut store, mara(), "1000000002 +0000");
+        let c3 = s3.collapse(&tree3, "third").unwrap();
+
+        let commits = vec![c1, c2, c3];
+        let recovered =
+            WitnessedSingularity::<Sha, Store<Fractal<String>>>::traversal(&store, &commits);
+
+        assert_eq!(recovered.len(), 3);
+        assert_eq!(content_oid(&recovered[0]), oid1);
+        assert_eq!(content_oid(&recovered[1]), oid2);
+        assert_eq!(content_oid(&recovered[2]), oid3);
+    }
+
+    #[test]
+    fn traversal_skips_non_lens_commits() {
+        // Mix Lens commits and non-Lens commits. The traversal should only
+        // recover from the Lens commits — partial observation, not total.
+        let mut store = Store::<Fractal<String>>::new();
+
+        let tree1 = encoding::encode("observable");
+        let tree2 = encoding::encode("not a collapse");
+        let oid1 = content_oid(&tree1);
+
+        let mut s1 =
+            WitnessedSingularity::<Sha, _>::new(&mut store, mara(), TIMESTAMP);
+        let lens_commit = s1.collapse(&tree1, "collapse").unwrap();
+
+        // Non-Lens commit (regular commit, not a collapse)
+        let normal_commit =
+            Draft::root("regular", tree2).commit(&mut store, mara(), "1000000001 +0000");
+
+        let commits = vec![lens_commit, normal_commit];
+        let recovered =
+            WitnessedSingularity::<Sha, Store<Fractal<String>>>::traversal(&store, &commits);
+
+        // Only the Lens commit was refracted — the non-Lens was skipped
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(content_oid(&recovered[0]), oid1);
+    }
+
+    #[test]
+    fn traversal_empty_for_no_commits() {
+        let store = Store::<Fractal<String>>::new();
+        let recovered =
+            WitnessedSingularity::<Sha, Store<Fractal<String>>>::traversal(&store, &[]);
+        assert!(recovered.is_empty());
+    }
+
+    // ====================================================================
+    // Black hole complementarity: different observers, same interior
+    // ====================================================================
+
+    #[test]
+    fn complementarity_different_observers_same_interior() {
+        // Two different observers collapse the same tree. The traversal
+        // over both should recover the same interior from both viewpoints.
+        // This is black hole complementarity: different observers see
+        // different things (commits), but the physics (tree) is consistent.
+        let mut store = Store::<Fractal<String>>::new();
+        let tree = test_tree();
+        let original_oid = content_oid(&tree);
+
+        let mut s_mara =
+            WitnessedSingularity::<Sha, _>::new(&mut store, mara(), TIMESTAMP);
+        let c_mara = s_mara.collapse(&tree, "mara observes").unwrap();
+
+        let mut s_reed =
+            WitnessedSingularity::<Sha, _>::new(&mut store, reed(), TIMESTAMP);
+        let c_reed = s_reed.collapse(&tree, "reed observes").unwrap();
+
+        // Different commits (different observers)
+        assert_ne!(c_mara.sha(), c_reed.sha());
+
+        // Traversal recovers the same tree from both
+        let commits = vec![c_mara, c_reed];
+        let recovered =
+            WitnessedSingularity::<Sha, Store<Fractal<String>>>::traversal(&store, &commits);
+
+        assert_eq!(recovered.len(), 2);
+        // Both observations point to the same interior
+        assert_eq!(content_oid(&recovered[0]), original_oid);
+        assert_eq!(content_oid(&recovered[1]), original_oid);
+        // The recovered trees are structurally identical
+        assert_eq!(content_oid(&recovered[0]), content_oid(&recovered[1]));
     }
 }
