@@ -157,10 +157,7 @@ impl<'a, H: HashAlg, R: Repo<Node = Fractal<String, H>, Hash = H>> WitnessedSing
     /// Prism: partial measurement. Attempts to refract but returns Option,
     /// not Result. You might see through the Lens. You might not.
     /// A single Hawking quantum — one partial observation.
-    pub fn prism(
-        repo: &R,
-        commit: &Commit<Fractal<String, H>, H>,
-    ) -> Option<Fractal<String, H>> {
+    pub fn prism(repo: &R, commit: &Commit<Fractal<String, H>, H>) -> Option<Fractal<String, H>> {
         Self::refract(repo, commit).ok()
     }
 
@@ -176,7 +173,10 @@ impl<'a, H: HashAlg, R: Repo<Node = Fractal<String, H>, Hash = H>> WitnessedSing
         repo: &R,
         commits: &[Commit<Fractal<String, H>, H>],
     ) -> Vec<Fractal<String, H>> {
-        todo!()
+        commits
+            .iter()
+            .filter_map(|commit| Self::prism(repo, commit))
+            .collect()
     }
 }
 
@@ -476,8 +476,7 @@ mod tests {
         let mut store = Store::<Fractal<String>>::new();
         let tree = test_tree();
 
-        let mut singularity =
-            WitnessedSingularity::<Sha, _>::new(&mut store, mara(), TIMESTAMP);
+        let mut singularity = WitnessedSingularity::<Sha, _>::new(&mut store, mara(), TIMESTAMP);
         let commit = singularity.collapse(&tree, "collapse").unwrap();
 
         // Prism succeeds — we can see through this Lens
@@ -494,7 +493,10 @@ mod tests {
         let commit = Draft::root("not a collapse", tree).commit(&mut store, mara(), TIMESTAMP);
 
         let result = WitnessedSingularity::<Sha, Store<Fractal<String>>>::prism(&store, &commit);
-        assert!(result.is_none(), "Prism should return None for non-Lens commit");
+        assert!(
+            result.is_none(),
+            "Prism should return None for non-Lens commit"
+        );
     }
 
     // ====================================================================
@@ -516,16 +518,13 @@ mod tests {
         let oid2 = content_oid(&tree2);
         let oid3 = content_oid(&tree3);
 
-        let mut s1 =
-            WitnessedSingularity::<Sha, _>::new(&mut store, mara(), "1000000000 +0000");
+        let mut s1 = WitnessedSingularity::<Sha, _>::new(&mut store, mara(), "1000000000 +0000");
         let c1 = s1.collapse(&tree1, "first").unwrap();
 
-        let mut s2 =
-            WitnessedSingularity::<Sha, _>::new(&mut store, mara(), "1000000001 +0000");
+        let mut s2 = WitnessedSingularity::<Sha, _>::new(&mut store, mara(), "1000000001 +0000");
         let c2 = s2.collapse(&tree2, "second").unwrap();
 
-        let mut s3 =
-            WitnessedSingularity::<Sha, _>::new(&mut store, mara(), "1000000002 +0000");
+        let mut s3 = WitnessedSingularity::<Sha, _>::new(&mut store, mara(), "1000000002 +0000");
         let c3 = s3.collapse(&tree3, "third").unwrap();
 
         let commits = vec![c1, c2, c3];
@@ -548,8 +547,7 @@ mod tests {
         let tree2 = encoding::encode("not a collapse");
         let oid1 = content_oid(&tree1);
 
-        let mut s1 =
-            WitnessedSingularity::<Sha, _>::new(&mut store, mara(), TIMESTAMP);
+        let mut s1 = WitnessedSingularity::<Sha, _>::new(&mut store, mara(), TIMESTAMP);
         let lens_commit = s1.collapse(&tree1, "collapse").unwrap();
 
         // Non-Lens commit (regular commit, not a collapse)
@@ -568,8 +566,7 @@ mod tests {
     #[test]
     fn traversal_empty_for_no_commits() {
         let store = Store::<Fractal<String>>::new();
-        let recovered =
-            WitnessedSingularity::<Sha, Store<Fractal<String>>>::traversal(&store, &[]);
+        let recovered = WitnessedSingularity::<Sha, Store<Fractal<String>>>::traversal(&store, &[]);
         assert!(recovered.is_empty());
     }
 
@@ -587,12 +584,10 @@ mod tests {
         let tree = test_tree();
         let original_oid = content_oid(&tree);
 
-        let mut s_mara =
-            WitnessedSingularity::<Sha, _>::new(&mut store, mara(), TIMESTAMP);
+        let mut s_mara = WitnessedSingularity::<Sha, _>::new(&mut store, mara(), TIMESTAMP);
         let c_mara = s_mara.collapse(&tree, "mara observes").unwrap();
 
-        let mut s_reed =
-            WitnessedSingularity::<Sha, _>::new(&mut store, reed(), TIMESTAMP);
+        let mut s_reed = WitnessedSingularity::<Sha, _>::new(&mut store, reed(), TIMESTAMP);
         let c_reed = s_reed.collapse(&tree, "reed observes").unwrap();
 
         // Different commits (different observers)
