@@ -73,6 +73,10 @@ pub trait Keys: Sized + Clone {
 
     /// Decrypt an encrypted fragment.
     fn decrypt<E: Decode>(&self, encrypted: &Encrypted<Self>) -> Result<Fractal<E>, Self::Error>;
+
+    /// Content-addressable identity of this key.
+    /// Deterministic, stable, unique per key.
+    fn fingerprint(&self) -> String;
 }
 
 /// No-op keys: empty signatures, no encryption.
@@ -97,6 +101,10 @@ impl Keys for PlainKeys {
         let sha = Sha(fragment::blob_oid_bytes(&encrypted.ciphertext));
         let ref_ = Ref::new(sha, "decrypted");
         Ok(Fractal::shard_typed(ref_, data))
+    }
+
+    fn fingerprint(&self) -> String {
+        "plain".to_string()
     }
 }
 
@@ -185,6 +193,16 @@ impl Keys for Local {
         let ref_ = Ref::new(sha, "decrypted");
         Ok(Fractal::shard_typed(ref_, data))
     }
+
+    fn fingerprint(&self) -> String {
+        match self {
+            Local::None => "none".to_string(),
+            #[cfg(feature = "ssh")]
+            Local::Ssh(ssh) => ssh.fingerprint(),
+            #[cfg(feature = "gpg")]
+            Local::Gpg(gpg) => gpg.key_id.clone(),
+        }
+    }
 }
 
 // ===========================================================================
@@ -218,6 +236,14 @@ impl SSH {
     pub fn write_to_file(&self, path: impl AsRef<std::path::Path>) -> Result<(), ssh_key::Error> {
         self.key
             .write_openssh_file(path.as_ref(), ssh_key::LineEnding::LF)
+    }
+
+    /// Content-addressable identity: SHA-256 fingerprint of the public key.
+    pub fn fingerprint(&self) -> String {
+        self.key
+            .public_key()
+            .fingerprint(ssh_key::HashAlg::Sha256)
+            .to_string()
     }
 
     /// Sign raw bytes, returning the PEM-encoded SSH signature.
