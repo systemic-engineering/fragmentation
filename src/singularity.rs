@@ -1,8 +1,7 @@
 use std::convert::Infallible;
 
-use crate::commit::{Commit, Draft, Draftable};
-use crate::encoding::Encode;
-use crate::fragment::{content_oid, Fractal, Fragmentable};
+use crate::commit::{Commit, Draftable, Draft};
+use crate::fragment::{Fractal, Fragmentable};
 use crate::ref_::Ref;
 use crate::repo::Repo;
 use crate::sha::HashAlg;
@@ -80,9 +79,7 @@ pub struct WitnessedSingularity<'a, H: HashAlg, R: Repo<Node = Fractal<String, H
     _hash: std::marker::PhantomData<H>,
 }
 
-impl<'a, H: HashAlg, R: Repo<Node = Fractal<String, H>, Hash = H>>
-    WitnessedSingularity<'a, H, R>
-{
+impl<'a, H: HashAlg, R: Repo<Node = Fractal<String, H>, Hash = H>> WitnessedSingularity<'a, H, R> {
     /// Create a new witnessed singularity with the given observer.
     pub fn new(repo: &'a mut R, committer: Committer, timestamp: impl Into<String>) -> Self {
         WitnessedSingularity {
@@ -107,7 +104,31 @@ impl<'a, H: HashAlg, R: Repo<Node = Fractal<String, H>, Hash = H>>
         tree: &Fractal<String, H>,
         message: impl Into<String>,
     ) -> Result<Commit<Fractal<String, H>, H>, SingularityError> {
-        todo!()
+        let message: String = message.into();
+
+        // 1. Write the original tree to the repo, preserving its content OID
+        let tree_oid = self.repo.write_tree(tree);
+
+        // 2. Create a Lens node targeting the original tree's content OID.
+        //    The Lens data carries the collapse message.
+        //    The Lens ref uses the tree OID as its SHA — it IS about that tree.
+        let lens_ref = Ref::new(H::from_hex(&tree_oid), "collapse");
+        let target = vec![H::from_hex(&tree_oid)];
+        let lens = Fractal::lens(lens_ref, &message, target);
+
+        // 3. Write the Lens to the repo (so its OID is stored too)
+        self.repo.write_tree(&lens);
+
+        // 4. Create a draft commit containing the Lens, and commit it.
+        //    The commit SHA depends on the observer (committer).
+        let draft = Draft::root(&message, lens);
+        let commit = draft.commit(
+            self.repo,
+            self.committer.clone(),
+            &self.timestamp,
+        );
+
+        Ok(commit)
     }
 
     /// Refract a commit back into the original tree by following the Lens.
@@ -118,7 +139,23 @@ impl<'a, H: HashAlg, R: Repo<Node = Fractal<String, H>, Hash = H>>
         repo: &R,
         commit: &Commit<Fractal<String, H>, H>,
     ) -> Result<Fractal<String, H>, SingularityError> {
-        todo!()
+        let node = commit.node();
+
+        // The commit's node must be a Lens
+        if !node.is_lens() {
+            return Err(SingularityError::NotALens);
+        }
+
+        // The Lens must have at least one target
+        let targets = node.targets();
+        if targets.is_empty() {
+            return Err(SingularityError::EmptyLens);
+        }
+
+        // Follow the first target back to the original tree
+        let target_oid = targets[0].as_str();
+        repo.read_tree(target_oid)
+            .ok_or_else(|| SingularityError::TargetNotFound(target_oid.to_string()))
     }
 }
 
@@ -126,7 +163,7 @@ impl<'a, H: HashAlg, R: Repo<Node = Fractal<String, H>, Hash = H>>
 mod tests {
     use super::*;
     use crate::encoding;
-    use crate::fragment::Fractal;
+    use crate::fragment::{content_oid, Fractal};
     use crate::sha::Sha;
     use crate::store::Store;
     use crate::witnessed::Committer;
@@ -154,12 +191,14 @@ mod tests {
         let mut store = Store::<Fractal<String>>::new();
         let tree = test_tree();
 
-        let mut singularity =
-            WitnessedSingularity::<Sha, _>::new(&mut store, mara(), TIMESTAMP);
+        let mut singularity = WitnessedSingularity::<Sha, _>::new(&mut store, mara(), TIMESTAMP);
         let commit = singularity.collapse(&tree, "collapse").unwrap();
 
         // The commit's node must be a Lens
-        assert!(commit.node().is_lens(), "collapse commit node must be a Lens");
+        assert!(
+            commit.node().is_lens(),
+            "collapse commit node must be a Lens"
+        );
     }
 
     #[test]
@@ -168,8 +207,7 @@ mod tests {
         let tree = test_tree();
         let original_oid = content_oid(&tree);
 
-        let mut singularity =
-            WitnessedSingularity::<Sha, _>::new(&mut store, mara(), TIMESTAMP);
+        let mut singularity = WitnessedSingularity::<Sha, _>::new(&mut store, mara(), TIMESTAMP);
         let commit = singularity.collapse(&tree, "collapse").unwrap();
 
         // The Lens must target the original tree's content OID
@@ -192,8 +230,7 @@ mod tests {
         let tree = test_tree();
         let original_oid = content_oid(&tree);
 
-        let mut singularity =
-            WitnessedSingularity::<Sha, _>::new(&mut store, mara(), TIMESTAMP);
+        let mut singularity = WitnessedSingularity::<Sha, _>::new(&mut store, mara(), TIMESTAMP);
         let commit = singularity.collapse(&tree, "collapse").unwrap();
 
         // refract must recover the original tree
@@ -216,8 +253,7 @@ mod tests {
         let tree = test_tree();
         let original_oid = content_oid(&tree);
 
-        let mut singularity =
-            WitnessedSingularity::<Sha, _>::new(&mut store, mara(), TIMESTAMP);
+        let mut singularity = WitnessedSingularity::<Sha, _>::new(&mut store, mara(), TIMESTAMP);
         let commit = singularity
             .collapse(&tree, "collapse through the horizon")
             .unwrap();
@@ -232,8 +268,7 @@ mod tests {
         let mut store = Store::<Fractal<String>>::new();
         let tree = test_tree();
 
-        let mut singularity =
-            WitnessedSingularity::<Sha, _>::new(&mut store, mara(), TIMESTAMP);
+        let mut singularity = WitnessedSingularity::<Sha, _>::new(&mut store, mara(), TIMESTAMP);
         let commit = singularity.collapse(&tree, "collapse").unwrap();
         let recovered =
             WitnessedSingularity::<Sha, Store<Fractal<String>>>::refract(&store, &commit).unwrap();
@@ -313,8 +348,7 @@ mod tests {
         let mut store = Store::<Fractal<String>>::new();
         let tree = test_tree();
 
-        let mut singularity =
-            WitnessedSingularity::<Sha, _>::new(&mut store, mara(), TIMESTAMP);
+        let mut singularity = WitnessedSingularity::<Sha, _>::new(&mut store, mara(), TIMESTAMP);
         let commit = singularity.collapse(&tree, "event horizon").unwrap();
 
         // The Lens data is the collapse message
@@ -335,8 +369,7 @@ mod tests {
         let tree = test_tree();
         let commit = Draft::root("not a collapse", tree).commit(&mut store, mara(), TIMESTAMP);
 
-        let result =
-            WitnessedSingularity::<Sha, Store<Fractal<String>>>::refract(&store, &commit);
+        let result = WitnessedSingularity::<Sha, Store<Fractal<String>>>::refract(&store, &commit);
         assert_eq!(result, Err(SingularityError::NotALens));
     }
 
@@ -370,8 +403,7 @@ mod tests {
         let mut store = Store::<Fractal<String>>::new();
         let tree = test_tree();
 
-        let mut singularity =
-            WitnessedSingularity::<Sha, _>::new(&mut store, mara(), TIMESTAMP);
+        let mut singularity = WitnessedSingularity::<Sha, _>::new(&mut store, mara(), TIMESTAMP);
         let commit = singularity.collapse(&tree, "witnessed collapse").unwrap();
 
         // The commit carries witness metadata
@@ -392,14 +424,12 @@ mod tests {
         let mut store = Store::<Fractal<String>>::new();
         let tree = test_tree();
 
-        let mut s1 =
-            WitnessedSingularity::<Sha, _>::new(&mut store, mara(), "1000000000 +0000");
+        let mut s1 = WitnessedSingularity::<Sha, _>::new(&mut store, mara(), "1000000000 +0000");
         let c1 = s1.collapse(&tree, "first collapse").unwrap();
 
         // Second tree, collapsed as child of first
         let tree2 = encoding::encode("second observation");
-        let mut s2 =
-            WitnessedSingularity::<Sha, _>::new(&mut store, mara(), "1000000001 +0000");
+        let mut s2 = WitnessedSingularity::<Sha, _>::new(&mut store, mara(), "1000000001 +0000");
         let c2 = s2.collapse(&tree2, "second collapse").unwrap();
 
         // Both commits exist, both are Lens nodes
@@ -410,10 +440,8 @@ mod tests {
         assert_ne!(c1.node().targets(), c2.node().targets());
 
         // Both can be refracted independently
-        let r1 =
-            WitnessedSingularity::<Sha, Store<Fractal<String>>>::refract(&store, &c1).unwrap();
-        let r2 =
-            WitnessedSingularity::<Sha, Store<Fractal<String>>>::refract(&store, &c2).unwrap();
+        let r1 = WitnessedSingularity::<Sha, Store<Fractal<String>>>::refract(&store, &c1).unwrap();
+        let r2 = WitnessedSingularity::<Sha, Store<Fractal<String>>>::refract(&store, &c2).unwrap();
         assert_eq!(content_oid(&r1), content_oid(&tree));
         assert_eq!(content_oid(&r2), content_oid(&tree2));
     }
