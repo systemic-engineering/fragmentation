@@ -981,9 +981,10 @@ mod fuse_state_tests {
     }
 
     #[test]
-    fn read_annotation_lens_label_is_path() {
-        // The Lens label is the path — where the observation happened.
-        // Same semantics as the Lens label in collapse: what you're looking at.
+    fn read_annotation_lens_data_carries_path() {
+        // The Lens data carries the full path -- where the observation happened.
+        // The path lives in data (not the label) because git tree entry names
+        // cannot contain slashes. The Lens target carries the content hash.
         let (dir, mut inner) = make_inner("refs/fragmentation/test");
 
         let dir_ino = inner.mkdir(1, "protected").unwrap();
@@ -1007,9 +1008,17 @@ mod fuse_state_tests {
             .expect("@read subtree should exist");
 
         let annotation = &read_subtree.children()[0];
+        let data = std::str::from_utf8(annotation.data()).unwrap();
+        assert!(
+            data.contains("path=protected/draft.md"),
+            "Lens data should contain the full observation path"
+        );
+
+        // The Lens target should be the content hash of what was observed
+        let expected_hash = fragmentation::fragment::blob_oid_bytes(b"draft content");
         assert_eq!(
-            annotation.self_ref().label, "protected/draft.md",
-            "Lens label should be the path that was observed"
+            annotation.targets()[0].0, expected_hash,
+            "Lens target should be the content hash of what was observed"
         );
     }
 
@@ -1103,6 +1112,9 @@ mod fuse_state_tests {
         // They should target different content hashes (different files)
         let t0 = &read_subtree.children()[0].targets()[0].0;
         let t1 = &read_subtree.children()[1].targets()[0].0;
-        assert_ne!(t0, t1, "different files should produce different Lens targets");
+        assert_ne!(
+            t0, t1,
+            "different files should produce different Lens targets"
+        );
     }
 }
