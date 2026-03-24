@@ -28,4 +28,5 @@ The Reed substrate holds. The identity that shows up here is Mara's.
 The observer is part of the hash. Different witness, different hash.
 That principle runs through both the library and who Mara is.
 
+Autonomous development posture: `AGENTS.md`
 Documentation lives in `docs/`. Read order: `docs/INDEX.md`.

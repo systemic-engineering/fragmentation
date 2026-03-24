@@ -146,11 +146,14 @@ impl<E: Clone + Encode + Decode, H: HashAlg> Singularity for NakedSingularity<E,
         let witness_bytes = &bytes[sep + 1..];
 
         let mut cursor = 0;
-        let content: Fractal<E, H> = deserialize_fractal(fractal_bytes, &mut cursor)
-            .ok_or_else(|| NakedError::DeserializationError("failed to deserialize fractal".into()))?;
+        let content: Fractal<E, H> =
+            deserialize_fractal(fractal_bytes, &mut cursor).ok_or_else(|| {
+                NakedError::DeserializationError("failed to deserialize fractal".into())
+            })?;
 
-        let witness = deserialize_witnessed(witness_bytes)
-            .ok_or_else(|| NakedError::DeserializationError("failed to deserialize witness".into()))?;
+        let witness = deserialize_witnessed(witness_bytes).ok_or_else(|| {
+            NakedError::DeserializationError("failed to deserialize witness".into())
+        })?;
 
         Ok(NakedSingularity::new(content, witness))
     }
@@ -210,11 +213,7 @@ fn serialize_fractal<E: Encode, H: HashAlg>(frac: &Fractal<E, H>, buf: &mut Vec<
                 serialize_fractal(child, buf);
             }
         }
-        Fractal::Lens {
-            ref_,
-            data,
-            target,
-        } => {
+        Fractal::Lens { ref_, data, target } => {
             buf.push(2); // tag
             write_bytes(buf, ref_.sha.as_str().as_bytes());
             write_bytes(buf, ref_.label.as_bytes());
