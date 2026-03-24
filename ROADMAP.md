@@ -359,7 +359,7 @@ See: `insights/fragmentation/naked-singularity.md`
 10. ✅ Self-describing identifiers — `Cid<H>` wraps `Ref<H>` with `Codec` + `HashId`
 11. ✅ `NakedSingularity` type — dual OID (content_oid observer-independent, naked_oid observer-dependent), collapse/refract via `Singularity` trait
 12. Non-git serialization backend (content model as its own format)
-13. Coincidence hash as `HashAlg` implementation
+13. ✅ Coincidence hash as `HashAlg` implementation — `CoincidenceHash<N>` implements `HashAlg`, `Fractal<E, CoincidenceHash<N>>` works with Store unchanged
 
 ### Longer-term (the VCS that falls out)
 
