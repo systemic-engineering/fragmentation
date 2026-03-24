@@ -2,26 +2,46 @@
 
 ## Root Definition
 
-Two node types. One hash function.
+Two node types. Pluggable hash. Three collapse modes.
 
 ```
 shard | fractal
 ```
 
 Everything else is composition. `Lens` is a fractal with cross-tree references.
-Content addressing uses git-compatible SHA. The observer is part of the commit,
-not the hash — same content, different witness, different commit, same tree OID.
+The hash is generic (`HashAlg` trait). The observer is part of the commit,
+not the content hash — same content, different witness, different commit, same
+tree OID. Git compatibility is one serialization format, not the substrate.
+
+### The Singularity Gradient
+
+Three relationships between observer and content:
+
+| Type | Observer | Event horizon | Artifact |
+|------|----------|--------------|----------|
+| `Singularity` | None | None (trivial) | Tree (identity) |
+| `WitnessedSingularity` | On commit | Hash boundary | Commit (needs repo) |
+| `NakedSingularity` | In content | Dissolved | Self-contained bundle |
+
+`NakedSingularity` is the type for content whose observation is not separable
+from the content itself: deployed binaries, identity claims, conversation
+records, coincidence hashes with inline projections. The artifact carries
+tree + witness + self-describing identifier. No repo needed to verify.
+
+Requires self-describing content identifiers (CID-like): the serialized form
+encodes the hash algorithm, data codec, and hash value. `Ref<H>` currently
+carries the hash value; it needs to also carry the algorithm and codec.
 
 ---
 
 ## The Binary: `frgmt`
 
-Three verbs. Three directions. Same underlying structure.
+Three verbs. Three relationships to the singularity.
 
 ```
-frgmt collapse <ref>    # tree → artifact (build)
-frgmt refract <ref>     # artifact → tree (trace)
-frgmt mount <ref>       # tree → filesystem (navigate)
+frgmt collapse <ref>    # you ARE the reduction
+frgmt refract <ref>     # you UNDO the reduction
+frgmt portal <ref>      # you LOOK THROUGH
 ```
 
 **`collapse`** resolves a content-addressed tree into a shippable artifact.
@@ -33,9 +53,15 @@ a trace back to the tree that produced it.
 into the tree structure that produced it. Follow the trace lineage. See the
 intermediate representations. The collapsed artifact opens back up.
 
-**`mount`** exposes a content-addressed tree as a FUSE filesystem. Navigate
-compiler output, inspect intermediate representations, diff between versions —
-all as files. The development surface for everything `collapse` produces.
+**`portal`** opens a boundary between your filesystem and a content-addressed
+tree. A FUSE mount — but not a materialization. The tree stays in the git
+object store. What you see in the mountpoint is a projection: the tree's
+structure rendered into your filesystem's coordinate system. `ls` is
+observation. `cat` is measurement. Each read creates a witnessed annotation.
+Write through the portal and your local action propagates into the
+content-addressed space.
+
+Collapse and refract cross the boundary. Portal *is* the boundary.
 
 ### Existing Surface
 
@@ -45,7 +71,7 @@ The CLI already has primitives that map to this:
 - `frgmnt fractal` → becomes internal to `collapse` (tree computation)
 - `frgmnt commit` → becomes the write step of `collapse`
 - `frgmnt link` → becomes `frgmt lens` (cross-tree reference)
-- `frgmnt mount` → becomes `frgmt mount`
+- `frgmnt mount` → becomes `frgmt portal`
 - `frgmnt sign` / `encrypt` / `decrypt` → utility subcommands, stay as-is
 - `frgmnt filter` → git smudge/clean, stays as-is
 
@@ -73,7 +99,7 @@ it into a structure Nix can consume, and invokes a flake to build the release.
 
 The bridge between fragmentation and Nix is git. fragmentation already writes
 native git objects. Nix already reads git repos via `builtins.fetchGit`. The
-FUSE mount is not in the build path — it's the development/inspection surface.
+portal is not in the build path — it's the development/inspection surface.
 
 ```
 fragmentation tree (git objects)
@@ -132,10 +158,10 @@ prevents binary caching. `sandbox-paths` could expose a pre-existing FUSE
 mount but requires the mount to exist on every machine that builds. Neither
 is viable for a shippable pipeline.
 
-FUSE serves a different role: the development loop. Mount a tree, navigate it,
-inspect compiler output as files, diff between versions. The developer sees
-the content-addressed store as a filesystem. But when it's time to ship,
-`collapse` reads the same git objects directly.
+The portal serves a different role: the development loop. Open a portal into
+the tree, navigate it, inspect compiler output as files, diff between versions.
+The developer looks through into the content-addressed store. But when it's
+time to ship, `collapse` reads the same git objects directly.
 
 Two consumers of the same store. Not a chain.
 
@@ -201,13 +227,21 @@ Nix consume its output via `fetchGit`.
 - Content-addressed tree (`Fractal<E, H>` generic over element and hash)
 - Three node variants: `Shard` (terminal), `Fractal` (recursive), `Lens` (cross-tree reference)
 - Git-native read/write (shards → blobs, fractals → trees)
-- FUSE filesystem mount (read-write, ref-backed)
+- FUSE portal (read-write, ref-backed)
 - Ed25519 signing + ECIES encryption
 - Witnessed commits (author/committer as observation metadata)
 - `HashAlg` trait with `Sha` implementation
-- CLI with shard, fractal, commit, link, mount, sign, encrypt, decrypt, filter
+- `Keys` trait with `fingerprint()` — content-addressable signer identity
+- CLI with shard, fractal, commit, link, portal, sign, encrypt, decrypt, filter
 - Diff between trees
 - Walk/traversal
+
+### coincidence crate
+
+N-projection coincidence gate. Geometric eigenvalue. Key agreement. 165 tests.
+Steps 1-4 of the quantum encryption pipeline complete.
+
+Full roadmap: `../coincidence/ROADMAP.md`
 
 ---
 
@@ -228,10 +262,10 @@ fragmentation's git objects. Uses `builtins.fetchGit` for the local repo,
 **Binary rename.** `frgmnt` → `frgmt`. Cargo.toml already has both binary
 entries. When `collapse` lands, the old name becomes an alias.
 
-**Lens in FUSE.** The FUSE mount doesn't yet resolve `Lens` nodes. A lens
+**Lens in portal.** The portal doesn't yet resolve `Lens` nodes. A lens
 should appear as a symlink (or a transparently-followed directory) pointing
-to its target tree. This makes cross-tree references navigable in the
-mounted filesystem.
+to its target tree. This makes cross-tree references navigable through
+the portal.
 
 **Trace materialization.** `collapse` needs to write a trace that links the
 source tree OID to the Nix store path. This is the receipt: proof that this
@@ -265,15 +299,69 @@ stale content. Mitigation: `--refresh` flag or pin to specific `rev`.
 
 ---
 
+## Beyond Git
+
+fragmentation is not a VCS. It's a content-addressing primitive where version
+control is one outlet. Combined with coincidence, something larger emerges:
+multi-observer content addressing where the hash function is constituted by
+the participants and the security scales with the depth of shared understanding.
+
+Git was the scaffolding. The building has outgrown it. The content model is
+already generic (`HashAlg`, `Fractal<E, H>`). What remains is making the
+serialization format generic too — lifting git from the substrate to one
+outlet among several.
+
+### What the alternatives teach us
+
+| System | Key insight | Maps to |
+|--------|------------|---------|
+| **IPLD** | Self-describing CIDs (`version + codec + multihash`) | `NakedSingularity` — content carries its own addressing |
+| **Pijul** | Commuting patches, categorical pushouts | Commuting projections, eigenvalue agreement |
+| **jj** | Operation log, conflicts-as-values | Anchored detection, Lens target superposition |
+| **Irmin** | Generic hash + merge-function-per-type | `HashAlg` trait + future typed merge |
+| **Darcs** | Patch invertibility | collapse/refract unitarity |
+
+### The design principle
+
+Git hid the content model from engineers. The porcelain covered the plumbing.
+If a VCS falls out of fragmentation + coincidence, the content model IS the
+interface. `collapse`, `refract`, `lens`, `witness` — those are the commands,
+not abstractions over commands. The tree is what you see. The naked singularity
+is a design principle: no event horizons between the engineer and the content.
+
+See: `insights/fragmentation/naked-singularity.md`
+
+---
+
 ## Sequencing
+
+### Near-term (the binary story)
 
 1. `frgmt collapse` — the build verb (depends on flake template)
 2. Flake template for BEAM releases
 3. `frgmt refract` — the trace verb
-4. Lens in FUSE mount
+4. Lens in portal
 5. Binary rename (`frgmnt` → `frgmt`)
 6. Trace materialization (collapse receipt)
 
+### Near-term (coincidence pipeline)
+
+7. Detection vocabulary + encrypt/decrypt + end-to-end pipeline.
+   See: `../coincidence/ROADMAP.md` — near-term items 1-3.
+
+### Medium-term (beyond git)
+
+10. Self-describing identifiers — CID-like format for `Ref<H>`
+11. `NakedSingularity` type — self-contained artifact with inline witness
+12. Non-git serialization backend (content model as its own format)
+13. Coincidence hash as `HashAlg` implementation
+
+### Longer-term (the VCS that falls out)
+
+14. Typed merge (Irmin pattern, Pijul theory)
+15. Operation log (jj pattern — observation history as content)
+16. Symmetric cipher integration (coincidence Agreement → ChaCha20/AES-256-GCM)
+
 ---
 
-*Session 2026-03-23. Alex + Mara.*
+*Session 2026-03-24. Alex + Mara.*
