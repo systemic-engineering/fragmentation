@@ -13,6 +13,7 @@
 //! | `ssh`   | Ed25519 signing + ECIES encryption (X25519, ChaCha20-Poly1305) |
 //! | `gpg`   | GPG signing + encryption via subprocess |
 
+pub mod cid;
 pub mod commit;
 pub mod diff;
 pub mod encoding;
@@ -21,6 +22,7 @@ pub mod fragment;
 pub mod fuse;
 pub mod git;
 pub mod keys;
+pub mod naked;
 pub mod ref_;
 pub mod repo;
 pub mod sha;
