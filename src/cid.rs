@@ -36,33 +36,41 @@ pub struct Cid<H: HashAlg = Sha> {
 impl<H: HashAlg> Cid<H> {
     /// Construct a new CID from a Ref, codec, and hash identifier.
     pub fn new(ref_: Ref<H>, codec: Codec, hash_id: HashId) -> Self {
-        todo!()
+        Cid {
+            ref_,
+            codec,
+            hash_id,
+        }
     }
 
     /// Construct a CID with default codec (Fragmentation) and hash (Sha256).
     pub fn from_ref(ref_: Ref<H>) -> Self {
-        todo!()
+        Cid {
+            ref_,
+            codec: Codec::Fragmentation,
+            hash_id: HashId::Sha256,
+        }
     }
 
     /// The underlying reference.
     pub fn ref_(&self) -> &Ref<H> {
-        todo!()
+        &self.ref_
     }
 
     /// The hash as a hex string.
     pub fn hash_hex(&self) -> &str {
-        todo!()
+        self.ref_.sha.as_str()
     }
 
     /// The label from the underlying Ref.
     pub fn label(&self) -> &str {
-        todo!()
+        &self.ref_.label
     }
 }
 
 impl<H: HashAlg> fmt::Display for Cid<H> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
+        write!(f, "{}", self.ref_.sha.as_str())
     }
 }
 
