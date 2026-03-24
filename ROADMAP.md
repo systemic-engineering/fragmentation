@@ -232,14 +232,19 @@ Nix consume its output via `fetchGit`.
 - Witnessed commits (author/committer as observation metadata)
 - `HashAlg` trait with `Sha` implementation
 - `Keys` trait with `fingerprint()` — content-addressable signer identity
+- Self-describing content identifiers (`Cid<H>` — wraps `Ref<H>` with codec + hash algorithm)
+- `NakedSingularity` — self-contained artifact with dual OID (content_oid + naked_oid), collapse/refract
 - CLI with shard, fractal, commit, link, portal, sign, encrypt, decrypt, filter
 - Diff between trees
 - Walk/traversal
 
 ### coincidence crate
 
-N-projection coincidence gate. Geometric eigenvalue. Key agreement. 165 tests.
-Steps 1-4 of the quantum encryption pipeline complete.
+N-projection coincidence gate. Geometric eigenvalue. Key agreement. Detection
+vocabulary. ChaCha20-Poly1305 symmetric encryption. End-to-end pipeline.
+Graph Laplacian (Dirac operator D) with Jacobi eigenvalue decomposition and
+spectral distance. 196 tests. Steps 1-7 of the quantum encryption pipeline
+complete. Spectral triple (A, H, D) complete.
 
 Full roadmap: `../coincidence/ROADMAP.md`
 
@@ -344,15 +349,15 @@ See: `insights/fragmentation/naked-singularity.md`
 5. Binary rename (`frgmnt` → `frgmt`)
 6. Trace materialization (collapse receipt)
 
-### Near-term (coincidence pipeline)
+### Near-term (coincidence pipeline) — completed
 
-7. Detection vocabulary + encrypt/decrypt + end-to-end pipeline.
-   See: `../coincidence/ROADMAP.md` — near-term items 1-3.
+7. ✅ Detection vocabulary + encrypt/decrypt + end-to-end pipeline.
+   See: `../coincidence/ROADMAP.md` — steps 5-7 done.
 
 ### Medium-term (beyond git)
 
-10. Self-describing identifiers — CID-like format for `Ref<H>`
-11. `NakedSingularity` type — self-contained artifact with inline witness
+10. ✅ Self-describing identifiers — `Cid<H>` wraps `Ref<H>` with `Codec` + `HashId`
+11. ✅ `NakedSingularity` type — dual OID (content_oid observer-independent, naked_oid observer-dependent), collapse/refract via `Singularity` trait
 12. Non-git serialization backend (content model as its own format)
 13. Coincidence hash as `HashAlg` implementation
 
@@ -360,7 +365,7 @@ See: `insights/fragmentation/naked-singularity.md`
 
 14. Typed merge (Irmin pattern, Pijul theory)
 15. Operation log (jj pattern — observation history as content)
-16. Symmetric cipher integration (coincidence Agreement → ChaCha20/AES-256-GCM)
+16. ✅ Symmetric cipher integration (coincidence Agreement → ChaCha20-Poly1305)
 
 ---
 
