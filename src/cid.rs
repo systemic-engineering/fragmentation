@@ -28,9 +28,9 @@ pub enum Codec {
 /// Zero blast radius on existing code — `Ref<H>` is unchanged.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Cid<H: HashAlg = Sha> {
-    pub ref_: Ref<H>,
-    pub codec: Codec,
-    pub hash_id: HashId,
+    ref_: Ref<H>,
+    codec: Codec,
+    hash_id: HashId,
 }
 
 impl<H: HashAlg> Cid<H> {
@@ -66,6 +66,16 @@ impl<H: HashAlg> Cid<H> {
     pub fn label(&self) -> &str {
         &self.ref_.label
     }
+
+    /// The codec.
+    pub fn codec(&self) -> &Codec {
+        &self.codec
+    }
+
+    /// The hash algorithm identifier.
+    pub fn hash_id(&self) -> &HashId {
+        &self.hash_id
+    }
 }
 
 impl<H: HashAlg> fmt::Display for Cid<H> {
@@ -88,8 +98,8 @@ mod tests {
         let r = test_ref();
         let cid = Cid::new(r.clone(), Codec::Fragmentation, HashId::Sha256);
         assert_eq!(cid.ref_(), &r);
-        assert_eq!(cid.codec, Codec::Fragmentation);
-        assert_eq!(cid.hash_id, HashId::Sha256);
+        assert_eq!(cid.codec(), &Codec::Fragmentation);
+        assert_eq!(cid.hash_id(), &HashId::Sha256);
     }
 
     #[test]
@@ -97,8 +107,8 @@ mod tests {
         let r = test_ref();
         let cid = Cid::from_ref(r.clone());
         assert_eq!(cid.ref_(), &r);
-        assert_eq!(cid.codec, Codec::Fragmentation);
-        assert_eq!(cid.hash_id, HashId::Sha256);
+        assert_eq!(cid.codec(), &Codec::Fragmentation);
+        assert_eq!(cid.hash_id(), &HashId::Sha256);
     }
 
     #[test]

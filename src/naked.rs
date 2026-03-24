@@ -47,6 +47,8 @@ impl std::fmt::Display for NakedError {
     }
 }
 
+impl std::error::Error for NakedError {}
+
 /// Self-contained byte bundle. The collapsed form of a NakedSingularity.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NakedArtifact<H: HashAlg = Sha> {
@@ -251,6 +253,10 @@ fn deserialize_fractal<E: Decode, H: HashAlg>(
         0 => Some(Fractal::Shard { ref_, data }),
         1 => {
             let count = read_u32(bytes, cursor)? as usize;
+            let remaining = bytes.len().saturating_sub(*cursor);
+            if count > remaining {
+                return None;
+            }
             let mut children = Vec::with_capacity(count);
             for _ in 0..count {
                 children.push(deserialize_fractal(bytes, cursor)?);
@@ -263,6 +269,10 @@ fn deserialize_fractal<E: Decode, H: HashAlg>(
         }
         2 => {
             let count = read_u32(bytes, cursor)? as usize;
+            let remaining = bytes.len().saturating_sub(*cursor);
+            if count > remaining {
+                return None;
+            }
             let mut targets = Vec::with_capacity(count);
             for _ in 0..count {
                 let t_bytes = read_bytes(bytes, cursor)?;
