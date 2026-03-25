@@ -464,13 +464,18 @@ where
         }
     }
 
-    /// Flush all in-memory objects to the git object database.
+    /// Flush all in-memory objects and refs to the git object database.
     ///
-    /// Each object becomes a git blob or tree. Returns the number
-    /// of objects written. Idempotent: git deduplicates by OID.
+    /// Objects become git blobs/trees. Refs become git refs under
+    /// `refs/store/<ref_name>`. Returns the number of objects written.
+    /// Idempotent: git deduplicates by OID.
     pub fn flush(&self) -> usize {
         use crate::repo::Repo;
+        use crate::sha::HashAlg;
+
         let mut count = 0;
+
+        // Flush objects.
         for oid in self.memory.keys() {
             if let Some(node) = Repo::read_tree(&self.memory, &oid) {
                 if write_node(&self.repo, &node).is_ok() {
@@ -478,6 +483,22 @@ where
                 }
             }
         }
+
+        // Flush refs: each in-memory ref becomes a git ref.
+        // The ref value (a hash) points to the object OID in the git ODB.
+        for ref_name in self.memory.ref_names() {
+            if let Some(sha) = Repo::resolve_ref(&self.memory, ref_name) {
+                let oid_str = sha.as_str();
+                if let Ok(oid) = git2::Oid::from_str(oid_str) {
+                    // Verify the object exists in git ODB before creating the ref.
+                    if self.repo.find_blob(oid).is_ok() || self.repo.find_tree(oid).is_ok() {
+                        let git_ref = format!("refs/store/{ref_name}");
+                        let _ = self.repo.reference(&git_ref, oid, true, "flush");
+                    }
+                }
+            }
+        }
+
         count
     }
 
@@ -527,6 +548,15 @@ where
     }
 
     fn resolve_ref(&self, name: &str) -> Option<N::Hash> {
-        self.memory.resolve_ref(name)
+        use crate::sha::HashAlg;
+        // Tier 1: memory.
+        if let Some(sha) = self.memory.resolve_ref(name) {
+            return Some(sha);
+        }
+        // Tier 2: git refs.
+        let git_ref = format!("refs/store/{name}");
+        let reference = self.repo.find_reference(&git_ref).ok()?;
+        let oid = reference.target()?;
+        Some(N::Hash::from_hex(oid.to_string()))
     }
 }
