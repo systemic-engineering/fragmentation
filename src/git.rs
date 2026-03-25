@@ -464,20 +464,14 @@ where
         }
     }
 
-    /// Flush all in-memory objects and refs to the git object database.
-    ///
-    /// Objects become git blobs. The ref index becomes a single git tree
-    /// at `refs/store/index` — each entry maps ref_name → object OID.
-    /// One tree, one ref. Hydrate reads it back in one shot.
-    ///
+    /// Flush: collapse + write objects + update git ref.
     /// Returns the number of objects written.
     pub fn flush(&self) -> usize {
         use crate::repo::Repo;
-        use crate::sha::HashAlg;
 
         let mut count = 0;
 
-        // Flush objects as git blobs.
+        // Write objects to git ODB.
         for oid in self.memory.keys() {
             if let Some(node) = Repo::read_tree(&self.memory, &oid) {
                 if write_node(&self.repo, &node).is_ok() {
@@ -486,55 +480,29 @@ where
             }
         }
 
-        // Flush refs as a single git tree: entry name = ref_name, blob = object.
-        // Merges with any existing index tree on disk.
-        let existing_tree = self
-            .repo
-            .find_reference("refs/store/index")
-            .ok()
-            .and_then(|r| r.peel_to_tree().ok());
-        if let Ok(mut builder) = self.repo.treebuilder(existing_tree.as_ref()) {
-            for ref_name in self.memory.ref_names() {
-                if let Some(sha) = Repo::resolve_ref(&self.memory, ref_name) {
-                    if let Ok(oid) = git2::Oid::from_str(sha.as_str()) {
-                        let _ = builder.insert(ref_name, oid, 0o100644);
-                    }
-                }
-            }
-            if let Ok(tree_oid) = builder.write() {
-                let _ = self
-                    .repo
-                    .reference("refs/store/index", tree_oid, true, "flush");
-            }
+        // Collapse the index to a single tree, update the ref.
+        if let Ok(tree_oid) = self.collapse_index() {
+            let _ = self
+                .repo
+                .reference("refs/store/index", tree_oid, true, "collapse");
         }
 
         count
     }
 
-    /// Hydrate the in-memory store from the git index tree.
-    ///
-    /// Reads `refs/store/index` and populates refs. Objects are loaded
-    /// lazily via read-through on access.
+    /// Hydrate: read git ref + refract.
     pub fn hydrate(&mut self) {
-        use crate::repo::Repo;
-        use crate::sha::HashAlg;
-
-        let tree = match self
+        let oid = match self
             .repo
             .find_reference("refs/store/index")
             .ok()
-            .and_then(|r| r.peel_to_tree().ok())
+            .and_then(|r| r.target())
         {
-            Some(t) => t,
+            Some(oid) => oid,
             None => return,
         };
 
-        for entry in tree.iter() {
-            if let Some(name) = entry.name() {
-                let oid = entry.id().to_string();
-                Repo::update_ref(&mut self.memory, name, N::Hash::from_hex(oid));
-            }
-        }
+        let _ = self.refract_from(oid);
     }
 
     /// Number of in-memory objects.
@@ -545,6 +513,52 @@ where
     /// Access the underlying git2::Repository.
     pub fn repo(&self) -> &git2::Repository {
         &self.repo
+    }
+
+    /// Refract (hydrate) from a specific tree OID.
+    fn refract_from(&mut self, oid: git2::Oid) -> Result<(), git2::Error> {
+        use crate::repo::Repo;
+        use crate::sha::HashAlg;
+
+        let tree = self.repo.find_tree(oid)?;
+        for entry in tree.iter() {
+            if let Some(name) = entry.name() {
+                let target_oid = entry.id().to_string();
+                Repo::update_ref(&mut self.memory, name, N::Hash::from_hex(target_oid));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Collapse the in-memory ref index to a single git tree OID.
+/// Used by higher-level Singularity impls (e.g. EigenStore in coincidence).
+#[cfg(feature = "git")]
+impl<N: Reconstructable + Clone> GitStore<N>
+where
+    N::Data: Decode,
+{
+    /// Collapse: serialize all in-memory refs as entries in one git tree.
+    /// Returns the tree OID. Merges with any existing index on disk.
+    pub fn collapse_index(&self) -> Result<git2::Oid, git2::Error> {
+        use crate::repo::Repo;
+        use crate::sha::HashAlg;
+
+        let existing_tree = self
+            .repo
+            .find_reference("refs/store/index")
+            .ok()
+            .and_then(|r| r.peel_to_tree().ok());
+        let mut builder = self.repo.treebuilder(existing_tree.as_ref())?;
+
+        for ref_name in self.memory.ref_names() {
+            if let Some(sha) = Repo::resolve_ref(&self.memory, ref_name) {
+                let oid = git2::Oid::from_str(sha.as_str())?;
+                builder.insert(ref_name, oid, 0o100644)?;
+            }
+        }
+
+        builder.write()
     }
 }
 
