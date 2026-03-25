@@ -154,6 +154,33 @@ impl<E: Encode, H: HashAlg> Fragmentable for Fractal<E, H> {
     }
 }
 
+/// Reconstruction from stored parts. Required for read-back from
+/// persistent stores (git, disk). Extends Fragmentable with the
+/// inverse operation: given ref + data + children → Self.
+pub trait Reconstructable: Fragmentable
+where
+    Self: Sized,
+    Self::Data: crate::encoding::Decode,
+{
+    /// Build a node from its parts. Shard: children is empty.
+    /// Fractal: children are the child nodes (already reconstructed).
+    fn reconstruct(ref_: Ref<Self::Hash>, data: Self::Data, children: Vec<Self>) -> Self;
+}
+
+impl<E: Encode + crate::encoding::Decode, H: HashAlg> Reconstructable for Fractal<E, H> {
+    fn reconstruct(ref_: Ref<H>, data: E, children: Vec<Self>) -> Self {
+        if children.is_empty() {
+            Fractal::Shard { ref_, data }
+        } else {
+            Fractal::Fractal {
+                ref_,
+                data,
+                fractal: children,
+            }
+        }
+    }
+}
+
 /// Compute a git-compatible content OID for any Fragmentable.
 /// Shard -> blob OID, Fractal -> tree OID, Lens -> tree OID (.data + .lens).
 /// Witness metadata is NOT included -- same content = same OID.

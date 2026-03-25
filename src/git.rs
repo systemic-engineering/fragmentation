@@ -1,8 +1,8 @@
 #[cfg(feature = "git")]
-use crate::encoding::Encode;
+use crate::encoding::{Decode, Encode};
 
 #[cfg(feature = "git")]
-use crate::fragment::{Fractal, Fragmentable};
+use crate::fragment::{Fractal, Fragmentable, Reconstructable};
 
 #[cfg(feature = "git")]
 use crate::witnessed::Witnessed;
@@ -116,6 +116,83 @@ pub fn write_tree<E: Encode>(
             builder.write()
         }
     }
+}
+
+/// Write any Fragmentable to the git object database.
+///
+/// Shard (no children) → git blob.
+/// Node with children → git tree (.data blob + numbered child entries).
+///
+/// This is the generic version of `write_tree` — works with any
+/// Fragmentable, not just Fractal.
+#[cfg(feature = "git")]
+pub fn write_node<N: Fragmentable>(
+    repo: &git2::Repository,
+    node: &N,
+) -> Result<git2::Oid, git2::Error> {
+    if node.is_shard() {
+        repo.blob(&node.data().encode())
+    } else {
+        let mut builder = repo.treebuilder(None)?;
+        let data_oid = repo.blob(&node.data().encode())?;
+        builder.insert(".data", data_oid, 0o100644)?;
+        for (i, child) in node.children().iter().enumerate() {
+            let child_oid = write_node(repo, child)?;
+            let mode = if child.is_shard() { 0o100644 } else { 0o040000 };
+            builder.insert(format!("{i:04}"), child_oid, mode)?;
+        }
+        builder.write()
+    }
+}
+
+/// Read any Reconstructable from the git object database.
+///
+/// Git blob → shard. Git tree → node with children (recursive).
+/// Requires N: Reconstructable so the type can be rebuilt from parts.
+#[cfg(feature = "git")]
+pub fn read_node<N: Reconstructable + Clone>(
+    repo: &git2::Repository,
+    oid: git2::Oid,
+) -> Result<N, Box<dyn std::error::Error>>
+where
+    N::Data: Decode,
+{
+    use crate::ref_::Ref;
+
+    // Try as blob first (shard).
+    if let Ok(blob) = repo.find_blob(oid) {
+        let data = N::Data::decode(blob.content()).map_err(|e| format!("decode error: {e}"))?;
+        let ref_ = Ref::new(
+            <N::Hash as crate::sha::HashAlg>::from_hex(oid.to_string()),
+            "shard",
+        );
+        return Ok(N::reconstruct(ref_, data, vec![]));
+    }
+
+    // Otherwise it's a tree (node with children).
+    let tree = repo.find_tree(oid)?;
+    let data_entry = tree.get_name(".data").ok_or("tree missing .data entry")?;
+    let data_blob = repo.find_blob(data_entry.id())?;
+    let data = N::Data::decode(data_blob.content()).map_err(|e| format!("decode error: {e}"))?;
+
+    let mut children = Vec::new();
+    let mut i = 0;
+    while let Some(entry) = tree.get_name(&format!("{i:04}")) {
+        let child = read_node::<N>(repo, entry.id())?;
+        children.push(child);
+        i += 1;
+    }
+
+    // Reconstruct and compute the correct content OID.
+    let node = N::reconstruct(
+        Ref::new(
+            <N::Hash as crate::sha::HashAlg>::from_hex(oid.to_string()),
+            "node",
+        ),
+        data,
+        children,
+    );
+    Ok(node)
 }
 
 /// Write a commit to git from individual pieces. Returns the commit OID.
@@ -342,5 +419,114 @@ pub fn read_tree(
             Ok(Fractal::new(ref_, data, children))
         }
         _ => Err(format!("unexpected object type for oid {}", oid).into()),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GitStore — persistent content-addressed store backed by git
+// ---------------------------------------------------------------------------
+
+/// Content-addressed store backed by the git object database.
+///
+/// Two tiers:
+///   Memory: in-process HashMap (hot path, no I/O per operation).
+///   Git:    git2 object database (persistent, cloneable, shareable).
+///
+/// Write: memory only (fast). Call `flush()` to persist to git.
+/// Read:  memory first, then git, then miss.
+///
+/// After `flush()`, everything is in the git repo. `git clone` includes it.
+#[cfg(feature = "git")]
+pub struct GitStore<N: Fragmentable + Clone> {
+    memory: crate::store::Store<N, N::Hash>,
+    repo: git2::Repository,
+}
+
+#[cfg(feature = "git")]
+impl<N: Reconstructable + Clone> GitStore<N>
+where
+    N::Data: Decode,
+{
+    /// Open a GitStore backed by the git repo at (or above) the given path.
+    pub fn open(path: &std::path::Path) -> Result<Self, git2::Error> {
+        let repo = git2::Repository::discover(path)?;
+        Ok(GitStore {
+            memory: crate::store::Store::new(),
+            repo,
+        })
+    }
+
+    /// Open a GitStore from an existing git2::Repository.
+    pub fn from_repo(repo: git2::Repository) -> Self {
+        GitStore {
+            memory: crate::store::Store::new(),
+            repo,
+        }
+    }
+
+    /// Flush all in-memory objects to the git object database.
+    ///
+    /// Each object becomes a git blob or tree. Returns the number
+    /// of objects written. Idempotent: git deduplicates by OID.
+    pub fn flush(&self) -> usize {
+        use crate::repo::Repo;
+        let mut count = 0;
+        for oid in self.memory.keys() {
+            if let Some(node) = Repo::read_tree(&self.memory, &oid) {
+                if write_node(&self.repo, &node).is_ok() {
+                    count += 1;
+                }
+            }
+        }
+        count
+    }
+
+    /// Number of in-memory objects.
+    pub fn memory_count(&self) -> usize {
+        self.memory.object_count()
+    }
+
+    /// Access the underlying git2::Repository.
+    pub fn repo(&self) -> &git2::Repository {
+        &self.repo
+    }
+}
+
+#[cfg(feature = "git")]
+impl<N: Reconstructable + Clone> crate::repo::Repo for GitStore<N>
+where
+    N::Data: Decode,
+{
+    type Node = N;
+    type Hash = N::Hash;
+
+    fn write_tree(&mut self, node: &N) -> String {
+        self.memory.write_tree(node)
+    }
+
+    fn read_tree(&self, oid: &str) -> Option<N> {
+        // Tier 1: memory.
+        if let Some(node) = self.memory.read_tree(oid) {
+            return Some(node);
+        }
+        // Tier 2: git.
+        let git_oid = git2::Oid::from_str(oid).ok()?;
+        read_node::<N>(&self.repo, git_oid).ok()
+    }
+
+    fn write_commit(&mut self, commit: crate::commit::Commit<N, N::Hash>) {
+        self.memory.write_commit(commit);
+    }
+
+    fn read_commit(&self, sha: &N::Hash) -> Option<crate::commit::Commit<N, N::Hash>> {
+        self.memory.read_commit(sha)
+    }
+
+    fn update_ref(&mut self, name: &str, sha: N::Hash) {
+        self.memory.update_ref(name, sha);
+    }
+
+    fn resolve_ref(&self, name: &str) -> Option<N::Hash> {
+        self.memory.resolve_ref(name)
     }
 }
