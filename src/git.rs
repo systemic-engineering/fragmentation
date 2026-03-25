@@ -466,16 +466,18 @@ where
 
     /// Flush all in-memory objects and refs to the git object database.
     ///
-    /// Objects become git blobs/trees. Refs become git refs under
-    /// `refs/store/<ref_name>`. Returns the number of objects written.
-    /// Idempotent: git deduplicates by OID.
+    /// Objects become git blobs. The ref index becomes a single git tree
+    /// at `refs/store/index` — each entry maps ref_name → object OID.
+    /// One tree, one ref. Hydrate reads it back in one shot.
+    ///
+    /// Returns the number of objects written.
     pub fn flush(&self) -> usize {
         use crate::repo::Repo;
         use crate::sha::HashAlg;
 
         let mut count = 0;
 
-        // Flush objects.
+        // Flush objects as git blobs.
         for oid in self.memory.keys() {
             if let Some(node) = Repo::read_tree(&self.memory, &oid) {
                 if write_node(&self.repo, &node).is_ok() {
@@ -484,22 +486,55 @@ where
             }
         }
 
-        // Flush refs: each in-memory ref becomes a git ref.
-        // The ref value (a hash) points to the object OID in the git ODB.
-        for ref_name in self.memory.ref_names() {
-            if let Some(sha) = Repo::resolve_ref(&self.memory, ref_name) {
-                let oid_str = sha.as_str();
-                if let Ok(oid) = git2::Oid::from_str(oid_str) {
-                    // Verify the object exists in git ODB before creating the ref.
-                    if self.repo.find_blob(oid).is_ok() || self.repo.find_tree(oid).is_ok() {
-                        let git_ref = format!("refs/store/{ref_name}");
-                        let _ = self.repo.reference(&git_ref, oid, true, "flush");
+        // Flush refs as a single git tree: entry name = ref_name, blob = object.
+        // Merges with any existing index tree on disk.
+        let existing_tree = self
+            .repo
+            .find_reference("refs/store/index")
+            .ok()
+            .and_then(|r| r.peel_to_tree().ok());
+        if let Ok(mut builder) = self.repo.treebuilder(existing_tree.as_ref()) {
+            for ref_name in self.memory.ref_names() {
+                if let Some(sha) = Repo::resolve_ref(&self.memory, ref_name) {
+                    if let Ok(oid) = git2::Oid::from_str(sha.as_str()) {
+                        let _ = builder.insert(ref_name, oid, 0o100644);
                     }
                 }
+            }
+            if let Ok(tree_oid) = builder.write() {
+                let _ = self
+                    .repo
+                    .reference("refs/store/index", tree_oid, true, "flush");
             }
         }
 
         count
+    }
+
+    /// Hydrate the in-memory store from the git index tree.
+    ///
+    /// Reads `refs/store/index` and populates refs. Objects are loaded
+    /// lazily via read-through on access.
+    pub fn hydrate(&mut self) {
+        use crate::repo::Repo;
+        use crate::sha::HashAlg;
+
+        let tree = match self
+            .repo
+            .find_reference("refs/store/index")
+            .ok()
+            .and_then(|r| r.peel_to_tree().ok())
+        {
+            Some(t) => t,
+            None => return,
+        };
+
+        for entry in tree.iter() {
+            if let Some(name) = entry.name() {
+                let oid = entry.id().to_string();
+                Repo::update_ref(&mut self.memory, name, N::Hash::from_hex(oid));
+            }
+        }
     }
 
     /// Number of in-memory objects.
@@ -548,15 +583,7 @@ where
     }
 
     fn resolve_ref(&self, name: &str) -> Option<N::Hash> {
-        use crate::sha::HashAlg;
-        // Tier 1: memory.
-        if let Some(sha) = self.memory.resolve_ref(name) {
-            return Some(sha);
-        }
-        // Tier 2: git refs.
-        let git_ref = format!("refs/store/{name}");
-        let reference = self.repo.find_reference(&git_ref).ok()?;
-        let oid = reference.target()?;
-        Some(N::Hash::from_hex(oid.to_string()))
+        // Memory only — call hydrate() on startup to populate from git.
+        self.memory.resolve_ref(name)
     }
 }
