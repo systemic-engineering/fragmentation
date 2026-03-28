@@ -28,6 +28,7 @@ pub mod repo;
 pub mod sha;
 pub mod singularity;
 pub mod store;
+pub mod supervision;
 pub mod visibility;
 pub mod walk;
 pub mod witnessed;
