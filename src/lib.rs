@@ -15,6 +15,7 @@
 
 pub mod cid;
 pub mod commit;
+pub mod concurrent_store;
 pub mod diff;
 pub mod encoding;
 pub mod fragment;

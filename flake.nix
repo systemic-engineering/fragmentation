@@ -19,6 +19,7 @@
           ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
             pkgs.libiconv
             pkgs.macfuse-stubs
+            pkgs.apple-sdk_15           # Security, SystemConfiguration, etc.
           ];
           shellHook = ''
             export LANG=en_US.UTF-8
