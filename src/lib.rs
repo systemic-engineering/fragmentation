@@ -17,6 +17,7 @@ pub mod manifest;
 pub mod project;
 pub mod cid;
 pub mod commit;
+pub mod bounded_store;
 pub mod concurrent_store;
 pub mod diff;
 pub mod encoding;
