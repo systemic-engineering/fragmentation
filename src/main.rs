@@ -113,6 +113,19 @@ enum Command {
         #[arg(long = "namespace")]
         namespace: Option<String>,
     },
+    /// Project files from a source directory according to a lens manifest.
+    /// Reads the manifest, copies source files to output paths, content-addresses each.
+    Project {
+        /// Path to the lens manifest (JSON). Reads stdin if omitted.
+        #[arg(short, long)]
+        manifest: Option<String>,
+        /// Source directory to project from.
+        #[arg(short, long)]
+        source: String,
+        /// Output directory. Created if it doesn't exist.
+        #[arg(short, long)]
+        output: String,
+    },
     /// Run as a git smudge/clean filter (identity transform).
     #[cfg(feature = "fuse-mount")]
     Filter {
@@ -388,6 +401,55 @@ fn main() {
                 });
 
             println!("{}", commit.sha().0);
+        }
+        Command::Project {
+            manifest,
+            source,
+            output,
+        } => {
+            let manifest_data = match manifest {
+                Some(path) => std::fs::read(&path).unwrap_or_else(|e| {
+                    eprintln!("failed to read manifest {}: {}", path, e);
+                    std::process::exit(1);
+                }),
+                None => {
+                    let mut buf = Vec::new();
+                    std::io::stdin()
+                        .read_to_end(&mut buf)
+                        .expect("failed to read stdin");
+                    buf
+                }
+            };
+
+            let manifest = fragmentation::manifest::Manifest::from_json(&manifest_data)
+                .unwrap_or_else(|e| {
+                    eprintln!("failed to parse manifest: {}", e);
+                    std::process::exit(1);
+                });
+
+            let source_path = std::path::Path::new(&source);
+            let output_path = std::path::Path::new(&output);
+
+            let projection =
+                fragmentation::project::project(source_path, &manifest).unwrap_or_else(|e| {
+                    eprintln!("projection failed: {}", e);
+                    std::process::exit(1);
+                });
+
+            for (target, file) in &projection.files {
+                let out_file = output_path.join(target);
+                if let Some(parent) = out_file.parent() {
+                    std::fs::create_dir_all(parent).unwrap_or_else(|e| {
+                        eprintln!("failed to create directory {}: {}", parent.display(), e);
+                        std::process::exit(1);
+                    });
+                }
+                std::fs::write(&out_file, &file.content).unwrap_or_else(|e| {
+                    eprintln!("failed to write {}: {}", out_file.display(), e);
+                    std::process::exit(1);
+                });
+                println!("{}\t{}", file.oid, target);
+            }
         }
         #[cfg(feature = "fuse-mount")]
         Command::Mount {
