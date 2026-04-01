@@ -8,56 +8,73 @@
 use std::collections::VecDeque;
 use std::sync::Mutex;
 
-use crate::concurrent_store::ConcurrentStore;
+use dashmap::DashMap;
+
 use crate::fragment::Fragmentable;
 use crate::sha::HashAlg;
 
 /// A size-bounded concurrent content-addressed store.
 ///
-/// Uses a `VecDeque` to track insertion order. On insert, if the number of
-/// tracked entries exceeds `max_entries`, the oldest entry (back of the deque)
-/// is evicted from both the deque and the underlying `ConcurrentStore`.
+/// Uses a `DashMap` for O(1) concurrent lookup and a `VecDeque` to track
+/// insertion order. On insert, if the number of tracked entries exceeds
+/// `max_entries`, the oldest entry (back of the deque) is evicted.
+///
+/// Evicted data is not lost when backed by git — it can be re-fetched on
+/// cache miss (git fallback is not wired in this layer).
 pub struct BoundedStore<N: Fragmentable + Clone, H: HashAlg = crate::sha::Sha> {
-    inner: ConcurrentStore<N, H>,
+    objects: DashMap<String, N>,
     order: Mutex<VecDeque<String>>,
     max_entries: usize,
+    _hash: std::marker::PhantomData<H>,
 }
 
 impl<N: Fragmentable + Clone, H: HashAlg> BoundedStore<N, H> {
     /// Create a new bounded store with the given capacity.
     pub fn new(max_entries: usize) -> Self {
         BoundedStore {
-            inner: ConcurrentStore::new(),
+            objects: DashMap::new(),
             order: Mutex::new(VecDeque::with_capacity(max_entries)),
             max_entries,
+            _hash: std::marker::PhantomData,
         }
     }
 
     /// Insert a node, tracking it by key. Evicts oldest if over capacity.
     pub fn insert(&self, key: String, value: N) {
-        let _ = (key, value);
-        todo!()
+        self.objects.insert(key.clone(), value);
+        let mut order = self.order.lock().unwrap();
+        order.push_front(key);
+        while order.len() > self.max_entries {
+            if let Some(evicted) = order.pop_back() {
+                self.objects.remove(&evicted);
+            }
+        }
     }
 
     /// Look up a node by its content OID.
     pub fn get(&self, key: &str) -> Option<N> {
-        let _ = key;
-        todo!()
+        self.objects.get(key).map(|r| r.value().clone())
     }
 
     /// Number of entries currently tracked.
     pub fn len(&self) -> usize {
-        todo!()
+        self.order.lock().unwrap().len()
     }
 
     /// Maximum number of entries this store will hold.
     pub fn capacity(&self) -> usize {
-        todo!()
+        self.max_entries
     }
 
     /// Manually evict the oldest entry. Returns the evicted key, if any.
     pub fn evict_one(&self) -> Option<String> {
-        todo!()
+        let mut order = self.order.lock().unwrap();
+        if let Some(key) = order.pop_back() {
+            self.objects.remove(&key);
+            Some(key)
+        } else {
+            None
+        }
     }
 }
 
