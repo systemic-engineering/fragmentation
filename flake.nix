@@ -6,8 +6,29 @@
   };
   outputs = { self, nixpkgs, flake-utils }:
     flake-utils.lib.eachDefaultSystem (system:
-      let pkgs = nixpkgs.legacyPackages.${system};
+      let
+        pkgs = nixpkgs.legacyPackages.${system};
+
+        fragmentation = pkgs.rustPlatform.buildRustPackage {
+          pname = "fragmentation";
+          version = "0.1.0";
+          src = pkgs.lib.cleanSource ./.;
+          cargoLock.lockFile = ./Cargo.lock;
+          buildFeatures = [ "cli" ];
+          nativeBuildInputs = [ pkgs.pkg-config ];
+          # Integration tests require git/ssh/gpg features not enabled in this build
+          doCheck = false;
+          buildInputs = [
+            pkgs.openssl pkgs.zlib
+          ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
+            pkgs.libiconv
+            pkgs.apple-sdk_15
+          ];
+        };
       in {
+        packages.default = fragmentation;
+        packages.fragmentation = fragmentation;
+
         devShells.default = pkgs.mkShell {
           buildInputs = [
             pkgs.rustc pkgs.cargo pkgs.clippy pkgs.rustfmt
@@ -19,7 +40,7 @@
           ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
             pkgs.libiconv
             pkgs.macfuse-stubs
-            pkgs.apple-sdk_15           # Security, SystemConfiguration, etc.
+            pkgs.apple-sdk_15
           ];
           shellHook = ''
             export LANG=en_US.UTF-8
@@ -29,5 +50,32 @@
             export LLVM_PROFDATA=${pkgs.llvmPackages.llvm}/bin/llvm-profdata
           '';
         };
-      });
+      }
+    ) // {
+      # Cross-system library: nix functions that use the fragmentation binary
+      lib.project =
+        { pkgs
+        , fragmentation ? self.packages.${pkgs.system}.default
+        , src
+        , lenses ? {}
+        , name ? "projection"
+        }:
+        let
+          # Convert attrset { "target" = "source"; } to manifest JSON
+          lensEntries = builtins.map
+            (target: { source = lenses.${target}; inherit target; })
+            (builtins.attrNames lenses);
+          manifestJson = builtins.toJSON { lenses = lensEntries; };
+          manifestFile = pkgs.writeText "lenses.json" manifestJson;
+        in
+        pkgs.runCommand name {
+          nativeBuildInputs = [ fragmentation ];
+        } ''
+          mkdir -p $out
+          fragmentation project \
+            --manifest ${manifestFile} \
+            --source ${src} \
+            --output $out
+        '';
+    };
 }
