@@ -141,4 +141,28 @@ mod tests {
         let result = project(dir.path(), &manifest).unwrap();
         assert_eq!(result.files["x.txt"].oid, result.files["y.txt"].oid);
     }
+
+    #[test]
+    fn project_preserves_content_exactly() {
+        let dir = tempfile::tempdir().unwrap();
+        let content = b"line 1\nline 2\nline 3\n";
+        fs::create_dir_all(dir.path().join("sub")).unwrap();
+        fs::write(dir.path().join("sub/file.md"), content).unwrap();
+
+        let manifest = Manifest::from_json(
+            br#"{"lenses": [{"source": "sub/file.md", "target": "flat.md"}]}"#,
+        )
+        .unwrap();
+
+        let result = project(dir.path(), &manifest).unwrap();
+
+        // Write to output dir and read back
+        let out_dir = tempfile::tempdir().unwrap();
+        let out_path = out_dir.path().join("flat.md");
+        fs::write(&out_path, &result.files["flat.md"].content).unwrap();
+        let readback = fs::read(&out_path).unwrap();
+
+        assert_eq!(readback, content);
+        assert_eq!(result.files["flat.md"].oid, blob_oid_bytes(content));
+    }
 }
