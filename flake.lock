@@ -1,5 +1,26 @@
 {
   "nodes": {
+    "cairn": {
+      "inputs": {
+        "flake-utils": "flake-utils",
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1773399537,
+        "narHash": "sha256-pA85oNmUSbx3n/iMbkfekK2/01rpBQsihYxIkGM3Cts=",
+        "ref": "refs/heads/main",
+        "rev": "6152dd65f41d88fd34299dc1991a75886299b7c0",
+        "revCount": 53,
+        "type": "git",
+        "url": "ssh://git@github.com/systemic-engineering/cairn"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@github.com/systemic-engineering/cairn"
+      }
+    },
     "flake-utils": {
       "inputs": {
         "systems": "systems"
@@ -16,6 +37,63 @@
         "owner": "numtide",
         "repo": "flake-utils",
         "type": "github"
+      }
+    },
+    "flake-utils_2": {
+      "inputs": {
+        "systems": "systems_2"
+      },
+      "locked": {
+        "lastModified": 1731533236,
+        "narHash": "sha256-l0KFg5HjrsfsO/JpG+r7fRrqm12kzFHyUHqHCVpMMbI=",
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "rev": "11707dc2f618dd54ca8739b309ec4fc024de578b",
+        "type": "github"
+      },
+      "original": {
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "type": "github"
+      }
+    },
+    "flake-utils_3": {
+      "inputs": {
+        "systems": "systems_3"
+      },
+      "locked": {
+        "lastModified": 1731533236,
+        "narHash": "sha256-l0KFg5HjrsfsO/JpG+r7fRrqm12kzFHyUHqHCVpMMbI=",
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "rev": "11707dc2f618dd54ca8739b309ec4fc024de578b",
+        "type": "github"
+      },
+      "original": {
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "type": "github"
+      }
+    },
+    "mara": {
+      "inputs": {
+        "flake-utils": "flake-utils_3",
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1772397888,
+        "narHash": "sha256-a9PCYBV1YNrorAyKxcDGSbri6RCm7+18m7PGnu3sUPw=",
+        "ref": "refs/heads/main",
+        "rev": "6c23f519de1032decb3f9b4282d9b6d391912ac2",
+        "revCount": 4,
+        "type": "git",
+        "url": "ssh://git@github.com/systemic-engineering/mara"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@github.com/systemic-engineering/mara"
       }
     },
     "nixpkgs": {
@@ -36,11 +114,43 @@
     },
     "root": {
       "inputs": {
-        "flake-utils": "flake-utils",
+        "cairn": "cairn",
+        "flake-utils": "flake-utils_2",
+        "mara": "mara",
         "nixpkgs": "nixpkgs"
       }
     },
     "systems": {
+      "locked": {
+        "lastModified": 1681028828,
+        "narHash": "sha256-Vy1rq5AaRuLzOxct8nz4T6wlgyUR7zLU309k9mBC768=",
+        "owner": "nix-systems",
+        "repo": "default",
+        "rev": "da67096a3b9bf56a91d16901293e51ba5b49a27e",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-systems",
+        "repo": "default",
+        "type": "github"
+      }
+    },
+    "systems_2": {
+      "locked": {
+        "lastModified": 1681028828,
+        "narHash": "sha256-Vy1rq5AaRuLzOxct8nz4T6wlgyUR7zLU309k9mBC768=",
+        "owner": "nix-systems",
+        "repo": "default",
+        "rev": "da67096a3b9bf56a91d16901293e51ba5b49a27e",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-systems",
+        "repo": "default",
+        "type": "github"
+      }
+    },
+    "systems_3": {
       "locked": {
         "lastModified": 1681028828,
         "narHash": "sha256-Vy1rq5AaRuLzOxct8nz4T6wlgyUR7zLU309k9mBC768=",
