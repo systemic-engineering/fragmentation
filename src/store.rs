@@ -96,8 +96,6 @@ mod tests {
     use crate::encoding;
     use crate::witnessed::Committer;
 
-        use crate::witnessed::Author;
-
     fn test_fractal() -> Fractal<String> {
         encoding::encode("hello world")
     }
@@ -173,33 +171,6 @@ mod tests {
         let child = child_draft.commit(&mut store, test_committer(), "1234567891 +0000");
         assert!(matches!(child, Commit::Child { .. }));
         assert_ne!(child.sha(), root.sha());
-    }
-
-        #[test]
-    fn store_commit_sha_matches_git() {
-        let fractal = test_fractal();
-        let timestamp = "1234567890 +0000";
-        let author = Author::new("Test", "test@test.com");
-        let committer = Committer::new("Test", "test@test.com");
-
-        // In-memory
-        let mut store = Store::<Fractal<String>>::new();
-        let draft = Draft::root("test commit", fractal.clone()).authored(author.clone());
-        let mem_commit = draft.commit(&mut store, committer.clone(), timestamp);
-
-        // git2
-        let tmp = tempfile::tempdir().unwrap();
-        let git_repo = git2::Repository::init(tmp.path()).unwrap();
-        let tree_oid = crate::git::write_tree(&git_repo, &fractal).unwrap();
-        let tree = git_repo.find_tree(tree_oid).unwrap();
-        let epoch: i64 = 1234567890;
-        let git_sig =
-            git2::Signature::new("Test", "test@test.com", &git2::Time::new(epoch, 0)).unwrap();
-        let git_oid = git_repo
-            .commit(None, &git_sig, &git_sig, "test commit", &tree, &[])
-            .unwrap();
-
-        assert_eq!(mem_commit.sha().0, git_oid.to_string());
     }
 
     #[test]

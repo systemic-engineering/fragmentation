@@ -81,6 +81,12 @@ impl<N, H: HashAlg> Draft<N, H> {
         self.author.as_ref()
     }
 
+    /// Consume the draft and return its parts.
+    /// Used by git integration crates that need access to internal fields.
+    pub fn into_parts(self) -> (N, Message, Option<Parent<H>>) {
+        (self.node, self.message, self.parent)
+    }
+
     /// Commit this draft to a repo. Computes git-compatible commit SHA.
     ///
     /// `timestamp` is in git format: "{epoch} {tz_offset}", e.g. "1234567890 +0000".
@@ -129,48 +135,6 @@ impl<N, H: HashAlg> Draft<N, H> {
     }
 }
 
-/// Git-native write. Only available for Fractal nodes.
-impl<E: Encode> Draft<crate::fragment::Fractal<E>> {
-    /// Write this draft to a git repository.
-    /// Returns a Commit (Root or Child) with SHA and witnessed metadata.
-    pub fn write(
-        self,
-        repo: &git2::Repository,
-        committer: Committer,
-    ) -> Result<Commit<crate::fragment::Fractal<E>>, git2::Error> {
-        let author = self
-            .author
-            .unwrap_or_else(|| Author::new(&committer.name, &committer.email));
-        let oid = crate::git::write_commit(
-            repo,
-            &self.node,
-            &author,
-            &committer,
-            &self.message.0,
-            self.parent.as_ref().map(|p| &p.0),
-        )?;
-        let git_commit = repo.find_commit(oid)?;
-        let timestamp = Timestamp(git_commit.time().seconds().to_string());
-        let witnessed = Witnessed::new(author, committer, timestamp);
-        let sha = Sha(oid.to_string());
-
-        Ok(match self.parent {
-            None => Commit::Root {
-                node: self.node,
-                witnessed,
-                message: self.message,
-                sha,
-            },
-            Some(parent) => Commit::Child {
-                node: self.node,
-                witnessed,
-                message: self.message,
-                parent,
-                sha,
-            },
-        })
-    }
-}
 
 impl<N, H: HashAlg> Draftable for Draft<N, H> {
     type Node = N;
@@ -217,7 +181,7 @@ impl<N, H: HashAlg> Commit<N, H> {
     }
 
     /// Construct a Root with full metadata.
-    pub(crate) fn full_root(node: N, witnessed: Witnessed, message: Message, sha: H) -> Self {
+    pub fn full_root(node: N, witnessed: Witnessed, message: Message, sha: H) -> Self {
         Commit::Root {
             node,
             witnessed,
@@ -227,7 +191,7 @@ impl<N, H: HashAlg> Commit<N, H> {
     }
 
     /// Construct a Child with full metadata.
-    pub(crate) fn full_child(
+    pub fn full_child(
         node: N,
         witnessed: Witnessed,
         message: Message,
@@ -358,32 +322,4 @@ mod tests {
         assert_ne!(child.sha(), root.sha());
     }
 
-    /// Draft::commit() must produce the same SHA as git2 with matching inputs.
-    /// Draft::write() uses Signature::now(), so we compare against raw git2 with fixed timestamps.
-        #[test]
-    fn draft_commit_matches_git() {
-        let fractal = test_fractal();
-        let author = Author::new("Test", "test@test.com");
-        let committer = Committer::new("Test", "test@test.com");
-        let timestamp = "1234567890 +0000";
-        let epoch: i64 = 1234567890;
-
-        // In-memory via Draft::commit()
-        let mut store = Store::<Fractal<String>>::new();
-        let draft = Draft::root("test commit", fractal.clone()).authored(author);
-        let mem_commit = draft.commit(&mut store, committer, timestamp);
-
-        // git2 with matching fixed timestamp
-        let tmp = tempfile::tempdir().unwrap();
-        let git_repo = git2::Repository::init(tmp.path()).unwrap();
-        let tree_oid = crate::git::write_tree(&git_repo, &fractal).unwrap();
-        let tree = git_repo.find_tree(tree_oid).unwrap();
-        let git_sig =
-            git2::Signature::new("Test", "test@test.com", &git2::Time::new(epoch, 0)).unwrap();
-        let git_oid = git_repo
-            .commit(None, &git_sig, &git_sig, "test commit", &tree, &[])
-            .unwrap();
-
-        assert_eq!(mem_commit.sha().0, git_oid.to_string());
-    }
 }

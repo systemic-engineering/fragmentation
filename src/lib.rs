@@ -25,6 +25,7 @@ pub mod encoding;
 pub mod fragment;
 #[cfg(any(feature = "fuse", feature = "fuse-mount"))]
 pub mod fuse;
+#[cfg(any(feature = "git", feature = "fuse", feature = "fuse-mount"))]
 pub mod git;
 pub mod keys;
 pub mod naked;

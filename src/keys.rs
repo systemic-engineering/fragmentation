@@ -523,6 +523,7 @@ impl GPG {
 // from_repo (behind `git` feature)
 // ===========================================================================
 
+#[cfg(feature = "git")]
 impl Local {
     /// Detect signing configuration from a git repository.
     /// Reads gpg.format and user.signingkey from git config.
