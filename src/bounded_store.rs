@@ -168,6 +168,16 @@ impl<E: crate::encoding::Encode + crate::encoding::Decode + Clone> GitBoundedSto
         self.cache.len()
     }
 
+    /// Total bytes in the memory cache.
+    pub fn total_bytes(&self) -> usize {
+        self.cache.total_bytes()
+    }
+
+    /// Byte capacity.
+    pub fn capacity(&self) -> usize {
+        self.cache.capacity()
+    }
+
     /// Flush all cached entries to git, then clear the cache.
     pub fn flush(&self) {
         let repo = self.repo.lock().unwrap();
