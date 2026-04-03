@@ -88,6 +88,31 @@ impl<N: Fragmentable + Clone, H: HashAlg> BoundedStore<N, H> {
         self.max_bytes
     }
 
+    /// Peek at the oldest key without removing it. Returns a clone.
+    pub fn peek_oldest(&self) -> Option<(String, N)> {
+        let order = self.order.lock().unwrap();
+        if let Some(key) = order.back() {
+            let value = self.objects.get(key).map(|r| r.value().clone());
+            value.map(|v| (key.clone(), v))
+        } else {
+            None
+        }
+    }
+
+    /// Drain all entries: calls `on_entry` for each (key, value), then clears.
+    pub fn drain_all(&self, mut on_entry: impl FnMut(&str, &N)) {
+        let order = self.order.lock().unwrap();
+        for key in order.iter() {
+            if let Some(node) = self.objects.get(key) {
+                on_entry(key, node.value());
+            }
+        }
+        drop(order);
+        self.objects.clear();
+        self.order.lock().unwrap().clear();
+        *self.total_bytes.lock().unwrap() = 0;
+    }
+
     /// Manually evict the oldest entry. Returns the evicted key, if any.
     pub fn evict_one(&self) -> Option<String> {
         let mut order = self.order.lock().unwrap();
