@@ -9,11 +9,10 @@ keywords = ["content-addressed", "tree", "fragment", "git", "hash"]
 categories = ["data-structures", "encoding"]
 
 [features]
-git = ["dep:git2"]
 ssh = ["dep:ssh-key", "dep:x25519-dalek", "dep:chacha20poly1305", "dep:hkdf"]
 gpg = []
 cli = ["dep:clap"]
-fuse = ["git"]
+fuse = []
 fuse-mount = ["fuse", "dep:fuser", "dep:libc"]
 
 [[bin]]
@@ -33,7 +32,7 @@ sha1 = "0.10"
 hex = "0.4"
 dashmap = "6"
 clap = { version = "4", features = ["derive"], optional = true }
-git2 = { version = "0.19", optional = true }
+git2 = "0.19"
 fuser = { version = "0.14", optional = true }
 libc = { version = "0.2", optional = true }
 ssh-key = { version = "0.6", features = ["std", "ed25519", "crypto"], optional = true }

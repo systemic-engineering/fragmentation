@@ -437,7 +437,6 @@ mod gpg_tests {
 // from_repo tests (feature-gated)
 // ===========================================================================
 
-#[cfg(feature = "git")]
 mod from_repo_tests {
     use super::*;
 

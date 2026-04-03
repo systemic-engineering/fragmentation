@@ -130,7 +130,6 @@ impl<N, H: HashAlg> Draft<N, H> {
 }
 
 /// Git-native write. Only available for Fractal nodes.
-#[cfg(feature = "git")]
 impl<E: Encode> Draft<crate::fragment::Fractal<E>> {
     /// Write this draft to a git repository.
     /// Returns a Commit (Root or Child) with SHA and witnessed metadata.
@@ -361,8 +360,7 @@ mod tests {
 
     /// Draft::commit() must produce the same SHA as git2 with matching inputs.
     /// Draft::write() uses Signature::now(), so we compare against raw git2 with fixed timestamps.
-    #[cfg(feature = "git")]
-    #[test]
+        #[test]
     fn draft_commit_matches_git() {
         let fractal = test_fractal();
         let author = Author::new("Test", "test@test.com");

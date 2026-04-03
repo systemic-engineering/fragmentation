@@ -96,8 +96,7 @@ mod tests {
     use crate::encoding;
     use crate::witnessed::Committer;
 
-    #[cfg(feature = "git")]
-    use crate::witnessed::Author;
+        use crate::witnessed::Author;
 
     fn test_fractal() -> Fractal<String> {
         encoding::encode("hello world")
@@ -176,8 +175,7 @@ mod tests {
         assert_ne!(child.sha(), root.sha());
     }
 
-    #[cfg(feature = "git")]
-    #[test]
+        #[test]
     fn store_commit_sha_matches_git() {
         let fractal = test_fractal();
         let timestamp = "1234567890 +0000";

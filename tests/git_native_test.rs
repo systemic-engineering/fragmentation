@@ -17,7 +17,6 @@ fn make_fractal(label: &str, data: &str, children: Vec<Fractal<String>>) -> Frac
     Fractal::new(Ref::new(sha::Sha(oid), label), data, children)
 }
 
-#[cfg(feature = "git")]
 fn make_lens(data: &str, targets: Vec<sha::Sha>) -> Fractal<String> {
     let oid = fragment::lens_oid_bytes(data.as_bytes(), &targets);
     Fractal::lens(Ref::new(sha::Sha(oid), "self"), data, targets)
@@ -112,7 +111,6 @@ fn tree_oid_children_order_matters() {
 // write_tree — git2 blob/tree creation (requires "git" feature)
 // ===========================================================================
 
-#[cfg(feature = "git")]
 mod git_native {
     use super::*;
     use fragmentation::commit::{Commit, Draft, Draftable};

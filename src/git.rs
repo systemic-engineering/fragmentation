@@ -1,15 +1,11 @@
-#[cfg(feature = "git")]
 use crate::encoding::{Decode, Encode};
 
-#[cfg(feature = "git")]
 use crate::fragment::{Fractal, Fragmentable, Reconstructable};
 
-#[cfg(feature = "git")]
 use crate::witnessed::Witnessed;
 
 /// Read witness metadata from any git commit.
 /// Returns (Witnessed, Message, tree OID). Works on any commit, not just fragmentation ones.
-#[cfg(feature = "git")]
 pub fn read_witnessed(
     repo: &git2::Repository,
     oid: git2::Oid,
@@ -33,7 +29,6 @@ pub fn read_witnessed(
 
 /// Read a fragmentation commit. Returns Commit<Fractal<String>> (Root or Child) with full metadata.
 /// Only works on commits written by write_commit (fragmentation-format trees).
-#[cfg(feature = "git")]
 pub fn read_commit(
     repo: &git2::Repository,
     oid: git2::Oid,
@@ -62,7 +57,6 @@ pub fn read_commit(
 
 /// Extract the signature from a signed commit, if present.
 /// Returns None for unsigned commits.
-#[cfg(feature = "git")]
 pub fn commit_signature(
     repo: &git2::Repository,
     oid: git2::Oid,
@@ -76,7 +70,6 @@ pub fn commit_signature(
 
 /// Write a fragment tree to git objects. Returns the root OID.
 /// Shard -> blob, Fractal -> tree with .data + numbered children.
-#[cfg(feature = "git")]
 pub fn write_tree<E: Encode>(
     repo: &git2::Repository,
     fragment: &Fractal<E>,
@@ -125,7 +118,6 @@ pub fn write_tree<E: Encode>(
 ///
 /// This is the generic version of `write_tree` — works with any
 /// Fragmentable, not just Fractal.
-#[cfg(feature = "git")]
 pub fn write_node<N: Fragmentable>(
     repo: &git2::Repository,
     node: &N,
@@ -149,7 +141,6 @@ pub fn write_node<N: Fragmentable>(
 ///
 /// Git blob → shard. Git tree → node with children (recursive).
 /// Requires N: Reconstructable so the type can be rebuilt from parts.
-#[cfg(feature = "git")]
 pub fn read_node<N: Reconstructable + Clone>(
     repo: &git2::Repository,
     oid: git2::Oid,
@@ -196,7 +187,6 @@ where
 }
 
 /// Write a commit to git from individual pieces. Returns the commit OID.
-#[cfg(feature = "git")]
 pub(crate) fn write_commit<E: Encode>(
     repo: &git2::Repository,
     fractal: &Fractal<E>,
@@ -234,7 +224,6 @@ pub(crate) fn write_commit<E: Encode>(
 /// Write a fragment tree using Ref::label as entry names (filesystem mode).
 /// Shard -> blob, Fractal -> tree with .data + label-named children.
 /// Encoding trees keep the numbered format (write_tree); this is for filesystem trees.
-#[cfg(feature = "git")]
 pub fn write_tree_named<E: crate::encoding::Encode>(
     repo: &git2::Repository,
     fragment: &Fractal<E>,
@@ -279,7 +268,6 @@ pub fn write_tree_named<E: crate::encoding::Encode>(
 
 /// Reconstruct a Fractal<Vec<u8>> from git objects using entry name as Ref::label.
 /// Blob -> Shard with raw bytes, Tree -> Fractal. Children get label from tree entry name.
-#[cfg(feature = "git")]
 pub fn read_tree_named(
     repo: &git2::Repository,
     oid: git2::Oid,
@@ -334,7 +322,6 @@ pub fn read_tree_named(
 }
 
 /// Set the label on the top-level Ref of a Fractal<Vec<u8>>.
-#[cfg(feature = "git")]
 fn relabel_named(
     frag: crate::fragment::Fractal<Vec<u8>>,
     label: &str,
@@ -364,7 +351,6 @@ fn relabel_named(
 
 /// Reconstruct a Fractal<String> from git objects.
 /// Blob -> Shard, Tree -> Fractal. Witness lives on the commit, not the tree.
-#[cfg(feature = "git")]
 pub fn read_tree(
     repo: &git2::Repository,
     oid: git2::Oid,
@@ -436,13 +422,11 @@ pub fn read_tree(
 /// Read:  memory first, then git, then miss.
 ///
 /// After `flush()`, everything is in the git repo. `git clone` includes it.
-#[cfg(feature = "git")]
 pub struct GitStore<N: Fragmentable + Clone> {
     memory: crate::store::Store<N, N::Hash>,
     repo: git2::Repository,
 }
 
-#[cfg(feature = "git")]
 impl<N: Reconstructable + Clone> GitStore<N>
 where
     N::Data: Decode,
@@ -533,7 +517,6 @@ where
 
 /// Collapse the in-memory ref index to a single git tree OID.
 /// Used by higher-level Singularity impls (e.g. EigenStore in coincidence).
-#[cfg(feature = "git")]
 impl<N: Reconstructable + Clone> GitStore<N>
 where
     N::Data: Decode,
@@ -562,7 +545,6 @@ where
     }
 }
 
-#[cfg(feature = "git")]
 impl<N: Reconstructable + Clone> crate::repo::Repo for GitStore<N>
 where
     N::Data: Decode,

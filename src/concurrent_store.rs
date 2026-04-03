@@ -111,7 +111,6 @@ impl<N: Fragmentable + Clone, H: HashAlg> ConcurrentStore<N, H> {
 // Git integration: flush / hydrate
 // ---------------------------------------------------------------------------
 
-#[cfg(feature = "git")]
 impl<N: Fragmentable + Clone, H: HashAlg> ConcurrentStore<N, H>
 where
     N: crate::fragment::Reconstructable,
@@ -349,8 +348,7 @@ mod tests {
 
     // -- git integration --
 
-    #[cfg(feature = "git")]
-    #[test]
+        #[test]
     fn flush_writes_objects_to_git() {
         let store = ConcurrentStore::<Fractal<String>>::new();
         let fractal = test_fractal();
@@ -362,8 +360,7 @@ mod tests {
         assert!(count > 0);
     }
 
-    #[cfg(feature = "git")]
-    #[test]
+        #[test]
     fn flush_updates_index_ref() {
         let store = ConcurrentStore::<Fractal<String>>::new();
         let fractal = test_fractal();
@@ -379,8 +376,7 @@ mod tests {
         assert!(reference.is_ok());
     }
 
-    #[cfg(feature = "git")]
-    #[test]
+        #[test]
     fn hydrate_loads_refs_from_git() {
         // First store: write and flush.
         let store1 = ConcurrentStore::<Fractal<String>>::new();
@@ -399,8 +395,7 @@ mod tests {
         assert_eq!(resolved, Some(Sha(oid)));
     }
 
-    #[cfg(feature = "git")]
-    #[test]
+        #[test]
     fn flush_then_hydrate_roundtrip() {
         let store1 = ConcurrentStore::<Fractal<String>>::new();
         let fractal = test_fractal();

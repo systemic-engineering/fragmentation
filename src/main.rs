@@ -25,8 +25,7 @@ enum Command {
         data: Option<String>,
     },
     /// Encode text, write fragment tree + commit to a git repo. Prints commit SHA.
-    #[cfg(feature = "git")]
-    Commit {
+        Commit {
         /// Text to commit. Reads stdin if omitted.
         data: Option<String>,
         /// Commit message.
@@ -46,8 +45,7 @@ enum Command {
         namespace: Option<String>,
     },
     /// Sign a shard. Prints signature bytes as hex.
-    #[cfg(feature = "git")]
-    Sign {
+        Sign {
         /// Data to sign. Reads stdin if omitted.
         data: Option<String>,
         /// Path to git repository (for key detection). Defaults to current directory.
@@ -55,8 +53,7 @@ enum Command {
         repo: Option<String>,
     },
     /// Encrypt a shard. Writes ciphertext to stdout.
-    #[cfg(feature = "git")]
-    Encrypt {
+        Encrypt {
         /// Data to encrypt. Reads stdin if omitted.
         data: Option<String>,
         /// Path to git repository (for key detection). Defaults to current directory.
@@ -64,8 +61,7 @@ enum Command {
         repo: Option<String>,
     },
     /// Decrypt ciphertext from stdin. Writes plaintext to stdout.
-    #[cfg(feature = "git")]
-    Decrypt {
+        Decrypt {
         /// Path to git repository (for key detection). Defaults to current directory.
         #[arg(short, long)]
         repo: Option<String>,
@@ -88,8 +84,7 @@ enum Command {
     },
     /// Create a content-addressed link (Lens) to one or more git objects.
     /// Resolves targets by SHA or git ref (branch, tag, HEAD, etc.).
-    #[cfg(feature = "git")]
-    #[command(alias = "ln")]
+        #[command(alias = "ln")]
     Link {
         /// Target SHAs or git refs to link to.
         #[arg(required = true)]
@@ -141,7 +136,6 @@ enum Command {
     },
 }
 
-#[cfg(feature = "git")]
 fn resolve_namespace(repo: &git2::Repository, cli_override: Option<String>) -> String {
     cli_override.unwrap_or_else(|| {
         repo.config()
@@ -151,7 +145,6 @@ fn resolve_namespace(repo: &git2::Repository, cli_override: Option<String>) -> S
     })
 }
 
-#[cfg(feature = "git")]
 fn open_repo(repo: Option<String>) -> git2::Repository {
     let repo_path = repo.unwrap_or_else(|| ".".to_string());
     git2::Repository::open(&repo_path).unwrap_or_else(|e| {
@@ -160,7 +153,6 @@ fn open_repo(repo: Option<String>) -> git2::Repository {
     })
 }
 
-#[cfg(feature = "git")]
 fn detect_keys(repo: &git2::Repository) -> keys::Local {
     keys::Local::from_repo(repo).unwrap_or_else(|e| {
         eprintln!("failed to detect keys: {}", e);
@@ -202,8 +194,7 @@ fn main() {
             let tree = encoding::encode(&input);
             println!("{}", fragment::content_oid(&tree));
         }
-        #[cfg(feature = "git")]
-        Command::Commit {
+                Command::Commit {
             data,
             message,
             repo,
@@ -256,8 +247,7 @@ fn main() {
 
             println!("{}", commit.sha().0);
         }
-        #[cfg(feature = "git")]
-        Command::Sign { data, repo } => {
+                Command::Sign { data, repo } => {
             use fragmentation::fragment::{Blob, Fractal};
             use keys::Keys;
 
@@ -281,8 +271,7 @@ fn main() {
                 print!("{}", hex::encode(bytes));
             }
         }
-        #[cfg(feature = "git")]
-        Command::Encrypt { data, repo } => {
+                Command::Encrypt { data, repo } => {
             use fragmentation::fragment::Fractal;
             use keys::Keys;
             use std::io::Write;
@@ -306,8 +295,7 @@ fn main() {
                 .write_all(encrypted.ciphertext())
                 .expect("failed to write ciphertext");
         }
-        #[cfg(feature = "git")]
-        Command::Decrypt { repo } => {
+                Command::Decrypt { repo } => {
             use fragmentation::fragment::Fractal;
             use keys::{Encrypted, Keys};
             use std::io::Write;
@@ -325,8 +313,7 @@ fn main() {
                 .write_all(decrypted.data().as_bytes())
                 .expect("failed to write plaintext");
         }
-        #[cfg(feature = "git")]
-        Command::Link {
+                Command::Link {
             targets,
             data,
             message,
