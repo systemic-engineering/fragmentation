@@ -1,10 +1,5 @@
 use std::convert::Infallible;
 
-use crate::fragment::{self, Fractal, Fragmentable};
-use crate::ref_::Ref;
-use crate::repo::Repo;
-use crate::sha;
-
 // ===========================================================================
 // Encode / Decode traits
 // ===========================================================================
@@ -51,45 +46,29 @@ impl Decode for String {
 }
 
 // ===========================================================================
-// Text encoding (five-level trees: document/paragraph/sentence/word/char)
+// Test helpers — text encoding as Fractal<String>
 // ===========================================================================
+//
+// Five-level decomposition (document → paragraph → sentence → word → char)
+// used only as test helpers to create Fractal<String> trees.
 
-/// Error type for decode failures.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum DecodeError {
-    UnknownLabel(String),
-}
+use crate::fragment::{self, Fractal, Fragmentable};
+use crate::ref_::Ref;
+use crate::repo::Repo;
+use crate::sha;
 
-/// Encode a single character as a Shard.
-pub fn encode_char(ch: &str) -> Fractal<String> {
-    let label = format!("utf8/{}", ch);
-    let s = sha::Sha(fragment::blob_oid(ch));
-    let r = Ref::new(s, label);
-    Fractal::shard(r, ch.to_string())
-}
-
-/// Encode a word as a Fractal of character Shards.
-pub fn encode_word(word: &str) -> Fractal<String> {
-    let chars: Vec<Fractal<String>> = word.chars().map(|c| encode_char(&c.to_string())).collect();
-    let label = format!("token/{}", word);
-    let s = sha::Sha(fragment::tree_oid(word, &chars));
-    let r = Ref::new(s, label);
-    Fractal::new(r, word.to_string(), chars)
-}
-
-/// Encode a sentence as a Fractal of word Fractals.
-pub fn encode_sentence(text: &str) -> Fractal<String> {
-    let words: Vec<Fractal<String>> = text
-        .split(' ')
-        .filter(|w| !w.is_empty())
-        .map(encode_word)
+/// Encode text as a Fractal<String>. Used by tests across the crate.
+pub fn encode(text: &str) -> Fractal<String> {
+    let paragraphs: Vec<Fractal<String>> = text
+        .split("\n\n")
+        .filter(|p| !p.is_empty())
+        .map(encode_paragraph)
         .collect();
-    let s = sha::Sha(fragment::tree_oid(text, &words));
-    let r = Ref::new(s, "sentence");
-    Fractal::new(r, text.to_string(), words)
+    let s = sha::Sha(fragment::tree_oid(text, &paragraphs));
+    let r = Ref::new(s, "document");
+    Fractal::new(r, text.to_string(), paragraphs)
 }
 
-/// Encode a paragraph as a Fractal of sentence Fractals.
 pub fn encode_paragraph(text: &str) -> Fractal<String> {
     let sentences: Vec<Fractal<String>> = split_sentences(text)
         .into_iter()
@@ -101,17 +80,30 @@ pub fn encode_paragraph(text: &str) -> Fractal<String> {
     Fractal::new(r, text.to_string(), sentences)
 }
 
-/// Encode full text as a document Fractal.
-/// Splits on double newlines into paragraphs.
-pub fn encode(text: &str) -> Fractal<String> {
-    let paragraphs: Vec<Fractal<String>> = text
-        .split("\n\n")
-        .filter(|p| !p.is_empty())
-        .map(encode_paragraph)
+pub fn encode_sentence(text: &str) -> Fractal<String> {
+    let words: Vec<Fractal<String>> = text
+        .split(' ')
+        .filter(|w| !w.is_empty())
+        .map(encode_word)
         .collect();
-    let s = sha::Sha(fragment::tree_oid(text, &paragraphs));
-    let r = Ref::new(s, "document");
-    Fractal::new(r, text.to_string(), paragraphs)
+    let s = sha::Sha(fragment::tree_oid(text, &words));
+    let r = Ref::new(s, "sentence");
+    Fractal::new(r, text.to_string(), words)
+}
+
+pub fn encode_word(word: &str) -> Fractal<String> {
+    let chars: Vec<Fractal<String>> = word.chars().map(|c| encode_char(&c.to_string())).collect();
+    let label = format!("token/{}", word);
+    let s = sha::Sha(fragment::tree_oid(word, &chars));
+    let r = Ref::new(s, label);
+    Fractal::new(r, word.to_string(), chars)
+}
+
+pub fn encode_char(ch: &str) -> Fractal<String> {
+    let label = format!("utf8/{}", ch);
+    let s = sha::Sha(fragment::blob_oid(ch));
+    let r = Ref::new(s, label);
+    Fractal::shard(r, ch.to_string())
 }
 
 /// Encode and store, returning root Fractal. Deduplicates via write_tree.
@@ -126,8 +118,12 @@ pub fn decode(fragment: &Fractal<String>) -> Result<String, DecodeError> {
     Ok(fragment.data().to_string())
 }
 
-/// Split text into sentences on ". ", "! ", "? " boundaries.
-/// Punctuation stays with the preceding sentence.
+/// Error type for decode failures.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DecodeError {
+    UnknownLabel(String),
+}
+
 fn split_sentences(text: &str) -> Vec<String> {
     let chars: Vec<char> = text.chars().collect();
     let mut result = Vec::new();

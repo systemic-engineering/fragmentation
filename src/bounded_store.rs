@@ -8,24 +8,20 @@ use std::sync::Mutex;
 
 use dashmap::DashMap;
 
-use crate::fragment::Fragmentable;
-use crate::sha::HashAlg;
-
 /// A byte-bounded concurrent content-addressed store.
 ///
 /// Uses a `DashMap` for O(1) concurrent lookup and a `VecDeque` to track
 /// insertion order. On insert, if total bytes exceed `max_bytes`, the oldest
 /// entries (back of the deque) are evicted until the store fits.
-pub struct BoundedStore<N: Fragmentable + Clone, H: HashAlg = crate::sha::Sha> {
+pub struct BoundedStore<N: Clone> {
     objects: DashMap<String, N>,
     sizes: DashMap<String, usize>,
     order: Mutex<VecDeque<String>>,
     total_bytes: Mutex<usize>,
     max_bytes: usize,
-    _hash: std::marker::PhantomData<H>,
 }
 
-impl<N: Fragmentable + Clone, H: HashAlg> BoundedStore<N, H> {
+impl<N: Clone> BoundedStore<N> {
     /// Create a new bounded store with the given byte capacity.
     pub fn new(max_bytes: usize) -> Self {
         BoundedStore {
@@ -34,7 +30,6 @@ impl<N: Fragmentable + Clone, H: HashAlg> BoundedStore<N, H> {
             order: Mutex::new(VecDeque::new()),
             total_bytes: Mutex::new(0),
             max_bytes,
-            _hash: std::marker::PhantomData,
         }
     }
 

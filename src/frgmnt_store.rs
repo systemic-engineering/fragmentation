@@ -1,5 +1,10 @@
 //! `.frgmnt` content store — no git dependency. Files on disk.
 //!
+//! Two modes based on trait bounds:
+//! - **In-memory** (`N: Fragmentable + Clone`): bounded cache, eviction drops.
+//! - **Persistent** (`N: Reconstructable + Clone`): bounded cache + `.frgmnt/`
+//!   disk spillover. Evicted entries persist. Cache misses fall back to disk.
+//!
 //! Structure:
 //! ```text
 //! .frgmnt/
@@ -11,8 +16,8 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use crate::bounded_store::BoundedStore;
-use crate::encoding::{Decode, Encode};
-use crate::fragment::{Fractal, Fragmentable};
+use crate::encoding::Encode;
+use crate::fragment::{Fragmentable, Reconstructable};
 
 /// Error type for FrgmntStore operations.
 #[derive(Debug)]
@@ -36,13 +41,6 @@ impl From<std::io::Error> for Error {
     }
 }
 
-/// Estimate byte size of a Fractal for cache accounting.
-fn estimate_size<E: Encode>(fractal: &Fractal<E>) -> usize {
-    let base = std::mem::size_of_val(fractal);
-    let data_size = std::mem::size_of_val(fractal.data());
-    base + data_size
-}
-
 /// Return the object path for a given oid inside a .frgmnt root.
 /// Fan-out: `.frgmnt/objects/<first-2>/<rest>`.
 fn object_path(root: &PathBuf, oid: &str) -> PathBuf {
@@ -53,18 +51,20 @@ fn object_path(root: &PathBuf, oid: &str) -> PathBuf {
     root.join("objects").join(prefix).join(rest)
 }
 
-/// A file-backed bounded store that writes to `.frgmnt/` on eviction
-/// and reads from disk on cache miss. No git dependency.
-pub struct FrgmntStore<E: Encode + Decode + Clone> {
-    cache: BoundedStore<Fractal<E>>,
+/// A bounded content-addressed store. In-memory cache with optional
+/// `.frgmnt/` disk persistence for types that implement Reconstructable.
+pub struct FrgmntStore<N: Fragmentable + Clone> {
+    cache: BoundedStore<N>,
     root: PathBuf,
-    /// Protects flush — prevents concurrent flushes racing with inserts.
     _flush_lock: Mutex<()>,
 }
 
-impl<E: Encode + Decode + Clone> FrgmntStore<E> {
+// ---------------------------------------------------------------------------
+// Core — available for any N: Fragmentable + Clone
+// ---------------------------------------------------------------------------
+
+impl<N: Fragmentable + Clone> FrgmntStore<N> {
     /// Open or create a `.frgmnt` store at the given path.
-    /// Creates `.frgmnt/objects/` and `.frgmnt/refs/` if they don't exist.
     pub fn open(path: &str, max_bytes: usize) -> Result<Self, Error> {
         let root = PathBuf::from(path);
         std::fs::create_dir_all(root.join("objects"))?;
@@ -76,59 +76,18 @@ impl<E: Encode + Decode + Clone> FrgmntStore<E> {
         })
     }
 
-    /// Write a Fractal to disk at its object path.
-    fn write_to_disk(&self, oid: &str, value: &Fractal<E>) -> Result<(), Error> {
-        let path = object_path(&self.root, oid);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let bytes = value.data().encode();
-        std::fs::write(&path, &bytes)?;
-        Ok(())
-    }
-
-    /// Read a Fractal from disk at its object path.
-    fn read_from_disk(&self, oid: &str) -> Option<Fractal<E>> {
-        let path = object_path(&self.root, oid);
-        let bytes = std::fs::read(&path).ok()?;
-        let data = E::decode(&bytes).ok()?;
-        // Reconstruct as a shard (terminal fragment — we store data only).
-        let ref_ = crate::ref_::Ref::new(
-            crate::sha::Sha(oid.to_string()),
-            "frgmnt",
-        );
-        Some(Fractal::Shard { ref_, data })
-    }
-
-    /// Insert a fractal. Stores in cache; on cache overflow the evicted entry
-    /// is written to `.frgmnt/objects/` before being dropped.
-    /// Content-addressed: if the key is already in cache, this is a no-op.
-    pub fn insert(&self, key: String, value: Fractal<E>) {
-        // Content-addressed dedup: skip if already cached.
+    /// Insert a fragment by key with its byte size. Eviction drops.
+    /// Content-addressed: if the key is already cached, this is a no-op.
+    pub fn insert(&self, key: String, value: N, size_bytes: usize) {
         if self.cache.get(&key).is_some() {
             return;
         }
-        let size = estimate_size(&value);
-        // If inserting will cause eviction, persist the oldest entry first.
-        if self.cache.total_bytes() + size > self.cache.capacity() {
-            if let Some((oldest_key, oldest_node)) = self.cache.peek_oldest() {
-                let _ = self.write_to_disk(&oldest_key, &oldest_node);
-            }
-        }
-        self.cache.insert(key, value, size);
+        self.cache.insert(key, value, size_bytes);
     }
 
-    /// Get a Fractal by Oid. Checks cache first, falls back to disk on miss.
-    pub fn get(&self, key: &str) -> Option<Fractal<E>> {
-        // Hot path: in cache.
-        if let Some(node) = self.cache.get(key) {
-            return Some(node);
-        }
-        // Cold path: read from .frgmnt/objects/.
-        let node = self.read_from_disk(key)?;
-        let size = estimate_size(&node);
-        self.cache.insert(key.to_string(), node.clone(), size);
-        Some(node)
+    /// Get a fragment by key. Cache only — no disk fallback.
+    pub fn get(&self, key: &str) -> Option<N> {
+        self.cache.get(key)
     }
 
     /// Write a named ref (e.g. "boot" → Oid).
@@ -154,6 +113,71 @@ impl<E: Encode + Decode + Clone> FrgmntStore<E> {
         self.cache.total_bytes()
     }
 
+    /// Maximum bytes this store will hold.
+    pub fn capacity(&self) -> usize {
+        self.cache.capacity()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Persistent — disk spillover for types that can reconstruct from bytes
+// ---------------------------------------------------------------------------
+
+impl<N: Reconstructable + Clone> FrgmntStore<N>
+where
+    N::Data: Encode + crate::encoding::Decode,
+    N::Hash: crate::sha::HashAlg,
+{
+    /// Write a fragment to disk at its object path.
+    fn write_to_disk(&self, oid: &str, value: &N) -> Result<(), Error> {
+        let path = object_path(&self.root, oid);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let bytes = value.data().encode();
+        std::fs::write(&path, &bytes)?;
+        Ok(())
+    }
+
+    /// Read a fragment from disk at its object path.
+    fn read_from_disk(&self, oid: &str) -> Option<N> {
+        let path = object_path(&self.root, oid);
+        let bytes = std::fs::read(&path).ok()?;
+        let data = <N::Data as crate::encoding::Decode>::decode(&bytes).ok()?;
+        use crate::sha::HashAlg as _;
+        let ref_ = crate::ref_::Ref::new(
+            N::Hash::from_hex(oid),
+            "frgmnt",
+        );
+        Some(N::reconstruct(ref_, data, vec![]))
+    }
+
+    /// Insert with disk persistence. On cache overflow, the evicted entry
+    /// is written to `.frgmnt/objects/` before being dropped.
+    pub fn insert_persistent(&self, key: String, value: N, size_bytes: usize) {
+        if self.cache.get(&key).is_some() {
+            return;
+        }
+        if self.cache.total_bytes() + size_bytes > self.cache.capacity() {
+            if let Some((oldest_key, oldest_node)) = self.cache.peek_oldest() {
+                let _ = self.write_to_disk(&oldest_key, &oldest_node);
+            }
+        }
+        self.cache.insert(key, value, size_bytes);
+    }
+
+    /// Get with disk fallback. Checks cache first, reads from disk on miss,
+    /// promotes to cache on hit.
+    pub fn get_persistent(&self, key: &str) -> Option<N> {
+        if let Some(node) = self.cache.get(key) {
+            return Some(node);
+        }
+        let node = self.read_from_disk(key)?;
+        let size = std::mem::size_of_val(&node);
+        self.cache.insert(key.to_string(), node.clone(), size);
+        Some(node)
+    }
+
     /// Flush all cached entries to disk, then clear the cache.
     pub fn flush(&self) {
         let _guard = self._flush_lock.lock().unwrap();
@@ -163,25 +187,31 @@ impl<E: Encode + Decode + Clone> FrgmntStore<E> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::encoding;
-    use crate::fragment::{content_oid, Fragmentable};
+    use crate::fragment::{self, Fractal};
 
     fn shard(label: &str) -> Fractal<String> {
         encoding::encode(label)
     }
 
     fn oid(node: &Fractal<String>) -> String {
-        content_oid(node)
+        fragment::content_oid(node)
     }
+
+    // -- Core tests (Fragmentable + Clone) --
 
     #[test]
     fn open_creates_dirs() {
         let dir = tempfile::tempdir().unwrap();
         let frgmnt = dir.path().join(".frgmnt");
-        FrgmntStore::<String>::open(frgmnt.to_str().unwrap(), 10_000).unwrap();
+        FrgmntStore::<Fractal<String>>::open(frgmnt.to_str().unwrap(), 10_000).unwrap();
         assert!(frgmnt.join("objects").exists());
         assert!(frgmnt.join("refs").exists());
     }
@@ -190,92 +220,86 @@ mod tests {
     fn insert_and_get() {
         let dir = tempfile::tempdir().unwrap();
         let frgmnt = dir.path().join(".frgmnt");
-        let store = FrgmntStore::<String>::open(frgmnt.to_str().unwrap(), 10_000).unwrap();
-
+        let store = FrgmntStore::<Fractal<String>>::open(frgmnt.to_str().unwrap(), 10_000).unwrap();
         let node = shard("hello");
         let key = oid(&node);
-        store.insert(key.clone(), node.clone());
-
+        store.insert(key.clone(), node.clone(), 100);
         let got = store.get(&key);
         assert!(got.is_some());
         assert_eq!(got.unwrap().data(), node.data());
     }
 
     #[test]
-    fn eviction_persists_to_frgmnt() {
+    fn eviction_drops_without_persistence() {
         let dir = tempfile::tempdir().unwrap();
         let frgmnt = dir.path().join(".frgmnt");
-        // Very small cache — 100 bytes forces eviction after first entry.
-        let store = FrgmntStore::<String>::open(frgmnt.to_str().unwrap(), 100).unwrap();
-
-        let a = shard("persist-a");
-        let b = shard("persist-b");
-        let c = shard("persist-c");
+        let store = FrgmntStore::<Fractal<String>>::open(frgmnt.to_str().unwrap(), 100).unwrap();
+        let a = shard("aaa");
+        let b = shard("bbb");
+        let c = shard("ccc");
         let ka = oid(&a);
-
-        store.insert(ka.clone(), a);
-        store.insert(oid(&b), b);
-        store.insert(oid(&c), c);
-
-        // "persist-a" should have been written to disk on eviction.
-        let path = object_path(&store.root, &ka);
-        assert!(path.exists(), "evicted object should be on disk: {:?}", path);
-    }
-
-    #[test]
-    fn cache_miss_reads_from_frgmnt() {
-        let dir = tempfile::tempdir().unwrap();
-        let frgmnt = dir.path().join(".frgmnt");
-        let store = FrgmntStore::<String>::open(frgmnt.to_str().unwrap(), 10_000).unwrap();
-
-        // Write a node directly to disk, bypassing cache.
-        let node = shard("cold-data");
-        let key = oid(&node);
-        let path = object_path(&store.root, &key);
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, node.data().encode()).unwrap();
-
-        // Cache should be empty.
-        assert_eq!(store.cached_len(), 0);
-
-        // Reading should load from disk and promote to cache.
-        let got = store.get(&key);
-        assert!(got.is_some(), "should read from disk on cache miss");
-        assert_eq!(store.cached_len(), 1, "should promote to cache after miss");
-    }
-
-    #[test]
-    fn set_ref_get_ref() {
-        let dir = tempfile::tempdir().unwrap();
-        let frgmnt = dir.path().join(".frgmnt");
-        let store = FrgmntStore::<String>::open(frgmnt.to_str().unwrap(), 10_000).unwrap();
-
-        let node = shard("ref-target");
-        let key = oid(&node);
-
-        store.set_ref("boot", &key).unwrap();
-        let got = store.get_ref("boot");
-        assert_eq!(got.as_deref(), Some(key.as_str()));
+        store.insert(ka.clone(), a, 50);
+        store.insert(oid(&b), b, 50);
+        store.insert(oid(&c), c, 50);
+        // "aaa" evicted from cache, not written to disk (used insert, not insert_persistent)
+        assert!(store.get(&ka).is_none());
     }
 
     #[test]
     fn content_addressed_dedup() {
         let dir = tempfile::tempdir().unwrap();
         let frgmnt = dir.path().join(".frgmnt");
-        let store = FrgmntStore::<String>::open(frgmnt.to_str().unwrap(), 10_000).unwrap();
+        let store = FrgmntStore::<Fractal<String>>::open(frgmnt.to_str().unwrap(), 10_000).unwrap();
+        let n1 = shard("same");
+        let n2 = shard("same");
+        let k1 = oid(&n1);
+        let k2 = oid(&n2);
+        assert_eq!(k1, k2);
+        store.insert(k1, n1, 50);
+        store.insert(k2, n2, 50);
+        assert_eq!(store.cached_len(), 1);
+    }
 
-        let node1 = shard("same-content");
-        let node2 = shard("same-content");
-        let key1 = oid(&node1);
-        let key2 = oid(&node2);
+    #[test]
+    fn set_ref_get_ref() {
+        let dir = tempfile::tempdir().unwrap();
+        let frgmnt = dir.path().join(".frgmnt");
+        let store = FrgmntStore::<Fractal<String>>::open(frgmnt.to_str().unwrap(), 10_000).unwrap();
+        store.set_ref("boot", "abc123").unwrap();
+        assert_eq!(store.get_ref("boot").as_deref(), Some("abc123"));
+    }
 
-        // Same content → same Oid.
-        assert_eq!(key1, key2);
+    // -- Persistent tests (Reconstructable + Clone) --
 
-        store.insert(key1.clone(), node1);
-        store.insert(key2.clone(), node2);
+    #[test]
+    fn insert_persistent_evicts_to_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let frgmnt = dir.path().join(".frgmnt");
+        let store = FrgmntStore::<Fractal<String>>::open(frgmnt.to_str().unwrap(), 100).unwrap();
+        let a = shard("persist-a");
+        let b = shard("persist-b");
+        let c = shard("persist-c");
+        let ka = oid(&a);
+        store.insert_persistent(ka.clone(), a, 50);
+        store.insert_persistent(oid(&b), b, 50);
+        store.insert_persistent(oid(&c), c, 50);
+        let path = object_path(&store.root, &ka);
+        assert!(path.exists(), "evicted object should be on disk: {:?}", path);
+    }
 
-        // Should only have one cache entry (same key).
+    #[test]
+    fn get_persistent_falls_back_to_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let frgmnt = dir.path().join(".frgmnt");
+        let store = FrgmntStore::<Fractal<String>>::open(frgmnt.to_str().unwrap(), 10_000).unwrap();
+        // Write directly to disk, bypassing cache.
+        let path = object_path(&store.root, "cold");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "cold-data".as_bytes()).unwrap();
+        assert_eq!(store.cached_len(), 0);
+        let got = store.get_persistent("cold");
+        assert!(got.is_some());
+        assert_eq!(got.unwrap().data(), "cold-data");
         assert_eq!(store.cached_len(), 1);
     }
 
@@ -283,22 +307,16 @@ mod tests {
     fn flush_writes_all() {
         let dir = tempfile::tempdir().unwrap();
         let frgmnt = dir.path().join(".frgmnt");
-        let store = FrgmntStore::<String>::open(frgmnt.to_str().unwrap(), 10_000).unwrap();
-
+        let store = FrgmntStore::<Fractal<String>>::open(frgmnt.to_str().unwrap(), 10_000).unwrap();
         let a = shard("flush-a");
         let b = shard("flush-b");
         let ka = oid(&a);
         let kb = oid(&b);
-
-        store.insert(ka.clone(), a);
-        store.insert(kb.clone(), b);
+        store.insert(ka.clone(), a, 50);
+        store.insert(kb.clone(), b, 50);
         assert_eq!(store.cached_len(), 2);
-
         store.flush();
-
-        // Cache should be empty.
         assert_eq!(store.cached_len(), 0);
-        // Both objects should be on disk.
         assert!(object_path(&store.root, &ka).exists());
         assert!(object_path(&store.root, &kb).exists());
     }
