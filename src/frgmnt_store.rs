@@ -14,7 +14,7 @@ use crate::bounded_store::BoundedStore;
 use crate::encoding::{Decode, Encode};
 use crate::fragment::{Fractal, Fragmentable};
 
-/// Error type for FgmntStore operations.
+/// Error type for FrgmntStore operations.
 #[derive(Debug)]
 pub enum Error {
     Io(std::io::Error),
@@ -55,21 +55,21 @@ fn object_path(root: &PathBuf, oid: &str) -> PathBuf {
 
 /// A file-backed bounded store that writes to `.frgmnt/` on eviction
 /// and reads from disk on cache miss. No git dependency.
-pub struct FgmntStore<E: Encode + Decode + Clone> {
+pub struct FrgmntStore<E: Encode + Decode + Clone> {
     cache: BoundedStore<Fractal<E>>,
     root: PathBuf,
     /// Protects flush — prevents concurrent flushes racing with inserts.
     _flush_lock: Mutex<()>,
 }
 
-impl<E: Encode + Decode + Clone> FgmntStore<E> {
+impl<E: Encode + Decode + Clone> FrgmntStore<E> {
     /// Open or create a `.frgmnt` store at the given path.
     /// Creates `.frgmnt/objects/` and `.frgmnt/refs/` if they don't exist.
     pub fn open(path: &str, max_bytes: usize) -> Result<Self, Error> {
         let root = PathBuf::from(path);
         std::fs::create_dir_all(root.join("objects"))?;
         std::fs::create_dir_all(root.join("refs"))?;
-        Ok(FgmntStore {
+        Ok(FrgmntStore {
             cache: BoundedStore::new(max_bytes),
             root,
             _flush_lock: Mutex::new(()),
@@ -181,7 +181,7 @@ mod tests {
     fn open_creates_dirs() {
         let dir = tempfile::tempdir().unwrap();
         let frgmnt = dir.path().join(".frgmnt");
-        FgmntStore::<String>::open(frgmnt.to_str().unwrap(), 10_000).unwrap();
+        FrgmntStore::<String>::open(frgmnt.to_str().unwrap(), 10_000).unwrap();
         assert!(frgmnt.join("objects").exists());
         assert!(frgmnt.join("refs").exists());
     }
@@ -190,7 +190,7 @@ mod tests {
     fn insert_and_get() {
         let dir = tempfile::tempdir().unwrap();
         let frgmnt = dir.path().join(".frgmnt");
-        let store = FgmntStore::<String>::open(frgmnt.to_str().unwrap(), 10_000).unwrap();
+        let store = FrgmntStore::<String>::open(frgmnt.to_str().unwrap(), 10_000).unwrap();
 
         let node = shard("hello");
         let key = oid(&node);
@@ -206,7 +206,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let frgmnt = dir.path().join(".frgmnt");
         // Very small cache — 100 bytes forces eviction after first entry.
-        let store = FgmntStore::<String>::open(frgmnt.to_str().unwrap(), 100).unwrap();
+        let store = FrgmntStore::<String>::open(frgmnt.to_str().unwrap(), 100).unwrap();
 
         let a = shard("persist-a");
         let b = shard("persist-b");
@@ -226,7 +226,7 @@ mod tests {
     fn cache_miss_reads_from_frgmnt() {
         let dir = tempfile::tempdir().unwrap();
         let frgmnt = dir.path().join(".frgmnt");
-        let store = FgmntStore::<String>::open(frgmnt.to_str().unwrap(), 10_000).unwrap();
+        let store = FrgmntStore::<String>::open(frgmnt.to_str().unwrap(), 10_000).unwrap();
 
         // Write a node directly to disk, bypassing cache.
         let node = shard("cold-data");
@@ -248,7 +248,7 @@ mod tests {
     fn set_ref_get_ref() {
         let dir = tempfile::tempdir().unwrap();
         let frgmnt = dir.path().join(".frgmnt");
-        let store = FgmntStore::<String>::open(frgmnt.to_str().unwrap(), 10_000).unwrap();
+        let store = FrgmntStore::<String>::open(frgmnt.to_str().unwrap(), 10_000).unwrap();
 
         let node = shard("ref-target");
         let key = oid(&node);
@@ -262,7 +262,7 @@ mod tests {
     fn content_addressed_dedup() {
         let dir = tempfile::tempdir().unwrap();
         let frgmnt = dir.path().join(".frgmnt");
-        let store = FgmntStore::<String>::open(frgmnt.to_str().unwrap(), 10_000).unwrap();
+        let store = FrgmntStore::<String>::open(frgmnt.to_str().unwrap(), 10_000).unwrap();
 
         let node1 = shard("same-content");
         let node2 = shard("same-content");
@@ -283,7 +283,7 @@ mod tests {
     fn flush_writes_all() {
         let dir = tempfile::tempdir().unwrap();
         let frgmnt = dir.path().join(".frgmnt");
-        let store = FgmntStore::<String>::open(frgmnt.to_str().unwrap(), 10_000).unwrap();
+        let store = FrgmntStore::<String>::open(frgmnt.to_str().unwrap(), 10_000).unwrap();
 
         let a = shard("flush-a");
         let b = shard("flush-b");
