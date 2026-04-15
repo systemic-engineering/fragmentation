@@ -14,6 +14,7 @@
 //! | `gpg`   | GPG signing + encryption via subprocess |
 
 pub mod manifest;
+pub mod prism_bridge;
 pub mod project;
 pub mod cid;
 pub mod commit;

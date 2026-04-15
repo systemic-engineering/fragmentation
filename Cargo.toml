@@ -26,6 +26,7 @@ path = "src/main.rs"
 required-features = ["cli"]
 
 [dependencies]
+prism-core = { path = "../prism/core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
