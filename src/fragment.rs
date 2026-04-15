@@ -154,6 +154,65 @@ impl<E: Encode, H: HashAlg> Fragmentable for Fractal<E, H> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Merge — tree merge with caller-provided conflict resolution
+// ---------------------------------------------------------------------------
+
+/// Merge two fragment trees node-by-node.
+///
+/// Same hash → unchanged, skip. Different hash → call `resolve(old, new)`.
+/// Children merged positionally: matched children recurse, unmatched
+/// children from either side are preserved (information may not be destroyed).
+///
+/// The resolve function decides conflict winners. The tree walk is free.
+/// Tournament rules, holonomy minimization, annealing — all are just
+/// different resolve functions.
+pub fn merge<F, R>(old: &F, new: &F, resolve: &R) -> F
+where
+    F: Fragmentable + Reconstructable + Clone,
+    F::Data: Clone + crate::encoding::Decode,
+    R: Fn(&F, &F) -> F,
+{
+    // Same content hash → identical, keep old
+    if content_oid(old) == content_oid(new) {
+        return old.clone();
+    }
+
+    // Different content. Resolve this node's data.
+    let resolved = resolve(old, new);
+
+    // Merge children positionally
+    let old_children = old.children();
+    let new_children = new.children();
+    let max_len = old_children.len().max(new_children.len());
+    let mut merged_children = Vec::with_capacity(max_len);
+
+    for i in 0..max_len {
+        match (old_children.get(i), new_children.get(i)) {
+            (Some(o), Some(n)) => {
+                // Both exist — recurse
+                merged_children.push(merge(o, n, resolve));
+            }
+            (Some(o), None) => {
+                // Only in old — preserve (dark dimension)
+                merged_children.push(o.clone());
+            }
+            (None, Some(n)) => {
+                // Only in new — preserve (new structure)
+                merged_children.push(n.clone());
+            }
+            (None, None) => unreachable!(),
+        }
+    }
+
+    // Reconstruct with resolved data and merged children
+    F::reconstruct(resolved.self_ref().clone(), resolved.data().clone(), merged_children)
+}
+
+// ---------------------------------------------------------------------------
+// Reconstruction
+// ---------------------------------------------------------------------------
+
 /// Reconstruction from stored parts. Required for read-back from
 /// persistent stores (git, disk). Extends Fragmentable with the
 /// inverse operation: given ref + data + children → Self.
@@ -393,5 +452,93 @@ mod tests {
         // The targets() method should return &[MockHash], not &[Sha]
         let t: &[MockHash] = lens.targets();
         assert_eq!(t.len(), 1);
+    }
+
+    // -- merge tests --
+
+    fn sha_ref(name: &str) -> Ref<Sha> {
+        Ref::new(Sha::hash(name.as_bytes()), name)
+    }
+
+    #[test]
+    fn merge_identical_trees_returns_old() {
+        let a: Fractal<String> = Fractal::shard(sha_ref("x"), "hello");
+        let b: Fractal<String> = Fractal::shard(sha_ref("x"), "hello");
+        let merged = merge(&a, &b, &|old, _new| old.clone());
+        assert_eq!(content_oid(&merged), content_oid(&a));
+    }
+
+    #[test]
+    fn merge_different_shards_uses_resolve() {
+        let a: Fractal<String> = Fractal::shard(sha_ref("a"), "old");
+        let b: Fractal<String> = Fractal::shard(sha_ref("b"), "new");
+        // resolve: always pick new
+        let merged = merge(&a, &b, &|_old, new| new.clone());
+        assert_eq!(merged.data(), "new");
+    }
+
+    #[test]
+    fn merge_different_shards_can_pick_old() {
+        let a: Fractal<String> = Fractal::shard(sha_ref("a"), "old");
+        let b: Fractal<String> = Fractal::shard(sha_ref("b"), "new");
+        // resolve: always pick old
+        let merged = merge(&a, &b, &|old, _new| old.clone());
+        assert_eq!(merged.data(), "old");
+    }
+
+    #[test]
+    fn merge_preserves_children_from_old_when_new_has_fewer() {
+        let child1: Fractal<String> = Fractal::shard(sha_ref("c1"), "child1");
+        let child2: Fractal<String> = Fractal::shard(sha_ref("c2"), "child2");
+        let a = Fractal::new(sha_ref("a"), "parent", vec![child1, child2]);
+        // new has only one child
+        let new_child: Fractal<String> = Fractal::shard(sha_ref("c1-new"), "child1-new");
+        let b = Fractal::new(sha_ref("b"), "parent", vec![new_child]);
+
+        let merged = merge(&a, &b, &|_old, new| new.clone());
+        // child2 from old must be preserved (dark dimension)
+        assert_eq!(merged.children().len(), 2);
+        assert_eq!(merged.children()[1].data(), "child2");
+    }
+
+    #[test]
+    fn merge_preserves_children_from_new_when_old_has_fewer() {
+        let child1: Fractal<String> = Fractal::shard(sha_ref("c1"), "child1");
+        let a = Fractal::new(sha_ref("a"), "parent", vec![child1]);
+        let new_child1: Fractal<String> = Fractal::shard(sha_ref("c1"), "child1");
+        let new_child2: Fractal<String> = Fractal::shard(sha_ref("c2-new"), "child2-new");
+        let b = Fractal::new(sha_ref("b"), "parent", vec![new_child1, new_child2]);
+
+        let merged = merge(&a, &b, &|_old, new| new.clone());
+        assert_eq!(merged.children().len(), 2);
+    }
+
+    #[test]
+    fn merge_recurses_into_children() {
+        let leaf_a: Fractal<String> = Fractal::shard(sha_ref("la"), "leaf-old");
+        let leaf_b: Fractal<String> = Fractal::shard(sha_ref("lb"), "leaf-new");
+        let a = Fractal::new(sha_ref("a"), "root", vec![leaf_a]);
+        let b = Fractal::new(sha_ref("b"), "root", vec![leaf_b]);
+
+        // resolve: always pick new
+        let merged = merge(&a, &b, &|_old, new| new.clone());
+        assert_eq!(merged.children()[0].data(), "leaf-new");
+    }
+
+    #[test]
+    fn merge_with_holonomy_strategy() {
+        // Simulate holonomy: shorter data = lower loss
+        let a: Fractal<String> = Fractal::shard(sha_ref("a"), "long-content-high-loss");
+        let b: Fractal<String> = Fractal::shard(sha_ref("b"), "short");
+
+        let merged = merge(&a, &b, &|old, new| {
+            // "holonomy" = data length (lower is better)
+            if new.data().len() < old.data().len() {
+                new.clone()
+            } else {
+                old.clone()
+            }
+        });
+        assert_eq!(merged.data(), "short");
     }
 }
