@@ -449,6 +449,7 @@ dependencies = [
  "hex",
  "hkdf",
  "libc",
+ "prism-core",
  "serde",
  "serde_json",
  "sha1",
@@ -1082,6 +1083,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "prism-core"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "prism-derive",
+ "sha2",
+ "terni",
+]
+
+[[package]]
+name = "prism-derive"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.106"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1425,6 +1445,22 @@ dependencies = [
  "once_cell",
  "rustix",
  "windows-sys",
+]
+
+[[package]]
+name = "terni"
+version = "0.6.0"
+dependencies = [
+ "terni-macros",
+]
+
+[[package]]
+name = "terni-macros"
+version = "0.6.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

@@ -2,7 +2,7 @@ use crate::encoding::{Decode, Encode};
 use crate::fragment::{Fractal, Fragmentable};
 use crate::keys::{Encrypted, Keys, Signature};
 use crate::ref_::Ref;
-use crate::sha::Sha;
+use crate::sha::{HashAlg, Sha};
 
 /// Visible, attributed, proven content. Signature carries both key and proof.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -33,11 +33,11 @@ impl<K: Keys, T> Public<K, T> {
     }
 }
 
-impl<K: Keys, T: Fragmentable<Hash = Sha>> Fragmentable for Public<K, T> {
+impl<K: Keys, T: Fragmentable> Fragmentable for Public<K, T> {
     type Data = T::Data;
-    type Hash = Sha;
+    type Hash = T::Hash;
 
-    fn self_ref(&self) -> &Ref {
+    fn self_ref(&self) -> &Ref<T::Hash> {
         self.inner.self_ref()
     }
 
@@ -52,14 +52,14 @@ impl<K: Keys, T: Fragmentable<Hash = Sha>> Fragmentable for Public<K, T> {
 
 /// Encrypted visibility. Content accessible with key. Ref is plaintext address.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Protected<K: Keys> {
-    ref_: Ref,
+pub struct Protected<K: Keys, H: HashAlg = Sha> {
+    ref_: Ref<H>,
     ciphertext: Vec<u8>,
     signature: Signature<K>,
 }
 
-impl<K: Keys> Protected<K> {
-    pub fn new(ref_: Ref, ciphertext: Vec<u8>, signature: Signature<K>) -> Self {
+impl<K: Keys, H: HashAlg> Protected<K, H> {
+    pub fn new(ref_: Ref<H>, ciphertext: Vec<u8>, signature: Signature<K>) -> Self {
         Protected {
             ref_,
             ciphertext,
@@ -80,7 +80,9 @@ impl<K: Keys> Protected<K> {
     }
 }
 
-impl<K: Keys> Protected<K> {
+/// Encryption/decryption requires `Keys` which currently operates on `Fractal<E, Sha>`.
+/// When `Keys` becomes hash-generic, these methods can move to the `H: HashAlg` impl block.
+impl<K: Keys> Protected<K, Sha> {
     pub fn wrap<E: Encode>(
         fragment: Fractal<E>,
         signature: Signature<K>,
@@ -100,11 +102,11 @@ impl<K: Keys> Protected<K> {
     }
 }
 
-impl<K: Keys> Fragmentable for Protected<K> {
+impl<K: Keys, H: HashAlg> Fragmentable for Protected<K, H> {
     type Data = Vec<u8>;
-    type Hash = Sha;
+    type Hash = H;
 
-    fn self_ref(&self) -> &Ref {
+    fn self_ref(&self) -> &Ref<H> {
         &self.ref_
     }
 
@@ -119,13 +121,13 @@ impl<K: Keys> Fragmentable for Protected<K> {
 
 /// Proof of existence only. No content travels.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Private<K: Keys> {
-    ref_: Ref,
+pub struct Private<K: Keys, H: HashAlg = Sha> {
+    ref_: Ref<H>,
     signature: Signature<K>,
 }
 
-impl<K: Keys> Private<K> {
-    pub fn new(ref_: Ref, signature: Signature<K>) -> Self {
+impl<K: Keys, H: HashAlg> Private<K, H> {
+    pub fn new(ref_: Ref<H>, signature: Signature<K>) -> Self {
         Private { ref_, signature }
     }
 
@@ -137,7 +139,7 @@ impl<K: Keys> Private<K> {
         self.signature.key()
     }
 
-    pub fn seal<T: Fragmentable<Hash = Sha>>(fragment: &T, signature: Signature<K>) -> Self {
+    pub fn seal<T: Fragmentable<Hash = H>>(fragment: &T, signature: Signature<K>) -> Self {
         Private {
             ref_: fragment.self_ref().clone(),
             signature,
@@ -162,11 +164,11 @@ impl<K: Keys, T: crate::commit::Draftable> crate::commit::Draftable for Public<K
     }
 }
 
-impl<K: Keys> Fragmentable for Private<K> {
+impl<K: Keys, H: HashAlg> Fragmentable for Private<K, H> {
     type Data = ();
-    type Hash = Sha;
+    type Hash = H;
 
-    fn self_ref(&self) -> &Ref {
+    fn self_ref(&self) -> &Ref<H> {
         &self.ref_
     }
 
@@ -176,5 +178,121 @@ impl<K: Keys> Fragmentable for Private<K> {
 
     fn children(&self) -> &[Self] {
         &[]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fragment::{self, Fractal, Fragmentable};
+    use crate::keys::PlainKeys;
+    use crate::ref_::Ref;
+    use crate::sha::{HashAlg, Sha};
+
+    // -- helpers --
+
+    fn make_shard(label: &str) -> Fractal<String> {
+        let r = Ref::new(Sha(fragment::blob_oid(label)), label);
+        Fractal::shard(r, label)
+    }
+
+    // -- Public: hash propagation --
+
+    #[test]
+    fn public_fragmentable_propagates_hash_type() {
+        let shard = make_shard("test");
+        let sig = PlainKeys.sign(&shard).unwrap();
+        let public = Public::new(shard.clone(), sig);
+        // Hash type propagated from inner T
+        assert_eq!(
+            Fragmentable::self_ref(&public).sha.as_str(),
+            shard.self_ref().sha.as_str()
+        );
+        assert_eq!(Fragmentable::data(&public), "test");
+    }
+
+    #[test]
+    fn public_with_oid_hash_type() {
+        // Construct a Fractal<String, prism_core::Oid> manually
+        let oid = prism_core::Oid::hash(b"hello");
+        let r = Ref::new(oid, "hello");
+        let shard: Fractal<String, prism_core::Oid> = Fractal::shard(r, "hello");
+
+        // PlainKeys.sign only works with Fractal<E, Sha>, so we construct
+        // the Public directly with a plain signature
+        let sig = Signature::new(PlainKeys, vec![]);
+        let public = Public::new(shard.clone(), sig);
+
+        // The Fragmentable impl should propagate prism_core::Oid
+        let ref_ = Fragmentable::self_ref(&public);
+        assert_eq!(ref_.sha.as_str(), shard.self_ref().sha.as_str());
+    }
+
+    // -- Protected: generic struct --
+
+    #[test]
+    fn protected_with_default_sha() {
+        let shard = make_shard("secret");
+        let sig = PlainKeys.sign(&shard).unwrap();
+        let protected = Protected::<PlainKeys>::wrap(shard, sig).unwrap();
+        assert!(!protected.ciphertext().is_empty());
+    }
+
+    #[test]
+    fn protected_with_oid_hash() {
+        let oid = prism_core::Oid::hash(b"protected-data");
+        let r = Ref::new(oid, "protected");
+        let protected: Protected<PlainKeys, prism_core::Oid> =
+            Protected::new(r.clone(), b"ciphertext".to_vec(), Signature::new(PlainKeys, vec![]));
+        // Fragmentable should use Oid as Hash
+        assert_eq!(Fragmentable::self_ref(&protected).sha.as_str(), r.sha.as_str());
+        assert_eq!(Fragmentable::data(&protected), &b"ciphertext".to_vec());
+    }
+
+    // -- Private: generic struct --
+
+    #[test]
+    fn private_with_default_sha() {
+        let shard = make_shard("sealed");
+        let sig = PlainKeys.sign(&shard).unwrap();
+        let private = Private::<PlainKeys>::seal(&shard, sig);
+        assert_eq!(
+            Fragmentable::self_ref(&private).sha.as_str(),
+            shard.self_ref().sha.as_str()
+        );
+    }
+
+    #[test]
+    fn private_with_oid_hash() {
+        let oid = prism_core::Oid::hash(b"private-data");
+        let r = Ref::new(oid.clone(), "private");
+        let shard: Fractal<String, prism_core::Oid> = Fractal::shard(r, "private");
+        let sig = Signature::new(PlainKeys, vec![]);
+        let private: Private<PlainKeys, prism_core::Oid> = Private::seal(&shard, sig);
+        // Hash type = Oid, content address matches
+        assert_eq!(Fragmentable::self_ref(&private).sha.as_str(), oid.as_str());
+    }
+
+    #[test]
+    fn private_new_with_oid() {
+        let oid = prism_core::Oid::hash(b"direct-construct");
+        let r = Ref::new(oid.clone(), "direct");
+        let sig = Signature::new(PlainKeys, vec![]);
+        let private: Private<PlainKeys, prism_core::Oid> = Private::new(r, sig);
+        assert_eq!(Fragmentable::self_ref(&private).sha.as_str(), oid.as_str());
+        assert_eq!(Fragmentable::data(&private), &());
+    }
+
+    // -- Draftable propagation --
+
+    #[test]
+    fn public_draftable_propagates_hash() {
+        use crate::commit::{Draft, Draftable};
+        let shard = make_shard("draftable");
+        let draft = Draft::<Fractal<String>>::root("test", shard.clone());
+        let sig = Signature::new(PlainKeys, vec![]);
+        let public = Public::new(draft, sig);
+        assert_eq!(public.message().0, "test");
+        assert!(public.parent().is_none());
     }
 }
