@@ -1,4 +1,8 @@
-//! Git-native commit write extension for Draft<Fractal<E>>.
+//! Git-native commit write extension for Draft<Fractal<E>, Sha>.
+//!
+//! The git adapter overrides fragmentation's substrate default (`SpectralCoordinate<5>`)
+//! to `Sha` because git's object model is SHA-1 throughout. See
+//! `fragmentation/docs/specs/mirror-native-vcs.md` §4.7.
 
 use fragmentation::commit::{Commit, Draft};
 use fragmentation::encoding::Encode;
@@ -38,15 +42,15 @@ pub trait DraftWriteExt<E: Encode> {
         self,
         repo: &git2::Repository,
         committer: Committer,
-    ) -> Result<Commit<Fractal<E>>, git2::Error>;
+    ) -> Result<Commit<Fractal<E>, Sha>, git2::Error>;
 }
 
-impl<E: Encode> DraftWriteExt<E> for Draft<Fractal<E>> {
+impl<E: Encode> DraftWriteExt<E> for Draft<Fractal<E>, Sha> {
     fn write_to_git(
         self,
         repo: &git2::Repository,
         committer: Committer,
-    ) -> Result<Commit<Fractal<E>>, git2::Error> {
+    ) -> Result<Commit<Fractal<E>, Sha>, git2::Error> {
         let author = self
             .author()
             .cloned()

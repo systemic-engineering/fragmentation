@@ -303,7 +303,7 @@ mod tests {
     fn public_draftable_propagates_hash() {
         use crate::commit::{Draft, Draftable};
         let shard = make_shard("draftable");
-        let draft = Draft::<Fractal<String>>::root("test", shard.clone());
+        let draft = Draft::<Fractal<String>, crate::sha::Sha>::root("test", shard.clone());
         let sig = Signature::new(PlainKeys, vec![]);
         let public = Public::new(draft, sig);
         assert_eq!(public.message().0, "test");

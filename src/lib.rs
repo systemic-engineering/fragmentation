@@ -60,6 +60,7 @@ pub mod repo;
 pub mod sha;
 #[cfg(feature = "singularity")]
 pub mod singularity;
+pub mod spectral_coordinate;
 pub mod store;
 #[cfg(feature = "supervision")]
 pub mod supervision;

@@ -180,8 +180,8 @@ fn public_commit_implements_draftable() {
     use fragmentation::commit::{Draft, Draftable};
     let shard = make_blob_shard(vec![1, 2, 3]);
     let sig = Local::None.sign(&shard).unwrap();
-    let draft = Draft::root("signed observation", shard);
-    let public: Public<Local, Draft<Fractal<Blob>>> = Public::new(draft, sig);
+    let draft: Draft<Fractal<Blob>, sha::Sha> = Draft::root("signed observation", shard);
+    let public: Public<Local, Draft<Fractal<Blob>, sha::Sha>> = Public::new(draft, sig);
 
     fn accepts_draftable<T: Draftable>(_d: &T) {}
     accepts_draftable(&public);
@@ -206,8 +206,8 @@ fn public_draftable_fractal_method() {
     use fragmentation::commit::{Draft, Draftable};
     let shard = make_blob_shard(vec![1, 2, 3]);
     let sig = Local::None.sign(&shard).unwrap();
-    let draft = Draft::root("test", shard.clone());
-    let public: Public<Local, Draft<Fractal<Blob>>> = Public::new(draft, sig);
+    let draft: Draft<Fractal<Blob>, sha::Sha> = Draft::root("test", shard.clone());
+    let public: Public<Local, Draft<Fractal<Blob>, sha::Sha>> = Public::new(draft, sig);
     // .node() via Draftable → covers visibility.rs:148
     assert_eq!(public.node().data(), shard.data());
 }

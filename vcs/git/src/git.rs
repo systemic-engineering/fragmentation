@@ -27,12 +27,15 @@ pub fn read_witnessed(
     Ok((witnessed, message, commit.tree_id()))
 }
 
-/// Read a fragmentation commit. Returns Commit<Fractal<String>> (Root or Child) with full metadata.
-/// Only works on commits written by write_commit (fragmentation-format trees).
+/// Read a fragmentation commit. Returns `Commit<Fractal<String>, Sha>` (Root or Child)
+/// with full metadata. Only works on commits written by write_commit (fragmentation-format trees).
+///
+/// The git adapter overrides fragmentation's default `H = SpectralCoordinate<5>` to `Sha`
+/// because git's object model is SHA-1. See `docs/specs/mirror-native-vcs.md` §4.7.
 pub fn read_commit(
     repo: &git2::Repository,
     oid: git2::Oid,
-) -> Result<fragmentation::commit::Commit<Fractal<String>>, Box<dyn std::error::Error>> {
+) -> Result<fragmentation::commit::Commit<Fractal<String>, fragmentation::sha::Sha>, Box<dyn std::error::Error>> {
     use fragmentation::commit::Parent;
     use fragmentation::sha::Sha;
 
