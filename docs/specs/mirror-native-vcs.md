@@ -141,8 +141,8 @@ fact that they're one serialization choice, not the substrate's only choice.
 **`sha.rs`** (2 KB) — `HashAlg` trait, `Sha` (SHA-1) implementation, hash()
 helper. **STAYS.** The trait is the pluggability the spec relies on. Add
 clear documentation that `Sha` is one impl among many (per
-`coincidence::CoincidenceHash<5>`, jj's `Blake2b<32>` in the default
-backend, future SHA-256 work).
+`fragmentation::spectral_coordinate::SpectralCoordinate<5>`, jj's
+`Blake2b<32>` in the default backend, future SHA-256 work).
 
 **`ref_.rs`** (0.8 KB) — `Ref<H>` wraps `(hash, label)`. **STAYS.** Tiny.
 Label is the human-readable name; hash is the address. Used everywhere.
@@ -490,12 +490,10 @@ structured.
 
 ```rust
 // commit.rs (today's Commit<N,H>, slightly typed)
-// Default H = Sha per the crate-direction note in §4.6
-// (fragmentation cannot depend on coincidence without a cycle; the
-// CoincidenceHash<5> substrate-default is set at the *consumer* layer:
-// mirror, spectral-db, and fragmentation/vcs/jj each set H = CoincidenceHash<5>
-// at their Repo construction. fragmentation/vcs/git keeps H = Sha.)
-pub enum Commit<N: ContentAddressed, H: HashAlg = Sha> {
+// Post-rename: SpectralCoordinate<5> lives in fragmentation, so the
+// substrate default lives in the trait directly. The git adapter
+// overrides to H = Sha at its boundary. See §4.6 + §4.7.
+pub enum Commit<N: ContentAddressed, H: HashAlg = SpectralCoordinate<5>> {
     Root { node: N, witnessed: Witnessed, message: Message, oid: H },
     Child { node: N, witnessed: Witnessed, message: Message, parents: Vec<H>, oid: H },
 }
@@ -966,15 +964,385 @@ import into the new workspace path.
 
 ---
 
-## 4.6 Hash function — `CoincidenceHash<5>` as default (eigenvalue-based, O(n log n))
+## 4.6 `SpectralCoordinate<5>` — the hash IS a coordinate
 
-Structural decision before T2's `Repo` retyping lands: **`CoincidenceHash<5>`
-is fragmentation's default `HashAlg` for mirror's consumption path.** SHA-1
-stays available as an explicit choice in `fragmentation/vcs/git/` where git
-interop requires it. SHA-256, blake2b, and any other format-specific hash
-are pluggable per `HashAlg` impl, used by their respective VCS adapters.
-Mirror itself never computes a SHA; the substrate it consumes computes
-`CoincidenceHash<5>`.
+Structural decision before T2's `Repo` retyping lands: **`SpectralCoordinate<5>`
+is fragmentation's default `HashAlg` for the substrate trait itself**, not
+just mirror's consumption path. The type lives in fragmentation
+(`fragmentation/src/spectral_coordinate.rs`); the trait defaults to it
+directly; the git adapter overrides to `Sha` at its boundary per §4.7.
+SHA-256, blake2b, and any other format-specific hash are pluggable per
+`HashAlg` impl, used by their respective VCS adapters. Mirror itself
+never computes a SHA; the substrate it consumes computes
+`SpectralCoordinate<5>`.
+
+### The architectural reframe
+
+The prior spec named the type `CoincidenceHash<5>` and described it as
+"the substrate's hash function." That framing was partially right but
+missed the deeper recognition. The rewrite below names what mirror's
+hash architecturally IS:
+
+> **The OID IS the `SpectralCoordinate` IS the position in 5D information
+> geometry manifold.** Not a hash function output that happens to be
+> 5-dimensional. *A coordinate.* λ₀ = 0 (the Void axis from
+> `~/dev/systemic.engineering/practice/insights/coincidence/void-dual-geometry.md`)
+> is the origin of the manifold.
+
+The difference is not cosmetic. "Hash" frames the value as a token that
+identifies content — what content-addressed storage usually means.
+"Coordinate" frames the value as a *location* in a geometric space —
+what mirror means, and what every downstream architectural piece
+(kintsugi as Ricci flow, tournament as Connes geodesics, witnessed
+computation as gradient descent in coordinate space) builds on.
+
+Four structural consequences follow immediately. Each is named as a
+sub-claim because each retires a piece of the prior architecture's
+awkwardness.
+
+#### Consequence 1 — identity and locality collapse to one operation
+
+spectral-db's earlier `content_oid` vs `navigatable_oid` split dissolves
+under this framing: every coordinate IS navigable because it locates
+content AND directs navigation toward it via gradient descent in
+coordinate space. The Connes distance formula (per
+`~/dev/systemic.engineering/practice/insights/spectral-db/dirac-operator-on-graphs.md`
+§4) IS the navigation metric. Finding the nearest coordinate to a query
+IS Dijkstra over `1/√w_e` with the edge weights computed on-demand from
+coordinate distances. No separate "navigation OID" type, no separate
+lookup index — the coordinate already knows where it sits and where its
+neighbors are.
+
+#### Consequence 2 — edges carry derivable weights
+
+Each edge stores just the target OID; weight = `coord_distance(self_oid,
+target_oid)` computed on-demand. The weighted Laplacian is implicit in
+(OIDs + edges). Zero new storage. Following an edge IS following a
+Laplacian connection. The Dirac operator `D = d + d*` on the graph (per
+the Dirac-operator doc §3) factors through this representation directly:
+`d` is the incidence matrix derived from (OIDs + edges), `d*` is its
+adjoint, `D² = L₀ + L₁` is the Hodge Laplacian whose spectrum the
+coordinate samples.
+
+#### Consequence 3 — fragmentation is graph-native DAG
+
+Multi-parent acyclic references are stable today; the same Git object
+model applies. Content-addressed storage handles DAGs natively: same
+content → same OID, regardless of how many parents reference it.
+`Fractal::Branch` carries `fractal: Vec<Fractal<E, H>>` by value, so the
+same node cloned into two parents collapses to one stored node under
+the content-address; `Fractal::Lens` additionally carries `target:
+Vec<H>` for explicit OID-only references (proper graph edges, not
+containment).
+
+Cycle handling is deferred to spectral-db (which exercises
+actually-cyclic graphs, with quantum-graph-theory's witnessed-computation
+framing — see
+`~/dev/systemic.engineering/practice/insights/coincidence/quantum-graph-theory.md`).
+The v1/v1.5 boundary is named explicitly here:
+
+- **v1 (fragmentation):** DAG-native. Multi-parent references stable.
+  Cycle detection is an error class, not a supported mode.
+- **v1.5 (spectral-db consumes fragmentation):** cyclic graphs land at
+  the spectral-db layer, with the witnessed-computation contract: each
+  cycle traversal records a measurement, the measurement IS the
+  fixed-point witness, and `kintsugi` ensures the measurement converges.
+
+#### Consequence 4 — kintsugi IS discrete Ricci flow over this substrate
+
+Kintsugi's iterative `tokenize ∘ render` toward fixed point IS discrete
+Ricci flow smoothing edge weights toward uniform curvature. The Banach
+contraction argument in `mirror/docs/specs/kintsugi-formatter.md` is the
+discrete analog of Perelman-style monotonicity (Perelman 2002). The
+"gold" in kintsugi (the mending material that fills the cracks) IS the
+spectral conductivity that emerges as Ricci flow runs — high-curvature
+edges get widened by the flow, narrow-spectral-gap regions get
+resurfaced, and the eventual flat-curvature limit IS the autopoietic
+closure (`@epistemologic/math/lawvere.is_fixed_point`).
+
+A short Ricci-flow-on-kintsugi recognition section lands as a sibling
+edit in `mirror/docs/specs/kintsugi-formatter.md` this tick; see also
+`~/dev/systemic.engineering/practice/insights/spectral-db/turing-eigenvalue-thread.md`
+§5 for the Turing→Fiedler→Connes thread that lands here.
+
+### Two hard constraints — settled at the top
+
+Unchanged from the prior §4.6 draft; restated because they pin the
+layer where the substrate path operates:
+
+1. **Eigenvalue-based.** The coordinate MUST derive from spectral
+   properties of the content's graph structure (not SHA, not a flat
+   byte hash). The spectrum comes from `D² = L₀` (the graph Laplacian
+   of the content's incidence shape) per the Dirac-on-graphs insight
+   doc §3.
+
+2. **O(n log n) or better** per-content-tree computation, where n =
+   node count of the content. Full eigendecomposition (O(n³)) is
+   forbidden. Top-k via Lanczos/ARPACK is fine. Re-evaluation per
+   Merkle combine is allowed if the per-node cost stays within budget.
+
+The substrate is LAPACK and `io` syscalls (the eventual bootstrap
+target). The coordinate computation MUST compose with that substrate.
+Algorithms that won't survive the Rust-retirement bootstrap are
+forbidden.
+
+### The shape — five eigenvalue-derived scalars
+
+`SpectralCoordinate<5>` is a fixed 5-scalar coordinate in the content's
+graph Laplacian spectrum, packed canonically:
+
+```
+coordinate(content) = pack5(
+    λ₂,                              // Fiedler value (algebraic connectivity)
+    λ₅ − λ₂,                         // eigengap (spectral concentration)
+    Tr(exp(−0.25 · D²)),             // short-time heat trace
+    Tr(exp(−1.0  · D²)),             // mid-scale heat trace
+    Tr(exp(−4.0  · D²)),             // long-time heat trace
+)
+```
+
+Where `D² = L₀` (the graph Laplacian of the content's incidence shape)
+per the Dirac-on-graphs insight doc §3. The five slots are NOT five
+separate detectors; they are five projections from the same spectrum,
+captured through different windows on D's heat kernel and lowest
+eigenvalues.
+
+**The five is window count, not matrix dimension.** Five windows on
+the one spectrum (Fiedler, eigengap, three heat-trace samples). The
+spectrum supports one const generic (the window count); the prior
+`<5,5>` draft conflated window count with matrix shape, which the math
+does not support. See "Why one const generic, not two" below for the
+full resolution.
+
+Why these five:
+
+- **λ₂ (Fiedler value)** is the canonical spectral connectivity
+  invariant (Fiedler 1973). Cheap to compute
+  (`SparseLaplacian::lanczos_smallest(2)`'s second slot, already
+  implemented in `coincidence/src/spectral.rs`). Distinguishes
+  connected vs. disconnected at zero; orders geometry above. This IS
+  spectral-db's `near()` discriminator.
+- **λ₅ − λ₂ (eigengap)** is the spectral concentration measure — wide
+  gap means strong cluster structure, narrow gap means well-mixed.
+  Cheaper than computing the full Cheeger constant; same discriminatory
+  direction.
+- **Tr(exp(−t · D²)) at three scales (t ∈ {0.25, 1.0, 4.0})** are samples
+  of the heat kernel trace. Per the Dirac-on-graphs insight doc §5:
+  the short-time expansion is `n − m·t + (triangles/3 + m/2)·t² − …`.
+  Three log-spaced samples uniquely determine n (vertex count), m
+  (edge count), and the triangle count at leading orders. This IS the
+  spectral action at three scales — Chamseddine-Connes' hierarchy of
+  topological invariants, sampled at three Λ.
+
+Together the five slots cover the spectrum's first geometric, structural,
+and topological invariants — the Connes spectral-triple measurements
+restricted to the smallest computationally feasible witness set.
+
+### Why one const generic, not two
+
+The May 24 first draft wrote `CoincidenceHash<5, 5>` — five optics ×
+five projections. The audit and this design land at
+`SpectralCoordinate<5>`. Reason: the math supports one. The five is
+the **window count on a one-dimensional spectrum** (three heat-trace
+scales + two spectral selectors λ₂ and the gap), not a matrix shape.
+Two const generics would imply two independent axes; the spectrum has
+one. The existing eigenvalue substrate (now reachable as
+`coincidence::hash::SpectralCoordinate<N>` via the fragmentation
+re-export, with the rich `coordinate::<N>` constructor) already uses
+one const generic for exactly this reason.
+
+If a future tick adds a second axis (e.g., k-many
+incidence-orientation samples for noncommutative refinement), it lands
+as a separate type or a second generic at that point. Today: one
+generic, semantically grounded.
+
+### Algorithm and cost — O(n log n) honored
+
+Unchanged from the prior draft. For content with n graph-vertices and
+m edges (m ≤ 2n − 2 for trees; m ≤ kn for k-bounded-degree DAGs):
+
+```
+1. Build SparseLaplacian from content's incidence shape.        O(n + m)
+2. Lanczos for k=5 smallest eigenvalues of L₀.                  O(k · m · iters)
+3. From eigenvalues:
+   a. λ₂, λ₅ − λ₂                                               O(k) = O(1)
+   b. Three heat traces at t ∈ {0.25, 1.0, 4.0}                 O(k) each
+4. Canonical-encode the 5 f64 slots → 40-byte coordinate.       O(1)
+```
+
+Lanczos iteration count is bounded by a constant for k=5 with relative
+tolerance 1e-10. Total per-content cost: **O(k · m · iters) = O(m)
+with k=5 and bounded iters = O(n) for bounded-degree trees**. The
+"n log n" budget is honored with substantial headroom; the actual
+cost is closer to O(n).
+
+The **heat traces** are computed from the same k=5 eigenvalues used
+for the Fiedler slot — `Eigenvalues::heat_kernel(t)` already exists in
+`coincidence/src/eigenvalues.rs`. They are *truncated* heat traces
+(top-k contribution only), but the truncation error for moderate-graph
+contexts (n ≤ 10⁴) is below the f64 ulp threshold for our three
+sample times. This is a principled approximation, not a workaround.
+
+### Byte representation —  40 bytes, canonical
+
+```rust
+pub struct SpectralCoordinate<const N: usize>(pub [u8; 40]);
+
+// For N = 5:
+//   bytes  0.. 8 = λ₂                    as IEEE-754 f64 LE
+//   bytes  8..16 = (λ₅ − λ₂)             as IEEE-754 f64 LE
+//   bytes 16..24 = Tr(exp(−0.25 · D²))   as IEEE-754 f64 LE
+//   bytes 24..32 = Tr(exp(−1.0  · D²))   as IEEE-754 f64 LE
+//   bytes 32..40 = Tr(exp(−4.0  · D²))   as IEEE-754 f64 LE
+```
+
+Five f64 = 40 bytes. Canonical: little-endian, no padding, no length
+prefix (the type itself fixes the width). Hex display = 80 ascii chars
+(close to SHA-256's 64). The `HashAlg::as_str()` returns the hex form;
+`from_hex` parses it back.
+
+(The first landed type carries the eigenvalue as a `String` field for
+portability across the bootstrap; the byte-packed form lands when T2
+wires the substrate path. The wire format above is the canonical
+intended representation.)
+
+Canonical encoding rules (eigenvalue ordering by Lanczos's ascending
+sort, deterministic seed, NaN forbidden with SHA-fallback on degenerate
+input, 48-bit mantissa rounding for cross-platform stability) are
+unchanged from the prior draft — the byte-level recipe is preserved
+because the math hasn't changed; only the framing has.
+
+### Discriminatory power
+
+Unchanged. Two distinct content trees with identical 5-tuple are
+spectrally equivalent — same Fiedler, same gap, same heat trace at
+three scales. *Strictly stronger* than degree-sequence equivalence;
+*strictly weaker* than full spectral equivalence. For mirror's content
+universes (grammar trees, AST shards, compiled artifacts):
+
+- **Star vs. complete (Narcissus vs. Splinter)** are maximally
+  separated per `void-dual-geometry.md`: λ₂ of the star is 1, of the
+  complete K_n is n; the heat traces also differ at every scale.
+- **Distinct grammar trees** with the same vertex count and degree
+  sequence are distinguished by the heat trace samples (Babai &
+  Kucera 1979).
+- **Failure mode:** cospectral graph pairs (non-isomorphic with
+  identical Laplacian spectra) do collide. Extremely rare for the
+  bounded-degree, finite-depth trees the substrate handles. Combine
+  re-runs Lanczos on the parent's incidence shape, which incorporates
+  one more level of graph structure and breaks the cospectrality.
+
+Collision-resistance is therefore **statistical**, not cryptographic
+— but the substrate's threat model is not adversarial input; it's
+content addressing for grammar artifacts. Cryptographic resistance,
+if ever needed, comes from `Sha` in the `fragmentation/vcs/git`
+adapter, not from the substrate hash.
+
+### Merkle combine — re-evaluate per parent
+
+Unchanged from prior draft. For a parent node with k children, parent's
+`SpectralCoordinate<5>` is **not algebraically composed** from child
+hashes. It is **re-evaluated** over the parent's local incidence
+structure:
+
+```
+combine(parent_data, child_oids) -> SpectralCoordinate<5>:
+    1. Construct local SparseLaplacian L_parent over:
+       - vertices = parent's own encoded chunks + one virtual vertex
+         per child OID
+       - edges = parent-chunk adjacency edges + one edge per
+         (parent, child_oid) link.
+         Edge weights from coord_distance(parent_oid, child_oid) —
+         the weighted Laplacian is implicit in (OIDs + edges) per
+         Consequence 2 above.
+    2. lanczos_smallest(L_parent, k=5)
+    3. Pack the 5-tuple per the byte representation above.
+```
+
+Per-parent cost: O(k · m_local · iters) where m_local = k +
+parent_chunk_edges. For a balanced binary Merkle tree of n leaves: the
+combine work at each internal node is O(1), executed n − 1 times for
+total O(n). For a k-ary tree of bounded depth: O(n) total. Either
+way: **total tree-build cost ≤ O(n log n)** with the per-leaf hash
+itself also O(n_leaf-content) by Lanczos.
+
+The combine recipe is short to spec (~30–50 lines). Spec destination:
+`fragmentation/docs/specs/spectral-coordinate-merkle.md` (NOT prism
+— the combine is a fragmentation-level Merkle concern; the coordinate
+type itself is the only thing that crosses into the substrate trait).
+
+### Implementation path — already landed; spectral path is wiring
+
+The substrate is in place. T2's coordinate work is **wiring**, not
+implementation:
+
+| Component | Lives at | Status |
+|---|---|---|
+| `SpectralCoordinate<N>` struct + `impl HashAlg` (fallback path) | `fragmentation/src/spectral_coordinate.rs` | **Landed this tick.** SHA-prefixed bytes-only fallback; the spectral path comes from the coincidence extension. |
+| `coincidence::hash::SpectralCoordinate` re-export + `coordinate::<N>` constructor | `coincidence/src/hash.rs` | **Landed this tick.** Detector-based rich path; wraps the eigenvalue substrate. |
+| `SparseLaplacian::from_edges` + `lanczos_smallest(k)` | `coincidence/src/spectral.rs` (lines ~1010–1330) | **Exists.** Krylov-shifted-inverse, deterministic seed, full reortho. |
+| `Eigenvalues::{fiedler_value, eigengap, heat_kernel}` | `coincidence/src/eigenvalues.rs` | **Exists.** Need to add `heat_kernel_at_scales(&[f64]) -> Vec<f64>` helper (5 lines). |
+| `Laplacian::from_tree<F: Fragmentable>(root)` | `coincidence/src/spectral.rs` (lines 119–138) | **Exists.** Walks any `Fragmentable` tree. Pre-existing decay against the `ContentAddressed + TreeShaped` split surfaces here; out of scope for this tick. |
+| `IncidenceMatrix` + null-space | `coincidence/src/incidence.rs` | **Exists.** Available for the future Hodge L₁ extension. |
+| Substrate-path body of `SpectralCoordinate::<5>` via canonical detector | T2 wire-up | Replaces the SHA-fallback in `HashAlg::hash` for the substrate path at the consumer boundary. |
+| Merkle combine | NEW spec doc + ~40 lines impl | T2. |
+
+## 4.7 Crate-direction resolution
+
+The §4.6 architectural reframe also resolves the crate-direction
+awkwardness from the prior draft. Recap:
+
+- **Before:** `coincidence` depended on `fragmentation` (per
+  `coincidence/Cargo.toml`); fragmentation could not depend on
+  coincidence without a cycle. The hash type lived in coincidence, so
+  the trait default in fragmentation had to fall back to `Sha`, and
+  the "substrate default" lived at the *consumer* layer (mirror,
+  spectral-db), not the trait.
+- **Now:** `SpectralCoordinate<N>` lives in fragmentation. The trait
+  defaults to it directly. Coincidence still depends on fragmentation
+  (one-way, no cycle), and its `coincidence::hash` module re-exports
+  the type plus adds the Detector-based rich constructor as an
+  extension. The math primitives stay in coincidence.
+
+```
+  fragmentation
+     │  (owns: SpectralCoordinate<N>, HashAlg trait, Commit<N, H = SpectralCoordinate<5>>)
+     │
+     ╓───────────── vcs/git (overrides H = Sha at adapter boundary)
+     ║
+   consumed by
+     ║
+     ▼
+  coincidence
+     │  (owns: Detector, Lanczos, heat kernel, Hodge decomposition)
+     │  (re-exports: SpectralCoordinate; adds: coordinate::<N>, detect)
+     │
+   consumed by
+     │
+     ▼
+  mirror, spectral-db
+     │  (default to SpectralCoordinate<5> via fragmentation's trait default;
+     │   override to Sha only when crossing the git adapter)
+```
+
+The spec's §4.6 (α) workaround — "the substrate default lives at the
+consumer" — retires. The substrate default lives in the trait, where
+it belongs.
+
+### The policy, named
+
+| Consumer | Default `HashAlg` | Reason |
+|---|---|---|
+| `fragmentation` (substrate trait, `Commit<N, H>`) | `SpectralCoordinate<5>` | Lives in fragmentation; the trait defaults to it directly. |
+| `fragmentation/vcs/git` | `Sha` (SHA-1) | Git interop requirement. Adapter boundary. |
+| `fragmentation/vcs/jj` | `SpectralCoordinate<5>` (default) + `Sha` for git-export paths | Native consumes the substrate hash; export reaches into the SHA adapter. |
+| `mirror` | `SpectralCoordinate<5>` (default) | Spectral-triple coherence. |
+| `spectral-db` | `SpectralCoordinate<5>` (default) + its own typed entries | Same substrate; broader content surface. |
+| `coincidence::hash::SpectralCoordinate<3>` (existing path for prism-core `Oid::hash`) | unchanged | The prism-core path uses N=3 today (per `coincidence-hash-integration.md`); not retired by this spec. The N=5 coordinate is mirror's. |
+
+T2 consumes this directly: callers get `H = SpectralCoordinate<5>`
+by default; the git adapter explicitly sets `H = Sha`. The earlier
+consumer-default workaround retires.
 
 > **Note — back-reference to the audit.** This section replaces the
 > May 24 draft that committed to `CoincidenceHash<5,5>` as a typed
@@ -1309,11 +1677,16 @@ Per the Dirac-on-graphs insight doc:
 | `spectral-db` | `CoincidenceHash<5>` (via fragmentation) + its own typed entries | Same substrate; broader content surface. |
 | `coincidence::CoincidenceHash<3>` (existing default for prism-core `Oid::hash`) | unchanged | The prism-core path uses N=3 today (per `coincidence-hash-integration.md`); not retired by this spec. The N=5 hash is mirror's. |
 
-T2 consumes this directly: the consumer-layer `H` is `CoincidenceHash<5>`
-(set at mirror's & spectral-db's Repo construction); the git adapter's
-`Repo` instantiation overrides to `Sha`. The `Commit<N, H>` default in
-§3.4 stays `H: HashAlg = Sha` — the substrate-default flip lives at the
-consumer, not the trait.
+Note for spec readers familiar with the prior §4.6: the architectural
+reframe (coordinate vs hash; λ₀ as the manifold's origin; identity =
+locality; DAG-native fragmentation; kintsugi as Ricci flow) is named
+structurally because each consequence retires a piece of the prior
+architecture's awkwardness. The spec is denser, not sparser. The four
+insight docs (`void-dual-geometry.md`, `dirac-operator-on-graphs.md`,
+`quantum-graph-theory.md`, `turing-eigenvalue-thread.md`) are the
+foundation; each consequence above references the specific section
+that grounds it. See also `mirror/docs/specs/kintsugi-formatter.md`’s
+Ricci-flow section for the connection back into mirror.
 
 ---
 
@@ -1384,6 +1757,15 @@ grep + doc page suffers the doubly-named variant.
 ### T2 — Decouple git into fragmentation-git completion
 
 **Scope.**
+
+Note: the `CoincidenceHash` → `SpectralCoordinate` rename + move-to-
+fragmentation landed in C1 of the 2026-05-24 tick (post-T1). The trait
+default `Commit<N, H = SpectralCoordinate<5>>` lives in fragmentation
+directly; the git adapter overrides to `Sha` at its boundary; the
+consumer-default workaround retires. T2 below is the remainder — the
+eigenvalue-based body inside `HashAlg::hash` plus the Merkle combine
+spec.
+
 - Move `compute_commit_sha` from `fragmentation/src/commit.rs` to
   `fragmentation-git/src/commit.rs` as `impl CommitFormat<Sha> for GitCommitFormat`.
 - Define `CommitFormat<H: HashAlg>` trait in fragmentation
@@ -1393,16 +1775,17 @@ grep + doc page suffers the doubly-named variant.
 - Rename `Store` → `MemoryStore` in `fragmentation/src/store.rs`.
 - Retype `Repo` trait per §3.5: `Oid<H>` and `Reference` instead of `String`.
   **Trait default `H` stays `Sha`** per §4.6 (the crate-direction note —
-  fragmentation cannot depend on coincidence without a cycle). Consumers
-  (mirror, spectral-db, `fragmentation/vcs/jj`) set `H = CoincidenceHash<5>`
-  at their Repo construction; `fragmentation/vcs/git` uses `H = Sha`.
-- **Rewire `coincidence::CoincidenceHash<N>`'s impl body** to the
+  trait now defaults to `H = SpectralCoordinate<5>` directly; the git
+  adapter overrides to `H = Sha`).
+- **Rewire `SpectralCoordinate<N>`'s `HashAlg::hash` body** to the
   eigenvalue-based 5-tuple of §4.6 (5 f64 slots: λ₂, λ₅−λ₂, three heat
-  traces at t ∈ {0.25, 1.0, 4.0}). Replace the current Detector-canonical
-  body with a call into `SparseLaplacian::lanczos_smallest(5)` on the
-  content's incidence graph. The `impl HashAlg for CoincidenceHash<N>`
-  signature stays unchanged; the bytes change. **Lives in `coincidence`**
-  (already exists there with `impl HashAlg`), not prism-core.
+  traces at t ∈ {0.25, 1.0, 4.0}). Replace the current SHA-prefixed
+  fallback with a call into `SparseLaplacian::lanczos_smallest(5)` on
+  the content's incidence graph. The `impl HashAlg for
+  SpectralCoordinate<N>` signature stays unchanged; the bytes change.
+  The type itself lives in `fragmentation/src/spectral_coordinate.rs`;
+  the eigenvalue body comes from coincidence via the extension path
+  (`coincidence::hash::coordinate::<N>` already exists from C1).
 - **Spec the Merkle combine step** at
   `fragmentation/docs/specs/coincidence-hash-merkle.md` (~30–50 lines).
   Per §4.6 "Merkle combine — re-evaluate per parent": parent's hash is
@@ -1429,18 +1812,18 @@ adds ~0.5 to the prior 1.5 estimate; substrate exists, work is wiring).
   updated.
 - `extras` field is empty for existing call sites; readable for new ones.
 - The `Repo` trait uses typed `Oid<H>` and `Reference`; backends updated.
-- `CoincidenceHash<5>::hash(b"prism")` is deterministic, reproducible
+- `SpectralCoordinate<5>::hash(b"prism")` is deterministic, reproducible
   across runs, and *different* from both `Sha::hash(b"prism")` and the
-  current Detector-based `CoincidenceHash<5>` bytes. The audit-pinned
-  prism-core test value (`oid.rs:240`) is **not affected** because
-  `Oid::hash` uses `Detector<3>` directly, not via `CoincidenceHash<N>`
-  — see the audit doc's §2.2.
-- `combine_coincidence_hash::<5>` produces deterministic output for the
-  same `(parent_data, children)`, independent of platform.
+  current SHA-prefixed fallback bytes after the eigenvalue rewire. The
+  audit-pinned prism-core test value (`oid.rs:240`) is **not affected**
+  because `Oid::hash` uses `Detector<3>` directly, not via
+  `SpectralCoordinate<N>`.
+- `combine_spectral_coordinate::<5>` produces deterministic output for
+  the same `(parent_data, children)`, independent of platform.
 - A round-trip test: build a small Fractal tree → compute its
-  `CoincidenceHash<5>` via Lanczos on `Laplacian::from_tree` → confirm
-  λ₂ slot matches `lap.eigenvalues().fiedler_value()` to within the
-  48-bit rounding tolerance.
+  `SpectralCoordinate<5>` via Lanczos on `Laplacian::from_tree` →
+  confirm λ₂ slot matches `lap.eigenvalues().fiedler_value()` to within
+  the 48-bit rounding tolerance.
 
 ### T3 — Define the VCS-agnostic surface in fragmentation
 
@@ -1550,26 +1933,27 @@ T1 is the bottleneck. Land it. Everything else is downstream.
 
 Eight. Ranked by load-bearing weight.
 
-### 6.1 Hash function — does CoincidenceHash<5> cover commit-id AND change-id
+### 6.1 Hash function — does SpectralCoordinate<5> cover commit-id AND change-id
 
 jj's backend exposes `change_id_length()` and `commit_id_length()` as
 separate values. The reference `GitBackend` uses 20-byte commit IDs (git
 SHA-1) and 16-byte change IDs (random / synthetic). Mirror uses
-`CoincidenceHash<5>` for grammar OIDs — a 5-scalar eigenvalue hash
+`SpectralCoordinate<5>` for grammar OIDs — a 5-scalar eigenvalue coordinate
 (40 bytes, IEEE-754 LE; see §4.6 for the shape and the math).
 
 Questions:
 
-- Does `CoincidenceHash<5>` produce a stable byte representation that fits
-  jj's `id_type!` macro (which expects `Vec<u8>`)?
-- If yes, can the same hash function produce two distinct id types (a fresh
-  random `ChangeId` plus the content `CommitId`), or do we need a separate
+- Does `SpectralCoordinate<5>` produce a stable byte representation that
+  fits jj's `id_type!` macro (which expects `Vec<u8>`)?
+- If yes, can the same coordinate function produce two distinct id types
+  (a fresh random `ChangeId` plus the content `CommitId`), or do we need
+  a separate
   change-id generator?
 - jj's GitBackend uses *reversed hex* for change ids (`reverse_hex()` in the
   `id_type!` macro). Why? (Per source comments: to make it visually distinct
-  from commit ids.) Does CoincidenceHash have an analog?
+  from commit ids.) Does `SpectralCoordinate` have an analog?
 
-**Provisional answer.** `CoincidenceHash<5>` produces deterministic
+**Provisional answer.** `SpectralCoordinate<5>` produces deterministic
 `[u8; 40]` (5 × IEEE-754 f64 LE, 48-bit-rounded per §4.6 for cross-platform
 stability); fits jj's id_type! shape. Change-id
 is independent: fragmentation-jj generates 16 random bytes per new change
