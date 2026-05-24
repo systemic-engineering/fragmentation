@@ -6,6 +6,8 @@ description = "Git transport layer for fragmentation content store"
 
 [dependencies]
 fragmentation = { path = "../.." }
+git2 = "0.19"
+dashmap = "6"
 
 [dev-dependencies]
 tempfile = "3"

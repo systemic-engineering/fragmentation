@@ -463,7 +463,9 @@ dependencies = [
 name = "fragmentation-git"
 version = "0.1.0"
 dependencies = [
+ "dashmap",
  "fragmentation",
+ "git2",
  "tempfile",
 ]
 
