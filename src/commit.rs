@@ -135,7 +135,6 @@ impl<N, H: HashAlg> Draft<N, H> {
     }
 }
 
-
 impl<N, H: HashAlg> Draftable for Draft<N, H> {
     type Node = N;
     type Hash = H;
@@ -321,5 +320,4 @@ mod tests {
         assert!(matches!(child, Commit::Child { .. }));
         assert_ne!(child.sha(), root.sha());
     }
-
 }

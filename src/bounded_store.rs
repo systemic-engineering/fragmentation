@@ -112,7 +112,6 @@ impl<N: Clone> BoundedStore<N> {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -198,4 +197,3 @@ mod tests {
         assert_eq!(store.total_bytes(), 0);
     }
 }
-

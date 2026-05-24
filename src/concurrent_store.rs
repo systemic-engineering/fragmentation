@@ -107,7 +107,6 @@ impl<N: Fragmentable + Clone, H: HashAlg> ConcurrentStore<N, H> {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -259,5 +258,4 @@ mod tests {
         let _names = store.ref_names();
         let _keys = store.keys();
     }
-
 }

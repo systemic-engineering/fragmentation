@@ -206,7 +206,11 @@ where
     }
 
     // Reconstruct with resolved data and merged children
-    F::reconstruct(resolved.self_ref().clone(), resolved.data().clone(), merged_children)
+    F::reconstruct(
+        resolved.self_ref().clone(),
+        resolved.data().clone(),
+        merged_children,
+    )
 }
 
 // ---------------------------------------------------------------------------

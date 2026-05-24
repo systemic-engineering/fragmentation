@@ -145,10 +145,7 @@ where
         let bytes = std::fs::read(&path).ok()?;
         let data = <N::Data as crate::encoding::Decode>::decode(&bytes).ok()?;
         use crate::sha::HashAlg as _;
-        let ref_ = crate::ref_::Ref::new(
-            N::Hash::from_hex(oid),
-            "frgmnt",
-        );
+        let ref_ = crate::ref_::Ref::new(N::Hash::from_hex(oid), "frgmnt");
         Some(N::reconstruct(ref_, data, vec![]))
     }
 
@@ -284,7 +281,11 @@ mod tests {
         store.insert_persistent(oid(&b), b, 50);
         store.insert_persistent(oid(&c), c, 50);
         let path = object_path(&store.root, &ka);
-        assert!(path.exists(), "evicted object should be on disk: {:?}", path);
+        assert!(
+            path.exists(),
+            "evicted object should be on disk: {:?}",
+            path
+        );
     }
 
     #[test]

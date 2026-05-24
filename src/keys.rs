@@ -519,33 +519,7 @@ impl GPG {
     }
 }
 
-// ===========================================================================
-// from_repo (behind `git` feature)
-// ===========================================================================
-
-#[cfg(feature = "git")]
-impl Local {
-    /// Detect signing configuration from a git repository.
-    /// Reads gpg.format and user.signingkey from git config.
-    pub fn from_repo(repo: &git2::Repository) -> Result<Self, LocalError> {
-        let config = repo
-            .config()
-            .and_then(|c| c.open_level(git2::ConfigLevel::Local))
-            .map_err(|e| LocalError::Decode(format!("failed to read git config: {}", e)))?;
-
-        let format = config.get_string("gpg.format").unwrap_or_default();
-        let signing_key = config.get_string("user.signingkey").ok();
-
-        match (format.as_str(), signing_key) {
-            #[cfg(feature = "ssh")]
-            ("ssh", Some(key_path)) => {
-                let ssh_key =
-                    SSH::from_path(&key_path).map_err(|e| LocalError::Ssh(format!("{}", e)))?;
-                Ok(Local::Ssh(Box::new(ssh_key)))
-            }
-            #[cfg(feature = "gpg")]
-            ("openpgp" | "", Some(key_id)) => Ok(Local::Gpg(GPG::new(key_id))),
-            _ => Ok(Local::None),
-        }
-    }
-}
+// `Local::from_repo` (detecting signing config from a git2::Repository) moved
+// to `fragmentation-git::keys::from_repo` per T1 §2.1 — the substrate carries
+// no `git2` import. See `vcs/git/src/keys.rs` for the relocation when T2 wires
+// the free-function form.

@@ -442,13 +442,9 @@ name = "fragmentation"
 version = "0.1.0"
 dependencies = [
  "chacha20poly1305",
- "clap",
  "dashmap",
- "fuser",
- "git2",
  "hex",
  "hkdf",
- "libc",
  "prism-core",
  "serde",
  "serde_json",
@@ -463,9 +459,13 @@ dependencies = [
 name = "fragmentation-git"
 version = "0.1.0"
 dependencies = [
+ "clap",
  "dashmap",
  "fragmentation",
+ "fuser",
  "git2",
+ "hex",
+ "libc",
  "tempfile",
 ]
 

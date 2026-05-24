@@ -108,10 +108,9 @@ where
         // FrgmntStore::get uses the content OID string as key
         match self.get(oid.as_str()) {
             Some(node) => prism_core::Imperfect::Success(node),
-            None => prism_core::Imperfect::Failure(
-                format!("not found: {}", oid),
-                StoreLoss::zero(),
-            ),
+            None => {
+                prism_core::Imperfect::Failure(format!("not found: {}", oid), StoreLoss::zero())
+            }
         }
     }
 

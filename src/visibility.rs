@@ -242,10 +242,16 @@ mod tests {
     fn protected_with_oid_hash() {
         let oid = prism_core::Oid::hash(b"protected-data");
         let r = Ref::new(oid, "protected");
-        let protected: Protected<PlainKeys, prism_core::Oid> =
-            Protected::new(r.clone(), b"ciphertext".to_vec(), Signature::new(PlainKeys, vec![]));
+        let protected: Protected<PlainKeys, prism_core::Oid> = Protected::new(
+            r.clone(),
+            b"ciphertext".to_vec(),
+            Signature::new(PlainKeys, vec![]),
+        );
         // Fragmentable should use Oid as Hash
-        assert_eq!(Fragmentable::self_ref(&protected).sha.as_str(), r.sha.as_str());
+        assert_eq!(
+            Fragmentable::self_ref(&protected).sha.as_str(),
+            r.sha.as_str()
+        );
         assert_eq!(Fragmentable::data(&protected), &b"ciphertext".to_vec());
     }
 

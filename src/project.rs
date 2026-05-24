@@ -51,10 +51,7 @@ pub fn project(source_dir: &Path, manifest: &Manifest) -> Result<Projection, Pro
         }
         let content = std::fs::read(&source_path)?;
         let oid = blob_oid_bytes(&content);
-        files.insert(
-            lens.target.clone(),
-            ProjectedFile { content, oid },
-        );
+        files.insert(lens.target.clone(), ProjectedFile { content, oid });
     }
 
     Ok(Projection { files })
@@ -78,18 +75,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         fs::write(dir.path().join("hello.txt"), b"hello world").unwrap();
 
-        let manifest = Manifest::from_json(
-            br#"{"lenses": [{"source": "hello.txt", "target": "out.txt"}]}"#,
-        )
-        .unwrap();
+        let manifest =
+            Manifest::from_json(br#"{"lenses": [{"source": "hello.txt", "target": "out.txt"}]}"#)
+                .unwrap();
 
         let result = project(dir.path(), &manifest).unwrap();
         assert_eq!(result.files.len(), 1);
         assert_eq!(result.files["out.txt"].content, b"hello world");
-        assert_eq!(
-            result.files["out.txt"].oid,
-            blob_oid_bytes(b"hello world")
-        );
+        assert_eq!(result.files["out.txt"].oid, blob_oid_bytes(b"hello world"));
     }
 
     #[test]
@@ -98,10 +91,9 @@ mod tests {
         fs::create_dir_all(dir.path().join("a/b")).unwrap();
         fs::write(dir.path().join("a/b/deep.md"), b"# Deep").unwrap();
 
-        let manifest = Manifest::from_json(
-            br#"{"lenses": [{"source": "a/b/deep.md", "target": "flat.md"}]}"#,
-        )
-        .unwrap();
+        let manifest =
+            Manifest::from_json(br#"{"lenses": [{"source": "a/b/deep.md", "target": "flat.md"}]}"#)
+                .unwrap();
 
         let result = project(dir.path(), &manifest).unwrap();
         assert_eq!(result.files.len(), 1);
@@ -111,10 +103,9 @@ mod tests {
     #[test]
     fn project_missing_source_errors() {
         let dir = tempfile::tempdir().unwrap();
-        let manifest = Manifest::from_json(
-            br#"{"lenses": [{"source": "nope.txt", "target": "out.txt"}]}"#,
-        )
-        .unwrap();
+        let manifest =
+            Manifest::from_json(br#"{"lenses": [{"source": "nope.txt", "target": "out.txt"}]}"#)
+                .unwrap();
 
         let result = project(dir.path(), &manifest);
         assert!(result.is_err());
@@ -149,10 +140,9 @@ mod tests {
         fs::create_dir_all(dir.path().join("sub")).unwrap();
         fs::write(dir.path().join("sub/file.md"), content).unwrap();
 
-        let manifest = Manifest::from_json(
-            br#"{"lenses": [{"source": "sub/file.md", "target": "flat.md"}]}"#,
-        )
-        .unwrap();
+        let manifest =
+            Manifest::from_json(br#"{"lenses": [{"source": "sub/file.md", "target": "flat.md"}]}"#)
+                .unwrap();
 
         let result = project(dir.path(), &manifest).unwrap();
 
