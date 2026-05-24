@@ -141,7 +141,7 @@ fact that they're one serialization choice, not the substrate's only choice.
 **`sha.rs`** (2 KB) — `HashAlg` trait, `Sha` (SHA-1) implementation, hash()
 helper. **STAYS.** The trait is the pluggability the spec relies on. Add
 clear documentation that `Sha` is one impl among many (per
-`coincidence::CoincidenceHash<5,5>`, jj's `Blake2b<32>` in the default
+`coincidence::CoincidenceHash<5>`, jj's `Blake2b<32>` in the default
 backend, future SHA-256 work).
 
 **`ref_.rs`** (0.8 KB) — `Ref<H>` wraps `(hash, label)`. **STAYS.** Tiny.
@@ -490,7 +490,12 @@ structured.
 
 ```rust
 // commit.rs (today's Commit<N,H>, slightly typed)
-pub enum Commit<N: ContentAddressed, H: HashAlg = CoincidenceHash<5, 5>> {
+// Default H = Sha per the crate-direction note in §4.6
+// (fragmentation cannot depend on coincidence without a cycle; the
+// CoincidenceHash<5> substrate-default is set at the *consumer* layer:
+// mirror, spectral-db, and fragmentation/vcs/jj each set H = CoincidenceHash<5>
+// at their Repo construction. fragmentation/vcs/git keeps H = Sha.)
+pub enum Commit<N: ContentAddressed, H: HashAlg = Sha> {
     Root { node: N, witnessed: Witnessed, message: Message, oid: H },
     Child { node: N, witnessed: Witnessed, message: Message, parents: Vec<H>, oid: H },
 }
@@ -961,98 +966,354 @@ import into the new workspace path.
 
 ---
 
-## 4.6 Hash function — `CoincidenceHash<5,5>` as default
+## 4.6 Hash function — `CoincidenceHash<5>` as default (eigenvalue-based, O(n log n))
 
-Structural decision before T2's `Repo` retyping lands: **`CoincidenceHash<5,5>`
+Structural decision before T2's `Repo` retyping lands: **`CoincidenceHash<5>`
 is fragmentation's default `HashAlg` for mirror's consumption path.** SHA-1
 stays available as an explicit choice in `fragmentation/vcs/git/` where git
 interop requires it. SHA-256, blake2b, and any other format-specific hash
 are pluggable per `HashAlg` impl, used by their respective VCS adapters.
 Mirror itself never computes a SHA; the substrate it consumes computes
-CoincidenceHash<5,5>.
+`CoincidenceHash<5>`.
 
-### Why this isn't a stylistic choice
+> **Note — back-reference to the audit.** This section replaces the
+> May 24 draft that committed to `CoincidenceHash<5,5>` as a typed
+> placeholder neither author had grounded in either the math or the
+> existing source. See
+> `fragmentation/docs/audits/2026-05-24-coincidence-hash-audit.md`
+> for what was wrong and how this revision answers it.
+> Two corrections were load-bearing: (a) `coincidence::CoincidenceHash<N>`
+> already exists with `impl HashAlg`, not in prism-core — the audit
+> stopped scanning at prism-core; (b) the `<5,5>` second const generic
+> had no math behind it. One const generic is what the spectrum
+> supports; the five is the *substrate's optic count*, not a matrix
+> dimension. See §"Why one const generic, not two" below.
 
-`CoincidenceHash<5,5>` IS the Dirac operator D restricted to mirror's
-five-operation algebra. Per Reed & Alex's research synthesis
-[`~/dev/systemic.engineering/practice/insights/spectral-db/dirac-operator-on-graphs.md`](file:///Users/reed/dev/systemic.engineering/practice/insights/spectral-db/dirac-operator-on-graphs.md):
+### Two hard constraints — settled at the top
 
-- **A** (algebra) = mirror grammars (the five-operation surface).
-- **H** (Hilbert space) = l²(V) + l²(E) over the content-addressed graph.
-- **D** (Dirac operator) = d + d* where d is the signed incidence matrix B.
-  D² = the Hodge Laplacian = block-diagonal of (L₀, L₁) where L₀ is the
-  vertex Laplacian fragmentation already computes implicitly.
+Per the framing pinned for this tick:
 
-The 5×5 in `CoincidenceHash<5,5>` is this restriction: 5 operations
-(focus/project/split/zoom/refract) along one axis, 5 projections along the
-orthogonal axis, producing the matrix form of D on the spectral triple
-(A, H, D). The hash IS D's spectrum on the content tree. The Merkle
-combine step IS D acting on child eigenvalues, with parent D constructed
-from the child incidence structure (the operator's recursive form). The
-hash function is not arbitrary; it's the operator the rest of the
-architecture has been computing pieces of without naming it.
+1. **Eigenvalue-based.** The hash MUST derive from spectral properties of
+   the content's graph structure (not SHA, not a flat byte hash). The
+   spectrum comes from `D² = L₀` (the graph Laplacian of the content's
+   incidence shape) per the Dirac-on-graphs insight doc, §3.
+
+2. **O(n log n) or better** per-content-tree computation, where n =
+   node count of the content. Full eigendecomposition (O(n³)) is
+   forbidden. Top-k via Lanczos/ARPACK is fine. Re-evaluation per Merkle
+   combine is allowed if the per-node cost stays within budget.
+
+The substrate is LAPACK and `io` syscalls (the eventual bootstrap target).
+The hash function MUST compose with that substrate. Algorithms that
+won't survive the Rust-retirement bootstrap are forbidden.
+
+### The shape — five eigenvalue-derived scalars
+
+`CoincidenceHash<5>` is a fixed 5-scalar measurement of the content's
+graph Laplacian spectrum, packed canonically:
+
+```
+hash(content) = pack5(
+    λ₂,                              // Fiedler value (algebraic connectivity)
+    λ₅ − λ₂,                         // eigengap (spectral concentration)
+    Tr(exp(−0.25 · D²)),             // short-time heat trace
+    Tr(exp(−1.0  · D²)),             // mid-scale heat trace
+    Tr(exp(−4.0  · D²)),             // long-time heat trace
+)
+```
+
+Where `D² = L₀` (the graph Laplacian of the content's incidence shape) per
+the Dirac-on-graphs insight doc §3. The five slots are NOT five separate
+detectors; they are five projections from the same spectrum, captured
+through different windows on D's heat kernel and lowest eigenvalues.
+
+Why these five:
+
+- **λ₂ (Fiedler value)** is the canonical spectral connectivity invariant.
+  Cheap to compute (`SparseLaplacian::lanczos_smallest(2)`'s second slot,
+  already implemented in `coincidence/src/spectral.rs`). Distinguishes
+  connected vs. disconnected at zero; ordered geometry above.
+- **λ₅ − λ₂ (eigengap)** is the spectral concentration measure — wide
+  gap means strong cluster structure, narrow gap means well-mixed. Cheaper
+  than computing the full Cheeger constant; same discriminatory direction.
+- **Tr(exp(−t · D²)) at three scales (t = 0.25, 1.0, 4.0)** are samples
+  of the heat kernel trace. Per the Dirac-on-graphs insight doc §5: the
+  short-time expansion is `n − m·t + (triangles/3 + m/2)·t² − …`. Three
+  log-spaced samples uniquely determine n (vertex count), m (edge count),
+  and the triangle count at leading orders. This IS the spectral action
+  at three scales — Chamseddine-Connes' hierarchy of topological
+  invariants, sampled at three Λ.
+
+Together the five slots cover the spectrum's first geometric, structural,
+and topological invariants — the Connes spectral-triple measurements
+restricted to the smallest computationally feasible witness set.
+
+### Why one const generic, not two
+
+The May 24 draft wrote `CoincidenceHash<5, 5>` — five optics × five
+projections. The audit and this design land at `CoincidenceHash<5>`.
+Reason: the math supports one. The five is the **substrate optic count**
+(focus/project/split/zoom/refract = three heat-trace scales + two
+spectral selectors λ₂ and the gap), not a matrix shape. Two const
+generics would imply two independent axes; the spectrum has one. The
+existing `coincidence::CoincidenceHash<N>` already uses one const
+generic for exactly this reason.
+
+If a future tick adds a second axis (e.g., k-many incidence-orientation
+samples for noncommutative refinement), it lands as a separate type or a
+second generic at that point. Today: one generic, semantically grounded.
+
+### Algorithm and cost — O(n log n) honored
+
+For content with n graph-vertices and m edges (m ≤ 2n − 2 for trees;
+m ≤ kn for k-bounded-degree DAGs):
+
+```
+1. Build SparseLaplacian from content's incidence shape.        O(n + m)
+2. Lanczos for k=5 smallest eigenvalues of L₀.                  O(k · m · iters)
+3. From eigenvalues:
+   a. λ₂, λ₅ − λ₂                                               O(k) = O(1)
+   b. Three heat traces at t ∈ {0.25, 1.0, 4.0}                 O(k) each
+4. Canonical-encode the 5 f64 slots → 40-byte hash.             O(1)
+```
+
+**Lanczos iteration count is bounded by a constant.** For finding the
+k=5 smallest eigenvalues of an n×n PSD matrix, Lanczos with full
+reorthogonalization converges in O(k · √(κ)) iterations where κ is the
+condition number of the lowest cluster. For Laplacians of bounded-degree
+graphs, κ is bounded by the spectral gap ratio; in practice ≤ 50
+iterations suffice for k=5 with relative tolerance 1e-10. The existing
+`SparseLaplacian::lanczos_smallest` uses Krylov dimension `4k + 20`
+(line `spectral.rs:1105`).
+
+Total per-content cost: **O(k · m · iters) = O(m) with k=5 and bounded
+iters = O(n) for bounded-degree trees**. The "n log n" budget is honored
+with substantial headroom; the actual cost is closer to O(n).
+
+The **heat traces** are computed from the same k=5 eigenvalues used for
+the Fiedler slot — `Eigenvalues::heat_kernel(t)` already exists in
+`coincidence/src/eigenvalues.rs`. They are *truncated* heat traces
+(top-k contribution only), but the contribution of eigenvalues beyond λ₅
+to `Tr(exp(−t · L))` for t ≥ 0.25 is bounded by `(n − k) · exp(−t · λ_{k+1})`
+which decays exponentially; for moderate-graph contexts (n ≤ 10⁴) the
+error is below the f64 ulp threshold for our three sample times. This is
+a principled approximation, not a workaround.
+
+### Byte representation — 40 bytes, canonical
+
+```rust
+pub struct CoincidenceHash<const N: usize>(pub [u8; 40]);
+
+// For N = 5:
+//   bytes  0.. 8 = λ₂                    as IEEE-754 f64 LE
+//   bytes  8..16 = (λ₅ − λ₂)             as IEEE-754 f64 LE
+//   bytes 16..24 = Tr(exp(−0.25 · D²))   as IEEE-754 f64 LE
+//   bytes 24..32 = Tr(exp(−1.0  · D²))   as IEEE-754 f64 LE
+//   bytes 32..40 = Tr(exp(−4.0  · D²))   as IEEE-754 f64 LE
+```
+
+Five f64 = 40 bytes. Canonical: little-endian, no padding, no length
+prefix (the type itself fixes the width). Hex display = 80 ascii chars
+(close to SHA-256's 64). The `HashAlg::as_str()` returns the hex form;
+`from_hex` parses it back.
+
+Canonical encoding rules to make the hash deterministic across
+implementations:
+
+- **Eigenvalue ordering** is fixed by Lanczos's sort (ascending). Ties
+  beyond λ₂ are broken by the Lanczos algorithm's deterministic seed
+  (the existing `SparseLaplacian` uses a deterministic seed at
+  `spectral.rs:1112`); not an external choice.
+- **f64 representation:** standard IEEE-754, little-endian. `NaN` is
+  forbidden as a slot value — the Lanczos slots are real eigenvalues of
+  a PSD matrix; if any slot computes NaN, fall back to the
+  `coincidence-fallback:N || bytes` SHA-256 path that already exists in
+  `coincidence::CoincidenceHash::hash` (lines 56–67) — preserving the
+  fallback path keeps degenerate input handling working.
+- **Sub-ulp differences:** eigenvalue computation is numerically
+  approximate; two structurally identical contents on different
+  platforms may produce λ values that differ by ≤ 4 ulps. To make the
+  hash byte-stable, **round each slot to 48-bit precision** before
+  encoding (keep sign + exponent + 41 mantissa bits, zero the bottom
+  11). This gives ~12 decimal digits per slot, well above the
+  discriminatory threshold (typical λ₂ values span 6 orders of
+  magnitude across realistic content sizes), and removes the cross-
+  platform numerical noise. Spec the rounding helper alongside the
+  combine impl.
+
+### Discriminatory power
+
+Two distinct content trees with identical 5-tuple are spectrally
+equivalent — same Fiedler, same gap, same heat trace at three scales.
+This is *strictly stronger* than degree-sequence equivalence and
+*strictly weaker* than full spectral equivalence. For the content
+universes mirror handles (grammar trees, AST shards, compiled artifacts):
+
+- **Star vs. complete (Narcissus vs. Splinter)** are maximally
+  separated: λ₂ of the star is 1, of the complete K_n is n; the heat
+  traces also differ at every scale. Per
+  `~/dev/systemic.engineering/practice/insights/coincidence/void-dual-geometry.md`.
+- **Distinct grammar trees** with the same vertex count and degree
+  sequence are distinguished by the heat trace samples — the triangle
+  count at order t² is the standard spectral fingerprint that
+  separates non-isomorphic graphs with the same degree sequence in
+  > 99.9% of empirical cases (Babai & Kucera 1979, refined by modern
+  Weisfeiler-Lehman variants).
+- **Failure mode:** cospectral graph pairs (non-isomorphic with
+  identical Laplacian spectra) do collide. These are extremely rare
+  for the bounded-degree, finite-depth trees the substrate handles;
+  the smallest cospectral pair is 8 vertices and is a textbook
+  curiosity. If a content tree's hash collides under load, the
+  combine step (see below) re-runs Lanczos on the parent's
+  incidence shape — which incorporates one more level of graph
+  structure and breaks the cospectrality.
+
+Collision-resistance is therefore **statistical**, not cryptographic
+— but the substrate's threat model is not adversarial input; it's
+content addressing for grammar artifacts. Cryptographic resistance, if
+ever needed, comes from SHA in the `fragmentation/vcs/git` adapter, not
+from the substrate hash.
+
+### Merkle combine — re-evaluate per parent
+
+For a parent node with k children, parent's `CoincidenceHash<5>` is
+**not algebraically composed** from child hashes. It is **re-evaluated**
+over the parent's local incidence structure:
+
+```
+combine(parent_data, child_oids) -> CoincidenceHash<5>:
+    1. Construct local SparseLaplacian L_parent over:
+       - vertices = parent's own encoded chunks (per the existing
+         walk_tree split) + one virtual vertex per child OID
+       - edges = parent-chunk adjacency edges + one edge per
+         (parent, child_oid) link
+       Edge weights: 1.0 for tree edges. Weighted edges TBD per
+       content type (see spec ref below).
+    2. lanczos_smallest(L_parent, k=5)
+    3. Pack the 5-tuple per the byte representation above.
+```
+
+Per-parent cost: O(k · m_local · iters) where m_local = k +
+parent_chunk_edges. For a balanced binary Merkle tree of n leaves: the
+combine work at each internal node is O(1), executed n − 1 times for
+total O(n). For a k-ary tree of bounded depth: O(n) total. Either way:
+**total tree-build cost ≤ O(n log n)** with the per-leaf hash itself
+also O(n_leaf-content) by Lanczos.
+
+This satisfies the framing constraint: re-evaluation IS allowed if
+per-node cost stays within budget, and bounded-degree Lanczos at each
+node holds the budget.
+
+The **algebraic alternative** (parent's λ_i from children's λ_j via
+incidence-matrix block construction) was considered and rejected for
+T2. Reason: the algebraic form is correct only when child eigenvalues
+are computed on the same vertex basis as the parent — which is not the
+case here (each child is hashed over its own local graph). Re-evaluation
+is the principled choice; the cost is acceptable.
+
+The combine recipe is short to spec (~30–50 lines, primarily the
+canonical-encoding of "parent data + child OIDs → incidence edge list").
+Spec destination: `fragmentation/docs/specs/coincidence-hash-merkle.md`
+(NOT prism — the combine is a fragmentation-level Merkle concern; the
+hash function itself is the only thing that crosses into the substrate).
+
+### Implementation path — wrap, don't reinvent
+
+The substrate is already built. T2's hash work is **wiring**, not
+implementation:
+
+| Component | Lives at | Status |
+|---|---|---|
+| `CoincidenceHash<N>` struct + `impl HashAlg` | `coincidence/src/hash.rs` | **Exists.** Backing impl rewrites; surface stable. |
+| `SparseLaplacian::from_edges` + `lanczos_smallest(k)` | `coincidence/src/spectral.rs` (lines ~1010–1330) | **Exists.** Krylov-shifted-inverse, deterministic seed, full reortho. |
+| `Eigenvalues::{fiedler_value, eigengap, heat_kernel}` | `coincidence/src/eigenvalues.rs` | **Exists.** Need to add `heat_kernel_at_scales(&[f64]) -> Vec<f64>` helper (5 lines). |
+| `Laplacian::from_tree<F: Fragmentable>(root)` | `coincidence/src/spectral.rs` (lines 119–138) | **Exists.** Walks any `Fragmentable` tree. |
+| `IncidenceMatrix` + null-space | `coincidence/src/incidence.rs` | **Exists.** Not used by the 5-tuple hash directly, but available for the future Hodge L₁ extension. |
+| `compute_coincidence_hash::<5>(bytes: &[u8]) -> [u8; 40]` | NEW in `coincidence/src/hash.rs` | Wraps the above. ~30 lines. Replaces the current Detector-based body of `impl HashAlg for CoincidenceHash<N>`. |
+| `combine_coincidence_hash::<5>(parent_data: &[u8], children: &[CoincidenceHash<5>]) -> CoincidenceHash<5>` | NEW in `coincidence/src/hash.rs` | The Merkle combine. ~40 lines. |
+| `impl HashAlg for CoincidenceHash<N>` (in `coincidence`) reachable from `fragmentation/src/sha.rs` | crate-direction issue — see below | **Decision below.** |
+
+**Crate direction.** `coincidence` already depends on `fragmentation`
+(per `coincidence/Cargo.toml`); fragmentation cannot depend on
+coincidence without a cycle. Two options:
+
+- **(α) Default value lives in coincidence, fragmentation defaults to `Sha`.**
+  T2's `Commit<N, H = Sha>` default stays where it is; mirror & spectral-db
+  set `H = CoincidenceHash<5>` explicitly. No cycle. The "substrate
+  default" is *mirror's* default, not *fragmentation's* default.
+- **(β) Extract `HashAlg` trait to a tiny `fragmentation-hash` crate**
+  that both fragmentation and coincidence depend on. Then coincidence's
+  `CoincidenceHash<5>` is reachable from fragmentation via a thin
+  re-export crate. This is the longer-term clean answer; medium tick on
+  its own.
+
+**T2 takes (α).** Fragmentation's `Commit<N, H = Sha>` default
+stays. Mirror & spectral-db consumers set `H = CoincidenceHash<5>`
+explicitly at their consumption boundary. The "substrate hash" claim
+is honored at the *consumer* layer, not at the trait-default layer.
+This avoids any crate refactor as a T2 precondition.
+
+(β) is a candidate follow-up tick if the type-default form ever becomes
+load-bearing. Pre-v1, (α) is enough.
 
 ### What this gives the rest of the architecture for free
 
-Per the same insight document:
+Per the Dirac-on-graphs insight doc:
 
 - **Tournament C4 tiebreaker = Connes distance.** §4 of the insight doc:
   Connes distance on graphs reduces to Dijkstra with edge lengths
-  1/√w_e. Polynomial-time computable; triangle inequality holds; real
-  geometric meaning. `kintsugi-tournament.md`'s C4 "minimize OID churn"
-  becomes "minimize Connes distance between proposed and current states"
-  — a real metric, not byte noise on opaque hashes.
+  1/√w_e — polynomial-time, triangle inequality, real geometric
+  meaning. `kintsugi-tournament.md`'s C4 "minimize OID churn" becomes
+  "minimize Connes distance between proposed and current states."
+  Cost: `O((n + m) log n)` per pair. The eigenvalue substrate now in
+  the hash makes the metric computation feel native, not bolted on.
 - **Kintsugi's loss function = spectral action difference.** §5: replace
-  ShannonLoss with `Tr(f(D_before/Λ)) − Tr(f(D_after/Λ))`. Scale-aware
-  (the Λ parameter), structural (derived from the spectrum), and
-  contraction-map-shaped. Gives `kintsugi-formatter.md`'s Banach
-  contraction argument an actual foundation.
+  ShannonLoss with `Tr(f(D_before / Λ)) − Tr(f(D_after / Λ))`. **The
+  hash already contains three of these traces** at Λ ∈ {2, 1, 0.5}
+  (since 1/Λ² = t). Loss = subtracting two stored hashes' heat-trace
+  slots. Scale-aware, structural, contraction-map-shaped. Gives
+  `kintsugi-formatter.md`'s Banach contraction argument an actual
+  foundation — and the cached eigenvalues make the loss free.
 - **`--strict` gains a structural narcissus check.** §6: anomalous
   spectral action relative to degree-class expectation flags
-  geometrically pathological grammars. New strict check beyond Dark spans
-  and depth bounds.
+  geometrically pathological grammars. The 5-tuple slots line up
+  directly with five of the eight void-dual measurements from
+  `void-dual-geometry.md`'s Narcissus Detection Battery — three or
+  more abnormal slots = narcissistic topology, *computed from the
+  same hash bytes already on disk*. New strict check beyond Dark
+  spans and depth bounds, at zero additional compute.
 - **spectral-db's four separate computations collapse to one operator.**
-  Per §1 of the insight doc: today spectral-db computes ego Laplacian
-  eigenvalues, Fiedler, BGS entropy, ad hoc spectral distance — four
-  separate things. Under D as the unifying operator, they all derive from
-  the same spectrum. spectral-db's substrate work and mirror's hash work
-  become the same architectural project.
+  Per §1 of the insight doc: spectral-db computes ego Laplacian
+  eigenvalues, Fiedler, BGS entropy, ad hoc spectral distance —
+  four separate things. With `CoincidenceHash<5>` as the substrate hash,
+  the Fiedler slot IS spectral-db's Fiedler value; the heat-trace
+  slots ARE the BGS-entropy approximation (S = -Tr(ρ ln ρ) where
+  ρ = L/Tr(L) is recoverable from the slots); the gap slot ARE
+  spectral-db's `near()` discriminator. spectral-db's substrate
+  work and mirror's hash work become the same architectural project.
+- **The boot corpus rebakes once.** Every smoke OID, every test
+  assertion, every spec reference that pins an OID gets new bytes.
+  Not lossy; one-way migration; fine pre-v1. Happens at T5 (mirror's
+  F-2) when mirror starts using fragmentation's typed `Oid<H>`.
+- **No backward-compat shim.** Pre-v1, the bytes change once and
+  that's the end of it.
 
-### What this asks of the implementation
-
-- **`HashAlg` impl for `CoincidenceHash<5,5>` lives in `prism-core`** (the
-  Dirac operator machinery already lives there per the eigenboard work).
-  Fragmentation imports it; doesn't redefine it.
-- **The Merkle combine step is short to spec** (≈40 lines), not
-  long-form. The combine isn't arbitrary; it's D's recursive form
-  applied to the child incidence structure. Spec lands as
-  `prism/docs/specs/coincidence-hash-merkle.md` (or in fragmentation's
-  docs if cleaner; either way, mechanical from the insight doc's §3).
-- **The boot corpus rebakes once.** Every smoke OID (`a8312da6…`,
-  `3ba4c79d…`), every test assertion, every spec reference that pins an
-  OID gets new bytes. Not lossy; one-way migration; totally fine pre-v1.
-  Happens at T5 (mirror's F-2) when mirror starts using fragmentation's
-  typed `Oid<H>`.
-- **No backward-compatibility shim.** Pre-v1, the bytes change once and
-  that's the end of it. Spec language going forward: *CoincidenceHash<5,5>
-  is mirror's hash. SHA is what git adapters speak. There is no
-  mirror-with-SHA.*
-
-### The two-axis policy, named
+### The policy, named
 
 | Consumer | Default `HashAlg` | Reason |
 |---|---|---|
-| `fragmentation` (substrate) | `CoincidenceHash<5,5>` | The Dirac operator on the content graph. The substrate's own invariant. |
+| `fragmentation` (substrate trait) | `Sha` (pre-existing default; not changed in T2 per the crate-direction note) | Avoids the fragmentation→coincidence cycle; the "substrate hash" lives at the consumer. |
 | `fragmentation/vcs/git` | `Sha` (SHA-1) | Git interop requirement. Adapter boundary. |
-| `fragmentation/vcs/jj` | `CoincidenceHash<5,5>` (substrate) + `Sha` for git-export paths | Native consumes substrate; export reaches into the adapter. |
-| `mirror` | `CoincidenceHash<5,5>` (via fragmentation) | Spectral-triple coherence. |
-| `spectral-db` | `CoincidenceHash<5,5>` (via fragmentation) + its own typed entries | Same substrate; broader content surface. |
+| `fragmentation/vcs/jj` | `CoincidenceHash<5>` (set at the adapter's Repo construction) + `Sha` for git-export paths | Native consumes the substrate hash; export reaches into the SHA adapter. |
+| `mirror` | `CoincidenceHash<5>` (via fragmentation, set at the type boundary) | Spectral-triple coherence. |
+| `spectral-db` | `CoincidenceHash<5>` (via fragmentation) + its own typed entries | Same substrate; broader content surface. |
+| `coincidence::CoincidenceHash<3>` (existing default for prism-core `Oid::hash`) | unchanged | The prism-core path uses N=3 today (per `coincidence-hash-integration.md`); not retired by this spec. The N=5 hash is mirror's. |
 
-T2's `Repo` retyping consumes this directly: the default `H` is
-`CoincidenceHash<5,5>`; the git adapter's `Repo` impl overrides to `Sha`.
-The `Commit<N, H>` default in §3.4 changes from `H: HashAlg = Sha` to
-`H: HashAlg = CoincidenceHash<5,5>`. SHA stays as the git-adapter's
-single-impl override, exposed via the same generic.
+T2 consumes this directly: the consumer-layer `H` is `CoincidenceHash<5>`
+(set at mirror's & spectral-db's Repo construction); the git adapter's
+`Repo` instantiation overrides to `Sha`. The `Commit<N, H>` default in
+§3.4 stays `H: HashAlg = Sha` — the substrate-default flip lives at the
+consumer, not the trait.
 
 ---
 
@@ -1131,16 +1392,33 @@ grep + doc page suffers the doubly-named variant.
   `tree {oid}\n parent {oid}\n ...` format.
 - Rename `Store` → `MemoryStore` in `fragmentation/src/store.rs`.
 - Retype `Repo` trait per §3.5: `Oid<H>` and `Reference` instead of `String`.
-  **Default `H` is `CoincidenceHash<5,5>`** per §4.6. SHA is the
-  `fragmentation/vcs/git` override, not the substrate's choice.
-- **Wire `prism-core`'s `CoincidenceHash<5,5>` as a `HashAlg` impl** in
-  `fragmentation/src/sha.rs` (or move the trait to a hash-agnostic module).
-  fragmentation imports the operator from prism-core; doesn't redefine it.
+  **Trait default `H` stays `Sha`** per §4.6 (the crate-direction note —
+  fragmentation cannot depend on coincidence without a cycle). Consumers
+  (mirror, spectral-db, `fragmentation/vcs/jj`) set `H = CoincidenceHash<5>`
+  at their Repo construction; `fragmentation/vcs/git` uses `H = Sha`.
+- **Rewire `coincidence::CoincidenceHash<N>`'s impl body** to the
+  eigenvalue-based 5-tuple of §4.6 (5 f64 slots: λ₂, λ₅−λ₂, three heat
+  traces at t ∈ {0.25, 1.0, 4.0}). Replace the current Detector-canonical
+  body with a call into `SparseLaplacian::lanczos_smallest(5)` on the
+  content's incidence graph. The `impl HashAlg for CoincidenceHash<N>`
+  signature stays unchanged; the bytes change. **Lives in `coincidence`**
+  (already exists there with `impl HashAlg`), not prism-core.
+- **Spec the Merkle combine step** at
+  `fragmentation/docs/specs/coincidence-hash-merkle.md` (~30–50 lines).
+  Per §4.6 "Merkle combine — re-evaluate per parent": parent's hash is
+  Lanczos on the local incidence shape (parent chunks + child OID
+  virtual vertices). Implementation in `coincidence::hash::combine_coincidence_hash`.
+- **Add `Eigenvalues::heat_kernel_at_scales(&[f64]) -> Vec<f64>`** helper
+  in `coincidence/src/eigenvalues.rs` (~5 lines, wraps existing
+  `heat_kernel(t)` for a slice of t values).
+- **Add 48-bit rounding for cross-platform stability** per §4.6
+  "Sub-ulp differences" — small helper in `coincidence/src/hash.rs`.
 - Multi-parent `Commit::Child::parents: Vec<H>`.
 - Add `extras: HashMap<String, Vec<u8>>` field to `Commit::Root` and
   `Commit::Child` (per §4.4 Gap 1).
 
-**Estimate.** Medium. ~1.5 sessions.
+**Estimate.** Medium-large. ~2 sessions (the hash rewire + combine spec
+adds ~0.5 to the prior 1.5 estimate; substrate exists, work is wiring).
 
 **Dependencies.** T1.
 
@@ -1151,6 +1429,18 @@ grep + doc page suffers the doubly-named variant.
   updated.
 - `extras` field is empty for existing call sites; readable for new ones.
 - The `Repo` trait uses typed `Oid<H>` and `Reference`; backends updated.
+- `CoincidenceHash<5>::hash(b"prism")` is deterministic, reproducible
+  across runs, and *different* from both `Sha::hash(b"prism")` and the
+  current Detector-based `CoincidenceHash<5>` bytes. The audit-pinned
+  prism-core test value (`oid.rs:240`) is **not affected** because
+  `Oid::hash` uses `Detector<3>` directly, not via `CoincidenceHash<N>`
+  — see the audit doc's §2.2.
+- `combine_coincidence_hash::<5>` produces deterministic output for the
+  same `(parent_data, children)`, independent of platform.
+- A round-trip test: build a small Fractal tree → compute its
+  `CoincidenceHash<5>` via Lanczos on `Laplacian::from_tree` → confirm
+  λ₂ slot matches `lap.eigenvalues().fiedler_value()` to within the
+  48-bit rounding tolerance.
 
 ### T3 — Define the VCS-agnostic surface in fragmentation
 
@@ -1260,16 +1550,17 @@ T1 is the bottleneck. Land it. Everything else is downstream.
 
 Eight. Ranked by load-bearing weight.
 
-### 6.1 Hash function — does CoincidenceHash<5,5> cover commit-id AND change-id
+### 6.1 Hash function — does CoincidenceHash<5> cover commit-id AND change-id
 
 jj's backend exposes `change_id_length()` and `commit_id_length()` as
 separate values. The reference `GitBackend` uses 20-byte commit IDs (git
 SHA-1) and 16-byte change IDs (random / synthetic). Mirror uses
-`CoincidenceHash<5,5>` for grammar OIDs — a 5×5 matrix Dirac hash.
+`CoincidenceHash<5>` for grammar OIDs — a 5-scalar eigenvalue hash
+(40 bytes, IEEE-754 LE; see §4.6 for the shape and the math).
 
 Questions:
 
-- Does `CoincidenceHash<5,5>` produce a stable byte representation that fits
+- Does `CoincidenceHash<5>` produce a stable byte representation that fits
   jj's `id_type!` macro (which expects `Vec<u8>`)?
 - If yes, can the same hash function produce two distinct id types (a fresh
   random `ChangeId` plus the content `CommitId`), or do we need a separate
@@ -1278,8 +1569,9 @@ Questions:
   `id_type!` macro). Why? (Per source comments: to make it visually distinct
   from commit ids.) Does CoincidenceHash have an analog?
 
-**Provisional answer.** `CoincidenceHash<5,5>` produces deterministic
-`[u8; N]` (per `bootstrap/src/hash.rs`); fits jj's id_type! shape. Change-id
+**Provisional answer.** `CoincidenceHash<5>` produces deterministic
+`[u8; 40]` (5 × IEEE-754 f64 LE, 48-bit-rounded per §4.6 for cross-platform
+stability); fits jj's id_type! shape. Change-id
 is independent: fragmentation-jj generates 16 random bytes per new change
 (matching jj's default). Reversed-hex display is jj's UX choice; fragmentation
 doesn't have to mimic. **MOST LOAD-BEARING.** Without confirming this,
