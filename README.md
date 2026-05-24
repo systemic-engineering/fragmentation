@@ -28,6 +28,27 @@ let oid = tree.content_oid();
 
 Different witness, different commit. Same content, same tree. The observer changes the record without changing the content.
 
+## DAG-native
+
+Fragmentation is **graph-native DAG** today (v1). Content addressing
+handles directed acyclic multi-parent references natively: same content
+→ same OID, regardless of how many parents reference it.
+
+- `Fractal::Branch` carries `fractal: Vec<Fractal<E, H>>` by value. The
+  same child node, cloned into two parents, collapses to one stored node
+  under the content-address.
+- `Fractal::Lens` carries `target: Vec<H>` for explicit OID-only
+  references (proper graph edges, not containment). Multiple lenses can
+  point at the same target without duplication.
+
+**Cycle handling is deferred to spectral-db (v1.5).** spectral-db
+exercises actually-cyclic graphs with the witnessed-computation
+contract: each cycle traversal records a measurement, the measurement
+IS the fixed-point witness, and `kintsugi` ensures the measurement
+converges. Fragmentation itself treats cycle detection as an error
+class; the v1/v1.5 boundary is named in
+`docs/specs/mirror-native-vcs.md` §4.6 (Consequence 3).
+
 ## Features
 
 | Feature | What it enables |
