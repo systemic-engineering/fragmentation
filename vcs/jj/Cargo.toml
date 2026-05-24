@@ -1,0 +1,8 @@
+[package]
+name = "fragmentation-jj"
+version = "0.1.0"
+edition = "2021"
+description = "jj-native VCS backend over fragmentation primitives — slot reserved per mirror-native-vcs.md T4"
+
+[dependencies]
+fragmentation = { path = "../.." }

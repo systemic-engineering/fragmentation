@@ -1,0 +1,11 @@
+[package]
+name = "fragmentation-git"
+version = "0.1.0"
+edition = "2021"
+description = "Git transport layer for fragmentation content store"
+
+[dependencies]
+fragmentation = { path = "../.." }
+
+[dev-dependencies]
+tempfile = "3"

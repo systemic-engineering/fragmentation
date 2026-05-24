@@ -1,3 +1,7 @@
+[workspace]
+members = [".", "vcs/git", "vcs/jj"]
+resolver = "2"
+
 [package]
 name = "fragmentation"
 version = "0.1.0"
