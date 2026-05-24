@@ -490,7 +490,7 @@ structured.
 
 ```rust
 // commit.rs (today's Commit<N,H>, slightly typed)
-pub enum Commit<N: ContentAddressed, H: HashAlg = Sha> {
+pub enum Commit<N: ContentAddressed, H: HashAlg = CoincidenceHash<5, 5>> {
     Root { node: N, witnessed: Witnessed, message: Message, oid: H },
     Child { node: N, witnessed: Witnessed, message: Message, parents: Vec<H>, oid: H },
 }
@@ -961,6 +961,101 @@ import into the new workspace path.
 
 ---
 
+## 4.6 Hash function — `CoincidenceHash<5,5>` as default
+
+Structural decision before T2's `Repo` retyping lands: **`CoincidenceHash<5,5>`
+is fragmentation's default `HashAlg` for mirror's consumption path.** SHA-1
+stays available as an explicit choice in `fragmentation/vcs/git/` where git
+interop requires it. SHA-256, blake2b, and any other format-specific hash
+are pluggable per `HashAlg` impl, used by their respective VCS adapters.
+Mirror itself never computes a SHA; the substrate it consumes computes
+CoincidenceHash<5,5>.
+
+### Why this isn't a stylistic choice
+
+`CoincidenceHash<5,5>` IS the Dirac operator D restricted to mirror's
+five-operation algebra. Per Reed & Alex's research synthesis
+[`~/dev/systemic.engineering/practice/insights/spectral-db/dirac-operator-on-graphs.md`](file:///Users/reed/dev/systemic.engineering/practice/insights/spectral-db/dirac-operator-on-graphs.md):
+
+- **A** (algebra) = mirror grammars (the five-operation surface).
+- **H** (Hilbert space) = l²(V) + l²(E) over the content-addressed graph.
+- **D** (Dirac operator) = d + d* where d is the signed incidence matrix B.
+  D² = the Hodge Laplacian = block-diagonal of (L₀, L₁) where L₀ is the
+  vertex Laplacian fragmentation already computes implicitly.
+
+The 5×5 in `CoincidenceHash<5,5>` is this restriction: 5 operations
+(focus/project/split/zoom/refract) along one axis, 5 projections along the
+orthogonal axis, producing the matrix form of D on the spectral triple
+(A, H, D). The hash IS D's spectrum on the content tree. The Merkle
+combine step IS D acting on child eigenvalues, with parent D constructed
+from the child incidence structure (the operator's recursive form). The
+hash function is not arbitrary; it's the operator the rest of the
+architecture has been computing pieces of without naming it.
+
+### What this gives the rest of the architecture for free
+
+Per the same insight document:
+
+- **Tournament C4 tiebreaker = Connes distance.** §4 of the insight doc:
+  Connes distance on graphs reduces to Dijkstra with edge lengths
+  1/√w_e. Polynomial-time computable; triangle inequality holds; real
+  geometric meaning. `kintsugi-tournament.md`'s C4 "minimize OID churn"
+  becomes "minimize Connes distance between proposed and current states"
+  — a real metric, not byte noise on opaque hashes.
+- **Kintsugi's loss function = spectral action difference.** §5: replace
+  ShannonLoss with `Tr(f(D_before/Λ)) − Tr(f(D_after/Λ))`. Scale-aware
+  (the Λ parameter), structural (derived from the spectrum), and
+  contraction-map-shaped. Gives `kintsugi-formatter.md`'s Banach
+  contraction argument an actual foundation.
+- **`--strict` gains a structural narcissus check.** §6: anomalous
+  spectral action relative to degree-class expectation flags
+  geometrically pathological grammars. New strict check beyond Dark spans
+  and depth bounds.
+- **spectral-db's four separate computations collapse to one operator.**
+  Per §1 of the insight doc: today spectral-db computes ego Laplacian
+  eigenvalues, Fiedler, BGS entropy, ad hoc spectral distance — four
+  separate things. Under D as the unifying operator, they all derive from
+  the same spectrum. spectral-db's substrate work and mirror's hash work
+  become the same architectural project.
+
+### What this asks of the implementation
+
+- **`HashAlg` impl for `CoincidenceHash<5,5>` lives in `prism-core`** (the
+  Dirac operator machinery already lives there per the eigenboard work).
+  Fragmentation imports it; doesn't redefine it.
+- **The Merkle combine step is short to spec** (≈40 lines), not
+  long-form. The combine isn't arbitrary; it's D's recursive form
+  applied to the child incidence structure. Spec lands as
+  `prism/docs/specs/coincidence-hash-merkle.md` (or in fragmentation's
+  docs if cleaner; either way, mechanical from the insight doc's §3).
+- **The boot corpus rebakes once.** Every smoke OID (`a8312da6…`,
+  `3ba4c79d…`), every test assertion, every spec reference that pins an
+  OID gets new bytes. Not lossy; one-way migration; totally fine pre-v1.
+  Happens at T5 (mirror's F-2) when mirror starts using fragmentation's
+  typed `Oid<H>`.
+- **No backward-compatibility shim.** Pre-v1, the bytes change once and
+  that's the end of it. Spec language going forward: *CoincidenceHash<5,5>
+  is mirror's hash. SHA is what git adapters speak. There is no
+  mirror-with-SHA.*
+
+### The two-axis policy, named
+
+| Consumer | Default `HashAlg` | Reason |
+|---|---|---|
+| `fragmentation` (substrate) | `CoincidenceHash<5,5>` | The Dirac operator on the content graph. The substrate's own invariant. |
+| `fragmentation/vcs/git` | `Sha` (SHA-1) | Git interop requirement. Adapter boundary. |
+| `fragmentation/vcs/jj` | `CoincidenceHash<5,5>` (substrate) + `Sha` for git-export paths | Native consumes substrate; export reaches into the adapter. |
+| `mirror` | `CoincidenceHash<5,5>` (via fragmentation) | Spectral-triple coherence. |
+| `spectral-db` | `CoincidenceHash<5,5>` (via fragmentation) + its own typed entries | Same substrate; broader content surface. |
+
+T2's `Repo` retyping consumes this directly: the default `H` is
+`CoincidenceHash<5,5>`; the git adapter's `Repo` impl overrides to `Sha`.
+The `Commit<N, H>` default in §3.4 changes from `H: HashAlg = Sha` to
+`H: HashAlg = CoincidenceHash<5,5>`. SHA stays as the git-adapter's
+single-impl override, exposed via the same generic.
+
+---
+
 ## 5. Tick decomposition
 
 Six ticks. T1 lands the audit's structural moves. T2–T4 build the jj path.
@@ -1036,6 +1131,11 @@ grep + doc page suffers the doubly-named variant.
   `tree {oid}\n parent {oid}\n ...` format.
 - Rename `Store` → `MemoryStore` in `fragmentation/src/store.rs`.
 - Retype `Repo` trait per §3.5: `Oid<H>` and `Reference` instead of `String`.
+  **Default `H` is `CoincidenceHash<5,5>`** per §4.6. SHA is the
+  `fragmentation/vcs/git` override, not the substrate's choice.
+- **Wire `prism-core`'s `CoincidenceHash<5,5>` as a `HashAlg` impl** in
+  `fragmentation/src/sha.rs` (or move the trait to a hash-agnostic module).
+  fragmentation imports the operator from prism-core; doesn't redefine it.
 - Multi-parent `Commit::Child::parents: Vec<H>`.
 - Add `extras: HashMap<String, Vec<u8>>` field to `Commit::Root` and
   `Commit::Child` (per §4.4 Gap 1).
