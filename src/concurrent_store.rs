@@ -14,7 +14,7 @@
 use dashmap::DashMap;
 
 use crate::commit::Commit;
-use crate::fragment::{content_oid, Fragmentable};
+use crate::fragment::{content_oid, ContentAddressed, Fragmentable, TreeShaped};
 use crate::sha::HashAlg;
 
 /// Concurrent content-addressed store.

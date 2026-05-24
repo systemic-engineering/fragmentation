@@ -1,5 +1,5 @@
 use crate::encoding::Encode;
-use crate::fragment::{content_oid, tree_oid_bytes, Fragmentable};
+use crate::fragment::{content_oid, tree_oid_bytes, ContentAddressed, Fragmentable, TreeShaped};
 use crate::repo::Repo;
 use crate::sha::{HashAlg, Sha};
 use crate::witnessed::{Author, Committer, Message, Timestamp, Witnessed};

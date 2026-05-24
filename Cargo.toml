@@ -13,6 +13,34 @@ keywords = ["content-addressed", "tree", "fragment", "git", "hash"]
 categories = ["data-structures", "encoding"]
 
 [features]
+# Default — preserves the v0.1.0 surface for existing consumers
+# (fragmentation-git, mirror's bootstrap, spectral-db's planned consumer).
+# T2/T3 callers should switch to --no-default-features and pick deliberately.
+default = ["concurrent", "prism-bridge", "visibility", "singularity", "project", "supervision"]
+
+# Cut 1 (mirror-store.md §4.5): DashMap-backed concurrent store. Single-threaded
+# callers turn this off; the rest of the substrate (Store, FrgmntStore,
+# BoundedStore) uses std HashMap.
+concurrent = ["dep:dashmap"]
+
+# Prism MerkleTree/Store/Loss impls for Fractal + FrgmntStore. Pulls in
+# `concurrent` because the Store impl is over `FrgmntStore` (which depends
+# on DashMap-backed BoundedStore).
+prism-bridge = ["concurrent"]
+
+# Public/Protected/Private wrappers + Keys/Signature.
+visibility = []
+
+# File-system materialization (naked + singularity).
+singularity = []
+
+# Lens projection (project + manifest).
+project = []
+
+# OTP-style supervision trees over fragments.
+supervision = []
+
+# Signing/encryption back-ends.
 ssh = ["dep:ssh-key", "dep:x25519-dalek", "dep:chacha20poly1305", "dep:hkdf"]
 gpg = []
 
@@ -23,7 +51,7 @@ serde_json = "1"
 sha2 = "0.10"
 sha1 = "0.10"
 hex = "0.4"
-dashmap = "6"
+dashmap = { version = "6", optional = true }
 ssh-key = { version = "0.6", features = ["std", "ed25519", "crypto"], optional = true }
 x25519-dalek = { version = "2", features = ["static_secrets"], optional = true }
 chacha20poly1305 = { version = "0.10", optional = true }

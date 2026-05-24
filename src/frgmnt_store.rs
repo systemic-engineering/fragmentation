@@ -17,7 +17,7 @@ use std::sync::Mutex;
 
 use crate::bounded_store::BoundedStore;
 use crate::encoding::Encode;
-use crate::fragment::{Fragmentable, Reconstructable};
+use crate::fragment::{ContentAddressed, Fragmentable, Reconstructable, TreeShaped};
 
 /// Error type for FrgmntStore operations.
 #[derive(Debug)]

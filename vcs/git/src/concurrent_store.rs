@@ -5,7 +5,7 @@
 
 use fragmentation::concurrent_store::ConcurrentStore;
 use fragmentation::encoding::Decode;
-use fragmentation::fragment::{Fragmentable, Reconstructable};
+use fragmentation::fragment::{ContentAddressed, Fragmentable, Reconstructable, TreeShaped};
 use fragmentation::sha::HashAlg;
 
 /// Git persistence extension for ConcurrentStore.

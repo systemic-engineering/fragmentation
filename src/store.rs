@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::commit::Commit;
-use crate::fragment::{content_oid, Blob, Fractal, Fragmentable};
+use crate::fragment::{content_oid, Blob, ContentAddressed, Fractal, Fragmentable, TreeShaped};
 use crate::repo::Repo;
 use crate::sha::{HashAlg, Sha};
 

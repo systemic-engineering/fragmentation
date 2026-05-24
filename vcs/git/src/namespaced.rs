@@ -189,7 +189,7 @@ fn find_git_dir(path: &Path) -> Result<PathBuf, NamespacedStoreError> {
 mod tests {
     use super::*;
     use fragmentation::encoding;
-    use fragmentation::fragment::{self, Fractal, Fragmentable};
+    use fragmentation::fragment::{self, ContentAddressed, Fractal, Fragmentable, TreeShaped};
 
     fn shard(label: &str) -> Fractal<String> {
         encoding::encode(label)

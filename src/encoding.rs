@@ -52,7 +52,7 @@ impl Decode for String {
 // Five-level decomposition (document → paragraph → sentence → word → char)
 // used only as test helpers to create Fractal<String> trees.
 
-use crate::fragment::{self, Fractal, Fragmentable};
+use crate::fragment::{self, ContentAddressed, Fractal, Fragmentable, TreeShaped};
 use crate::ref_::Ref;
 use crate::repo::Repo;
 use crate::sha;

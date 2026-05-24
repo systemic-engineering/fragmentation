@@ -199,7 +199,7 @@ fn serialize_fractal<E: Encode, H: HashAlg>(frac: &Fractal<E, H>, buf: &mut Vec<
             write_bytes(buf, ref_.label.as_bytes());
             write_bytes(buf, &data.encode());
         }
-        Fractal::Fractal {
+        Fractal::Branch {
             ref_,
             data,
             fractal,
@@ -260,7 +260,7 @@ fn deserialize_fractal<E: Decode, H: HashAlg>(
             for _ in 0..count {
                 children.push(deserialize_fractal(bytes, cursor)?);
             }
-            Some(Fractal::Fractal {
+            Some(Fractal::Branch {
                 ref_,
                 data,
                 fractal: children,

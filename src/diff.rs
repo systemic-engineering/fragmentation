@@ -1,4 +1,4 @@
-use crate::fragment::{self, Fragmentable};
+use crate::fragment::{self, ContentAddressed, Fragmentable, TreeShaped};
 
 /// A change between two fragment trees.
 #[derive(Clone, Debug, PartialEq, Eq)]

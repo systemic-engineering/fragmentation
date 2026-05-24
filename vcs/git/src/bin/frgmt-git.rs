@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use std::io::Read;
 
-use fragmentation::fragment::Fragmentable;
+use fragmentation::fragment::{ContentAddressed, Fragmentable, TreeShaped};
 use fragmentation::{encoding, fragment, keys};
 use fragmentation_git::commit::DraftWriteExt;
 

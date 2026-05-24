@@ -21,7 +21,7 @@
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
 
-use fragmentation::fragment::{Fractal, Fragmentable};
+use fragmentation::fragment::{ContentAddressed, Fractal, Fragmentable, TreeShaped};
 use crate::git::{read_tree_named, write_tree_named};
 use fragmentation::ref_::Ref;
 use fragmentation::sha::Sha;
@@ -486,7 +486,7 @@ impl FsInner {
             let read_fractal = Fractal::new_typed(read_ref, vec![], annotation_shards);
 
             // Inject @read subtree into root fractal's children.
-            if let Fractal::Fractal { fractal, .. } = &mut root_fractal {
+            if let Fractal::Branch { fractal, .. } = &mut root_fractal {
                 fractal.push(read_fractal);
             }
 

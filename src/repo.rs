@@ -4,7 +4,7 @@
 //! A future git2 backend would implement the same trait.
 
 use crate::commit::Commit;
-use crate::fragment::Fragmentable;
+use crate::fragment::{ContentAddressed, Fragmentable, TreeShaped};
 use crate::sha::HashAlg;
 
 /// Content-addressed repository.
@@ -36,7 +36,7 @@ pub trait Repo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fragment::{content_oid, Fragmentable};
+    use crate::fragment::{content_oid, ContentAddressed, Fragmentable, TreeShaped};
     use crate::ref_::Ref;
     use crate::sha::{self, Sha};
     use crate::store::Store;
@@ -56,7 +56,7 @@ mod tests {
         },
     }
 
-    impl Fragmentable for TestNode {
+    impl ContentAddressed for TestNode {
         type Data = String;
         type Hash = Sha;
 
@@ -73,7 +73,9 @@ mod tests {
                 TestNode::Branch { data, .. } => data,
             }
         }
+    }
 
+    impl TreeShaped for TestNode {
         fn children(&self) -> &[TestNode] {
             match self {
                 TestNode::Leaf { .. } => &[],

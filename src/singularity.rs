@@ -1,7 +1,7 @@
 use std::convert::Infallible;
 
 use crate::commit::{Commit, Draft, Draftable};
-use crate::fragment::{Fractal, Fragmentable};
+use crate::fragment::{ContentAddressed, Fractal, Fragmentable, TreeShaped};
 use crate::ref_::Ref;
 use crate::repo::Repo;
 use crate::sha::HashAlg;

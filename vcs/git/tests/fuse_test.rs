@@ -119,7 +119,7 @@ mod fuse_state_tests {
             .iter()
             .find(|c| c.self_ref().label == "file.txt");
         assert!(file_child.is_some(), "file.txt should be in fractal");
-        use fragmentation::fragment::Fragmentable;
+        use fragmentation::fragment::{ContentAddressed, Fragmentable, TreeShaped};
         assert_eq!(file_child.unwrap().data(), b"fractal content");
     }
 
@@ -816,7 +816,7 @@ mod fuse_state_tests {
         let tree_oid = commit.tree_id();
         let fractal = fragmentation_git::git::read_tree_named(&repo, tree_oid).unwrap();
 
-        use fragmentation::fragment::Fragmentable;
+        use fragmentation::fragment::{ContentAddressed, Fragmentable, TreeShaped};
         let lens_child = fractal
             .children()
             .iter()
@@ -920,7 +920,7 @@ mod fuse_state_tests {
         let fractal = fragmentation_git::git::read_tree_named(&repo, tree_oid).unwrap();
 
         // Find the @read subtree
-        use fragmentation::fragment::Fragmentable;
+        use fragmentation::fragment::{ContentAddressed, Fragmentable, TreeShaped};
         let read_subtree = fractal
             .children()
             .iter()
@@ -965,7 +965,7 @@ mod fuse_state_tests {
         let tree_oid = commit.tree_id();
 
         let fractal = fragmentation_git::git::read_tree_named(&repo, tree_oid).unwrap();
-        use fragmentation::fragment::Fragmentable;
+        use fragmentation::fragment::{ContentAddressed, Fragmentable, TreeShaped};
 
         let read_subtree = fractal
             .children()
@@ -1001,7 +1001,7 @@ mod fuse_state_tests {
         let tree_oid = commit.tree_id();
 
         let fractal = fragmentation_git::git::read_tree_named(&repo, tree_oid).unwrap();
-        use fragmentation::fragment::Fragmentable;
+        use fragmentation::fragment::{ContentAddressed, Fragmentable, TreeShaped};
 
         let read_subtree = fractal
             .children()
@@ -1043,7 +1043,7 @@ mod fuse_state_tests {
         let tree_oid = commit.tree_id();
 
         let fractal = fragmentation_git::git::read_tree_named(&repo, tree_oid).unwrap();
-        use fragmentation::fragment::Fragmentable;
+        use fragmentation::fragment::{ContentAddressed, Fragmentable, TreeShaped};
 
         let read_subtree = fractal
             .children()
@@ -1088,7 +1088,7 @@ mod fuse_state_tests {
         let tree_oid = commit.tree_id();
 
         let fractal = fragmentation_git::git::read_tree_named(&repo, tree_oid).unwrap();
-        use fragmentation::fragment::Fragmentable;
+        use fragmentation::fragment::{ContentAddressed, Fragmentable, TreeShaped};
 
         let read_subtree = fractal
             .children()

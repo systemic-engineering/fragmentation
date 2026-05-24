@@ -5,32 +5,51 @@ use crate::sha::{HashAlg, Sha};
 /// Raw bytes. The default data type for fragments.
 pub type Blob = Vec<u8>;
 
-/// The interface for anything content-addressed and self-similar.
-/// Turtles all the way down: your children are yourself.
-pub trait Fragmentable {
+// ---------------------------------------------------------------------------
+// Cut 2 (mirror-store.md §4.5 / mirror-native-vcs.md §3.1):
+//
+// `Fragmentable` splits into two traits:
+//
+//   `ContentAddressed`  — the OID-computation contract: self_ref + data.
+//                         Any type whose identity is its content.
+//
+//   `TreeShaped`        — the tree-walking extension: children, targets,
+//                         shape predicates. Recursive structure.
+//
+// `Fragmentable` remains as a deprecated alias for `ContentAddressed +
+// TreeShaped` so the existing call sites keep working through the
+// transition. T2/T3 callers should prefer the narrow trait that matches
+// their use; this trait will be removed once the migration completes.
+// ---------------------------------------------------------------------------
+
+/// The OID-computation contract. Any type whose identity is its content.
+///
+/// Minimum trait for content-addressed storage. A backend that just stores
+/// and reads typed bytes only needs this.
+pub trait ContentAddressed {
     type Data: Encode;
     type Hash: HashAlg;
     fn self_ref(&self) -> &Ref<Self::Hash>;
     fn data(&self) -> &Self::Data;
-    fn children(&self) -> &[Self]
-    where
-        Self: Sized;
-    fn is_shard(&self) -> bool
-    where
-        Self: Sized,
-    {
+}
+
+/// The tree-walking contract. Recursive structure with shape predicates.
+///
+/// Adds the child-listing and lens-target methods on top of
+/// [`ContentAddressed`]. Required by `walk`, `merge`, `content_oid`, and
+/// anything else that has to traverse a fragment.
+pub trait TreeShaped: ContentAddressed
+where
+    Self: Sized,
+{
+    fn children(&self) -> &[Self];
+    fn is_shard(&self) -> bool {
         self.children().is_empty()
     }
-    fn is_fractal(&self) -> bool
-    where
-        Self: Sized,
-    {
+    fn is_fractal(&self) -> bool {
         !self.children().is_empty()
     }
-    fn is_lens(&self) -> bool
-    where
-        Self: Sized,
-    {
+    fn is_lens(&self) -> bool {
         false
     }
     fn targets(&self) -> &[Self::Hash] {
@@ -38,13 +57,41 @@ pub trait Fragmentable {
     }
 }
 
+/// Deprecated alias trait for `ContentAddressed + TreeShaped`. Kept so existing
+/// generic bounds (`T: Fragmentable`) continue to compile through the
+/// T1→T3 transition. Method-call sites must additionally import the
+/// supertrait that carries the method:
+///
+/// ```text
+/// use fragmentation::fragment::{ContentAddressed, TreeShaped};
+/// // then call: node.self_ref()  (from ContentAddressed)
+/// //           node.children()   (from TreeShaped)
+/// ```
+///
+/// Future code should drop `Fragmentable` entirely in favor of the
+/// narrower trait that matches the use. This blanket trait will be removed
+/// in 0.2 per docs/specs/mirror-native-vcs.md §3.1.
+#[deprecated(
+    since = "0.1.1",
+    note = "Use `ContentAddressed` (for OID computation) or `TreeShaped` (for tree walking) instead. \
+            This blanket trait will be removed in 0.2 per docs/specs/mirror-native-vcs.md §3.1."
+)]
+pub trait Fragmentable: ContentAddressed + TreeShaped {}
+
+#[allow(deprecated)]
+impl<T: ContentAddressed + TreeShaped> Fragmentable for T {}
+
 /// A node in the possibility space.
+///
+/// Cut 3 (mirror-store.md §4.5): the recursive variant is `Fractal::Branch`,
+/// not `Fractal::Fractal`. Removing the doubly-named variant lets grep,
+/// rustdoc, and match arms read at the type level.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Fractal<E = Blob, H: HashAlg = Sha> {
     /// Terminal: self-addressed, carries data, stops.
     Shard { ref_: Ref<H>, data: E },
     /// Self-similar: self-addressed, carries data, contains fractal children.
-    Fractal {
+    Branch {
         ref_: Ref<H>,
         data: E,
         fractal: Vec<Fractal<E, H>>,
@@ -66,9 +113,9 @@ impl<H: HashAlg> Fractal<String, H> {
         }
     }
 
-    /// Create a fractal from string-like data. Self-similar, contains other fragments.
+    /// Create a branch from string-like data. Self-similar, contains other fragments.
     pub fn new(ref_: Ref<H>, data: impl Into<String>, fractal: Vec<Fractal<String, H>>) -> Self {
-        Fractal::Fractal {
+        Fractal::Branch {
             ref_,
             data: data.into(),
             fractal,
@@ -91,9 +138,9 @@ impl<E, H: HashAlg> Fractal<E, H> {
         Fractal::Shard { ref_, data }
     }
 
-    /// Create a fractal with typed data. Self-similar, contains other fragments.
+    /// Create a branch with typed data. Self-similar, contains other fragments.
     pub fn new_typed(ref_: Ref<H>, data: E, fractal: Vec<Fractal<E, H>>) -> Self {
-        Fractal::Fractal {
+        Fractal::Branch {
             ref_,
             data,
             fractal,
@@ -106,14 +153,14 @@ impl<E, H: HashAlg> Fractal<E, H> {
     }
 }
 
-impl<E: Encode, H: HashAlg> Fragmentable for Fractal<E, H> {
+impl<E: Encode, H: HashAlg> ContentAddressed for Fractal<E, H> {
     type Data = E;
     type Hash = H;
 
     fn self_ref(&self) -> &Ref<H> {
         match self {
             Fractal::Shard { ref_, .. } => ref_,
-            Fractal::Fractal { ref_, .. } => ref_,
+            Fractal::Branch { ref_, .. } => ref_,
             Fractal::Lens { ref_, .. } => ref_,
         }
     }
@@ -121,15 +168,17 @@ impl<E: Encode, H: HashAlg> Fragmentable for Fractal<E, H> {
     fn data(&self) -> &E {
         match self {
             Fractal::Shard { data, .. } => data,
-            Fractal::Fractal { data, .. } => data,
+            Fractal::Branch { data, .. } => data,
             Fractal::Lens { data, .. } => data,
         }
     }
+}
 
+impl<E: Encode, H: HashAlg> TreeShaped for Fractal<E, H> {
     fn children(&self) -> &[Fractal<E, H>] {
         match self {
             Fractal::Shard { .. } => &[],
-            Fractal::Fractal { fractal, .. } => fractal,
+            Fractal::Branch { fractal, .. } => fractal,
             Fractal::Lens { .. } => &[],
         }
     }
@@ -139,7 +188,7 @@ impl<E: Encode, H: HashAlg> Fragmentable for Fractal<E, H> {
     }
 
     fn is_fractal(&self) -> bool {
-        matches!(self, Fractal::Fractal { .. })
+        matches!(self, Fractal::Branch { .. })
     }
 
     fn is_lens(&self) -> bool {
@@ -235,7 +284,7 @@ impl<E: Encode + crate::encoding::Decode, H: HashAlg> Reconstructable for Fracta
         if children.is_empty() {
             Fractal::Shard { ref_, data }
         } else {
-            Fractal::Fractal {
+            Fractal::Branch {
                 ref_,
                 data,
                 fractal: children,

@@ -1,5 +1,5 @@
 use fragmentation::encoding::{Decode, Encode};
-use fragmentation::fragment::{self, Blob, Fractal, Fragmentable};
+use fragmentation::fragment::{self, Blob, ContentAddressed, Fractal, Fragmentable, TreeShaped};
 use fragmentation::keys::{Keys, Local, LocalError, PlainKeys, Signature};
 use fragmentation::ref_::Ref;
 use fragmentation::sha;

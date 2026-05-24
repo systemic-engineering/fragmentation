@@ -5,7 +5,7 @@
 //! content-addressed trees visible to the prism pipeline.
 
 use crate::encoding::Encode;
-use crate::fragment::{content_oid, Fractal, Fragmentable};
+use crate::fragment::{content_oid, ContentAddressed, Fractal, Fragmentable, TreeShaped};
 use crate::sha::HashAlg;
 use prism_core::Loss;
 
@@ -46,11 +46,11 @@ impl<E: Encode + PartialEq + Clone, H: HashAlg> prism_core::MerkleTree for Fract
     type Data = E;
 
     fn data(&self) -> &E {
-        Fragmentable::data(self)
+        ContentAddressed::data(self)
     }
 
     fn children(&self) -> &[Self] {
-        Fragmentable::children(self)
+        TreeShaped::children(self)
     }
 }
 
@@ -137,7 +137,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::fragment::{self, Fractal, Fragmentable};
+    use crate::fragment::{self, ContentAddressed, Fractal, Fragmentable};
     use crate::ref_::Ref;
     use crate::sha::{HashAlg, Sha};
     use prism_core::merkle::MerkleTree;
@@ -294,7 +294,7 @@ mod tests {
         assert!(got.is_ok());
         // Verify data roundtrips
         let got_frag = got.ok().unwrap();
-        assert_eq!(Fragmentable::data(&got_frag), "test");
+        assert_eq!(ContentAddressed::data(&got_frag), "test");
     }
 
     // --- StoreLoss ---

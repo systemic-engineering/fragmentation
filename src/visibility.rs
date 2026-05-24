@@ -1,5 +1,7 @@
 use crate::encoding::{Decode, Encode};
-use crate::fragment::{Fractal, Fragmentable};
+// Cut 2: the two narrow traits define the impls; `Fragmentable` is only used at
+// call sites (e.g. `Private::seal<T: Fragmentable<Hash = H>>(...)`).
+use crate::fragment::{ContentAddressed, Fractal, Fragmentable, TreeShaped};
 use crate::keys::{Encrypted, Keys, Signature};
 use crate::ref_::Ref;
 use crate::sha::{HashAlg, Sha};
@@ -33,7 +35,7 @@ impl<K: Keys, T> Public<K, T> {
     }
 }
 
-impl<K: Keys, T: Fragmentable> Fragmentable for Public<K, T> {
+impl<K: Keys, T: ContentAddressed> ContentAddressed for Public<K, T> {
     type Data = T::Data;
     type Hash = T::Hash;
 
@@ -44,7 +46,9 @@ impl<K: Keys, T: Fragmentable> Fragmentable for Public<K, T> {
     fn data(&self) -> &T::Data {
         self.inner.data()
     }
+}
 
+impl<K: Keys, T: ContentAddressed> TreeShaped for Public<K, T> {
     fn children(&self) -> &[Self] {
         &[]
     }
@@ -102,7 +106,7 @@ impl<K: Keys> Protected<K, Sha> {
     }
 }
 
-impl<K: Keys, H: HashAlg> Fragmentable for Protected<K, H> {
+impl<K: Keys, H: HashAlg> ContentAddressed for Protected<K, H> {
     type Data = Vec<u8>;
     type Hash = H;
 
@@ -113,7 +117,9 @@ impl<K: Keys, H: HashAlg> Fragmentable for Protected<K, H> {
     fn data(&self) -> &Vec<u8> {
         &self.ciphertext
     }
+}
 
+impl<K: Keys, H: HashAlg> TreeShaped for Protected<K, H> {
     fn children(&self) -> &[Self] {
         &[]
     }
@@ -164,7 +170,7 @@ impl<K: Keys, T: crate::commit::Draftable> crate::commit::Draftable for Public<K
     }
 }
 
-impl<K: Keys, H: HashAlg> Fragmentable for Private<K, H> {
+impl<K: Keys, H: HashAlg> ContentAddressed for Private<K, H> {
     type Data = ();
     type Hash = H;
 
@@ -175,7 +181,9 @@ impl<K: Keys, H: HashAlg> Fragmentable for Private<K, H> {
     fn data(&self) -> &() {
         &()
     }
+}
 
+impl<K: Keys, H: HashAlg> TreeShaped for Private<K, H> {
     fn children(&self) -> &[Self] {
         &[]
     }
@@ -184,7 +192,7 @@ impl<K: Keys, H: HashAlg> Fragmentable for Private<K, H> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fragment::{self, Fractal, Fragmentable};
+    use crate::fragment::{self, ContentAddressed, Fractal, Fragmentable};
     use crate::keys::PlainKeys;
     use crate::ref_::Ref;
     use crate::sha::{HashAlg, Sha};
@@ -205,10 +213,10 @@ mod tests {
         let public = Public::new(shard.clone(), sig);
         // Hash type propagated from inner T
         assert_eq!(
-            Fragmentable::self_ref(&public).sha.as_str(),
+            ContentAddressed::self_ref(&public).sha.as_str(),
             shard.self_ref().sha.as_str()
         );
-        assert_eq!(Fragmentable::data(&public), "test");
+        assert_eq!(ContentAddressed::data(&public), "test");
     }
 
     #[test]
@@ -223,8 +231,8 @@ mod tests {
         let sig = Signature::new(PlainKeys, vec![]);
         let public = Public::new(shard.clone(), sig);
 
-        // The Fragmentable impl should propagate prism_core::Oid
-        let ref_ = Fragmentable::self_ref(&public);
+        // The ContentAddressed impl should propagate prism_core::Oid
+        let ref_ = ContentAddressed::self_ref(&public);
         assert_eq!(ref_.sha.as_str(), shard.self_ref().sha.as_str());
     }
 
@@ -249,10 +257,10 @@ mod tests {
         );
         // Fragmentable should use Oid as Hash
         assert_eq!(
-            Fragmentable::self_ref(&protected).sha.as_str(),
+            ContentAddressed::self_ref(&protected).sha.as_str(),
             r.sha.as_str()
         );
-        assert_eq!(Fragmentable::data(&protected), &b"ciphertext".to_vec());
+        assert_eq!(ContentAddressed::data(&protected), &b"ciphertext".to_vec());
     }
 
     // -- Private: generic struct --
@@ -263,7 +271,7 @@ mod tests {
         let sig = PlainKeys.sign(&shard).unwrap();
         let private = Private::<PlainKeys>::seal(&shard, sig);
         assert_eq!(
-            Fragmentable::self_ref(&private).sha.as_str(),
+            ContentAddressed::self_ref(&private).sha.as_str(),
             shard.self_ref().sha.as_str()
         );
     }
@@ -276,7 +284,7 @@ mod tests {
         let sig = Signature::new(PlainKeys, vec![]);
         let private: Private<PlainKeys, prism_core::Oid> = Private::seal(&shard, sig);
         // Hash type = Oid, content address matches
-        assert_eq!(Fragmentable::self_ref(&private).sha.as_str(), oid.as_str());
+        assert_eq!(ContentAddressed::self_ref(&private).sha.as_str(), oid.as_str());
     }
 
     #[test]
@@ -285,8 +293,8 @@ mod tests {
         let r = Ref::new(oid.clone(), "direct");
         let sig = Signature::new(PlainKeys, vec![]);
         let private: Private<PlainKeys, prism_core::Oid> = Private::new(r, sig);
-        assert_eq!(Fragmentable::self_ref(&private).sha.as_str(), oid.as_str());
-        assert_eq!(Fragmentable::data(&private), &());
+        assert_eq!(ContentAddressed::self_ref(&private).sha.as_str(), oid.as_str());
+        assert_eq!(ContentAddressed::data(&private), &());
     }
 
     // -- Draftable propagation --

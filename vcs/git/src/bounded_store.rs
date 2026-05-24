@@ -4,7 +4,7 @@ use std::sync::Mutex;
 
 use fragmentation::bounded_store::BoundedStore;
 use fragmentation::encoding::{Decode, Encode};
-use fragmentation::fragment::{Fractal, Fragmentable, Reconstructable};
+use fragmentation::fragment::{ContentAddressed, Fractal, Fragmentable, Reconstructable, TreeShaped};
 
 /// Estimate the byte size of a Fractal node (data + ref + children overhead).
 fn estimate_fractal_size<E: Encode>(fractal: &Fractal<E>) -> usize {

@@ -1,7 +1,7 @@
 //! GitStore — persistent content-addressed store backed by git.
 
 use fragmentation::encoding::Decode;
-use fragmentation::fragment::{Fragmentable, Reconstructable};
+use fragmentation::fragment::{ContentAddressed, Fragmentable, Reconstructable, TreeShaped};
 use fragmentation::repo::Repo;
 use fragmentation::sha::HashAlg;
 

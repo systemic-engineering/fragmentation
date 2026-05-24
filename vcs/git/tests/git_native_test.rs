@@ -1,5 +1,5 @@
 #[allow(unused_imports)]
-use fragmentation::fragment::{self, Fractal, Fragmentable};
+use fragmentation::fragment::{self, ContentAddressed, Fractal, Fragmentable, TreeShaped};
 use fragmentation::ref_::Ref;
 use fragmentation::sha;
 

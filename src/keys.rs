@@ -2,7 +2,7 @@ use std::convert::Infallible;
 use std::fmt;
 
 use crate::encoding::{Decode, Encode};
-use crate::fragment::{self, Fractal, Fragmentable};
+use crate::fragment::{self, ContentAddressed, Fractal, Fragmentable, TreeShaped};
 use crate::ref_::Ref;
 #[cfg(any(feature = "ssh", feature = "gpg"))]
 use crate::sha::HashAlg;

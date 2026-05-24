@@ -1,6 +1,6 @@
 use fragmentation::encoding::{Decode, Encode};
 
-use fragmentation::fragment::{Fractal, Fragmentable, Reconstructable};
+use fragmentation::fragment::{ContentAddressed, Fractal, Fragmentable, Reconstructable, TreeShaped};
 
 use fragmentation::witnessed::Witnessed;
 
@@ -78,7 +78,7 @@ pub fn write_tree<E: Encode>(
 
     match fragment {
         Fractal::Shard { data, .. } => repo.blob(&data.encode()),
-        Fractal::Fractal { data, fractal, .. } => {
+        Fractal::Branch { data, fractal, .. } => {
             let mut builder = repo.treebuilder(None)?;
 
             let data_oid = repo.blob(&data.encode())?;
@@ -202,7 +202,7 @@ pub(crate) fn write_commit<E: Encode>(
             builder.insert(".data", blob_oid, 0o100644)?;
             builder.write()?
         }
-        Fractal::Fractal { .. } | Fractal::Lens { .. } => write_tree(repo, fractal)?,
+        Fractal::Branch { .. } | Fractal::Lens { .. } => write_tree(repo, fractal)?,
     };
     let tree = repo.find_tree(tree_oid)?;
 
@@ -232,7 +232,7 @@ pub fn write_tree_named<E: fragmentation::encoding::Encode>(
 
     match fragment {
         Fractal::Shard { data, .. } => repo.blob(&data.encode()),
-        Fractal::Fractal { data, fractal, .. } => {
+        Fractal::Branch { data, fractal, .. } => {
             let mut builder = repo.treebuilder(None)?;
 
             let data_oid = repo.blob(&data.encode())?;
@@ -332,11 +332,11 @@ fn relabel_named(
             ref_: Ref::new(ref_.sha, label),
             data,
         },
-        fragmentation::fragment::Fractal::Fractal {
+        fragmentation::fragment::Fractal::Branch {
             ref_,
             data,
             fractal,
-        } => fragmentation::fragment::Fractal::Fractal {
+        } => fragmentation::fragment::Fractal::Branch {
             ref_: Ref::new(ref_.sha, label),
             data,
             fractal,
