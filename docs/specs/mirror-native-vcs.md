@@ -337,9 +337,9 @@ binary-feature-flags from `fragmentation/Cargo.toml`.
 
 | Module | Destination | Notes |
 |---|---|---|
-| `git.rs` | `fragmentation-git/src/git.rs` | already duplicated there; delete from fragmentation |
-| `fuse.rs` | `fragmentation-git/src/fuse.rs` | git-flavored; jj equivalent would be fragmentation-jj's |
-| `main.rs` | `fragmentation-git/src/bin/frgmt-git.rs` | rename binary; fragmentation crate ships no binary |
+| `git.rs` | `fragmentation/vcs/git/src/git.rs` | already duplicated in the standalone `../fragmentation-git/` repo from `f1e1135`; that repo retires (§4.5), contents fold into the workspace member |
+| `fuse.rs` | `fragmentation/vcs/git/src/fuse.rs` | git-flavored; jj equivalent (if any) lives in `fragmentation/vcs/jj/` |
+| `main.rs` | `fragmentation/vcs/git/src/bin/frgmt-git.rs` | rename binary; fragmentation crate ships no binary |
 | (top-level `[[bin]]` entries in `Cargo.toml`) | (delete) | with `main.rs` gone |
 
 **RETIRES — 0 modules, 4 features**
@@ -398,8 +398,10 @@ and the new modules.
 
 ### 2.4 The new fragmentation-jj surface (preview)
 
+Lives at `fragmentation/vcs/jj/` (workspace member, per §4.5).
+
 ```
-fragmentation-jj/src/
+fragmentation/vcs/jj/src/
 ├── lib.rs             (module index + Backend wiring)
 ├── backend.rs         (impl jj_lib::backend::Backend for FragmentationBackend)
 ├── change_id.rs       (the change-id store — see §4 for the design)
@@ -911,6 +913,54 @@ it. Name it.
 
 ---
 
+## 4.5 Repo layout — workspace with `vcs/` adapters
+
+Structural decision before the audit's moves land: **fragmentation becomes a
+workspace; adapters live inside it under `vcs/`.** Not separate sibling repos.
+This matches the prism repo's pattern (`prism/core/`, `prism/imperfect/`,
+`prism/derive/`, etc.) and self-contains the substrate + every adapter the
+substrate ships with.
+
+Target layout:
+
+```
+fragmentation/
+├── Cargo.toml          (workspace manifest + fragmentation crate manifest)
+├── src/                (fragmentation core code)
+├── vcs/
+│   ├── git/            (fragmentation-git crate)
+│   └── jj/             (fragmentation-jj crate)
+├── docs/
+└── …
+```
+
+The `vcs/` grouping signals intent (these are VCS implementations) and leaves
+room for future adapters (`vcs/mercurial/`, `vcs/pijul/`, `vcs/sapling/`)
+without sprawling the workspace root.
+
+**Crate names stay short and stable:** `fragmentation`, `fragmentation-git`,
+`fragmentation-jj`. The published names don't carry the `vcs/` directory.
+
+**Feature-flag posture:**
+
+- **Within `fragmentation/`** (the substrate crate): keep in-crate capability
+  gates (`concurrent` per Cut 1, `prism_bridge`, `keys`, etc.). These select
+  capability *inside* one crate; they don't pull siblings.
+- **Cross-crate adapter selection:** consumers depend on `fragmentation-git`
+  or `fragmentation-jj` directly (or via their own features that gate the
+  dependency). fragmentation itself has no `git` or `jj` feature — that would
+  muddle the workspace model. Mirror's `Cargo.toml` gets `git = ["dep:fragmentation-git"]`
+  and `jj = ["dep:fragmentation-jj"]`; mirror picks; fragmentation doesn't.
+
+**Retirement of the standalone `../fragmentation-git/` stub.** The repo at
+`/Users/alexwolf/dev/projects/fragmentation-git/` (the `f1e1135` extraction
+target) gets folded into `fragmentation/vcs/git/`. Its existing contents
+(the duplicate `git.rs`, basic `Cargo.toml`) merge in; the standalone repo
+archives. Use `git subtree` to preserve history if needed; otherwise a clean
+import into the new workspace path.
+
+---
+
 ## 5. Tick decomposition
 
 Six ticks. T1 lands the audit's structural moves. T2–T4 build the jj path.
@@ -920,13 +970,21 @@ rest is built on the wrong layer.
 ### T1 — Simplification audit + commits (the cleanup)
 
 **Scope.**
-- Move `git.rs` from `fragmentation/src/` to `fragmentation-git/src/` (delete
-  the fragmentation copy; the fragmentation-git copy already exists from
-  commit `f1e1135`).
-- Move `fuse.rs` from `fragmentation/src/` to `fragmentation-git/src/`.
-- Move `main.rs` from `fragmentation/src/` to `fragmentation-git/src/bin/frgmt-git.rs`.
+- **Convert fragmentation to a workspace** (per §4.5). Root `Cargo.toml`
+  gains a `[workspace]` section listing members `.`, `vcs/git`, `vcs/jj`
+  (jj added in T4 but the slot is declared up front).
+- **Retire the standalone `../fragmentation-git/` stub.** Move its contents
+  (the duplicate `git.rs`, the basic `Cargo.toml`) into the new
+  `fragmentation/vcs/git/` workspace member. Use `git subtree` if preserving
+  history matters; otherwise clean import. Archive or delete the standalone
+  repo once the move is verified.
+- Move `git.rs` from `fragmentation/src/` to `fragmentation/vcs/git/src/`
+  (deduplicate against the merged-in standalone-repo copy; keep one).
+- Move `fuse.rs` from `fragmentation/src/` to `fragmentation/vcs/git/src/`.
+- Move `main.rs` from `fragmentation/src/` to
+  `fragmentation/vcs/git/src/bin/frgmt-git.rs`.
 - Delete the `git`, `fuse`, `fuse-mount`, `cli` features and the `[[bin]]`
-  entries from `fragmentation/Cargo.toml`.
+  entries from `fragmentation/Cargo.toml` (the root crate manifest).
 - Apply mirror-store.md Cut 1: feature-gate `dashmap` behind `concurrent`
   (default-on).
 - Apply mirror-store.md Cut 2: split `Fragmentable` into `ContentAddressed`
@@ -935,11 +993,13 @@ rest is built on the wrong layer.
 - Feature-gate `prism_bridge.rs` behind `prism-bridge`.
 - Feature-gate `naked.rs`, `singularity.rs`, `visibility.rs`, `project.rs`,
   `manifest.rs`, `supervision.rs` behind their respective features (per §2.2).
-- Add `[[bin]]` entry to `fragmentation-git/Cargo.toml` for `frgmt-git`.
+- Add `[[bin]]` entry to `fragmentation/vcs/git/Cargo.toml` for `frgmt-git`.
 
-**Estimate.** Large. ~3 sessions. Touches every consumer (`mirror/`,
-`spectral-db/`, `coincidence/`, internal tests). Most of the work is
-updating call sites; the moves themselves are straightforward `git mv`.
+**Estimate.** Large. ~3.5 sessions (the workspace conversion + standalone
+repo retirement adds ~half a session vs. the prior estimate). Touches every
+consumer (`mirror/`, `spectral-db/`, `coincidence/`, internal tests). Most
+of the work is updating call sites; the moves themselves are straightforward
+`git mv`.
 
 **Dependencies.** None. Can start immediately.
 
@@ -1018,8 +1078,9 @@ grep + doc page suffers the doubly-named variant.
 
 **Scope.**
 - Initialize the `fragmentation-jj` crate at
-  `/Users/alexwolf/dev/projects/fragmentation-jj/` (sibling to fragmentation
-  and fragmentation-git).
+  `fragmentation/vcs/jj/` (workspace member, per §4.5).
+  Add to the workspace's `[workspace]` members list (or activate the slot
+  T1 declared up front).
 - Add `jj_lib` as a dependency.
 - Implement `jj_lib::backend::Backend` for `FragmentationBackend<R: Repo>`.
 - The 14 required methods, mapping per §4.3.
