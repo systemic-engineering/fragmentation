@@ -785,6 +785,133 @@ async fn wired_tool_schemas_publish_required_arguments() {
 }
 
 // ---------------------------------------------------------------------------
+// 15. T7 — tools/call result wrapped in MCP content envelope.
+//
+// Per MCP 2025-06-18 §tools/call, the result MUST be a `CallToolResult`
+// with shape `{content: [<ContentBlock>...], isError?: bool}` where each
+// ContentBlock has a `type` discriminator (`text` / `image` / `audio` /
+// `resource_link` / `resource`).
+//
+// T2/T3/T6 returned the raw payload directly as `result`:
+//   {"jsonrpc":"2.0","id":1,"result":{"budget_bytes":...,"shard_id":"..."}}
+//
+// Required shape:
+//   {"jsonrpc":"2.0","id":1,
+//    "result":{"content":[{"type":"text",
+//                          "text":"{\"budget_bytes\":...,\"shard_id\":\"...\"}"}],
+//              "isError":false}}
+//
+// Alex hit this on first live drive 2026-06-01: tool calls succeeded
+// but Claude Code rendered "no output" because it looks for
+// `result.content[0].text` and finds nothing.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn tools_call_result_wrapped_in_content_envelope() {
+    let (mut child, mut stdin, mut reader) = spawn_frgmnt();
+
+    write_line(&mut stdin, INITIALIZE_REQUEST).await;
+    let _ = read_line(&mut reader).await;
+    write_line(&mut stdin, NOTIFICATIONS_INITIALIZED).await;
+    write_line(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"fragmentation.shard.open","arguments":{"budget_mb":64}}}"#,
+    )
+    .await;
+    drop(stdin);
+
+    let line = read_line(&mut reader).await;
+    let parsed: serde_json::Value =
+        serde_json::from_str(&line).expect("parse tools/call result");
+
+    let result = parsed
+        .get("result")
+        .expect("tools/call must return result, not error");
+
+    // Required envelope: `content` array of ContentBlock objects.
+    let content = result
+        .get("content")
+        .and_then(|c| c.as_array())
+        .expect("tools/call result.content must be an array (MCP 2025-06-18 §tools/call)");
+    assert!(
+        !content.is_empty(),
+        "tools/call result.content must contain at least one ContentBlock"
+    );
+
+    let first = &content[0];
+    let ty = first.get("type").and_then(|t| t.as_str());
+    assert_eq!(
+        ty,
+        Some("text"),
+        "ContentBlock.type must be 'text' (or other discriminated variant); got {ty:?}"
+    );
+    assert!(
+        first.get("text").and_then(|t| t.as_str()).is_some(),
+        "text ContentBlock must carry a `text` field (string)"
+    );
+
+    // isError is optional but MUST be a bool if present.
+    if let Some(is_err) = result.get("isError") {
+        assert!(
+            is_err.is_boolean(),
+            "isError must be a boolean if present; got {is_err}"
+        );
+        assert_eq!(is_err.as_bool(), Some(false), "successful call: isError=false");
+    }
+
+    let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
+}
+
+// ---------------------------------------------------------------------------
+// 16. T7 — the structured payload is recoverable from the text content.
+//
+// The text ContentBlock is a JSON-serialized payload. Round-trip:
+// parsing `text` should yield the structured fields the original raw
+// result carried (`shard_id`, `budget_bytes` for shard.open). This
+// locks the convention: text MUST be JSON-serialized, not arbitrary
+// prose, so agents can extract structured data.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn tools_call_text_content_is_json_with_structured_payload() {
+    let (mut child, mut stdin, mut reader) = spawn_frgmnt();
+
+    write_line(&mut stdin, INITIALIZE_REQUEST).await;
+    let _ = read_line(&mut reader).await;
+    write_line(&mut stdin, NOTIFICATIONS_INITIALIZED).await;
+    write_line(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"fragmentation.shard.open","arguments":{"budget_mb":64}}}"#,
+    )
+    .await;
+    drop(stdin);
+
+    let line = read_line(&mut reader).await;
+    let parsed: serde_json::Value = serde_json::from_str(&line).expect("parse result");
+    let text = parsed
+        .get("result")
+        .and_then(|r| r.get("content"))
+        .and_then(|c| c.as_array())
+        .and_then(|a| a.first())
+        .and_then(|b| b.get("text"))
+        .and_then(|t| t.as_str())
+        .expect("text field present");
+
+    let payload: serde_json::Value =
+        serde_json::from_str(text).expect("text content must parse as JSON");
+    assert!(
+        payload.get("shard_id").and_then(|s| s.as_str()).is_some(),
+        "payload missing shard_id: {payload}"
+    );
+    assert!(
+        payload.get("budget_bytes").and_then(|b| b.as_u64()).is_some(),
+        "payload missing budget_bytes: {payload}"
+    );
+
+    let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
+}
+
+// ---------------------------------------------------------------------------
 // Binary location — see binary_stdio.rs for the standard cargo idiom.
 // ---------------------------------------------------------------------------
 
