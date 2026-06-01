@@ -1,0 +1,33 @@
+[package]
+name = "fragmentation-mcp"
+version = "0.1.0"
+edition = "2021"
+license-file = "../../LICENSE.md"
+description = "MCP server for content-addressed agent workflows over fragmentation primitives"
+repository = "https://github.com/systemic-engineering/fragmentation"
+keywords = ["mcp", "json-rpc", "agent", "git", "content-addressed"]
+categories = ["command-line-utilities", "development-tools"]
+
+# Per fragmentation-mcp.md §6's Cargo.toml sketch. T1 lands the stdio
+# transport + the twelve-tool registry stubs. `http` and `git-interop`
+# features are reserved slots; their `dep:` lines wait for T4 (HTTP)
+# and T4 (git crosswalk). The stub features compile to no-ops in T1.
+[features]
+default = ["stdio"]
+stdio = []
+http = []
+git-interop = []
+
+[dependencies]
+fragmentation = { path = "../.." }
+prism-core = { path = "../../../prism/core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "io-std", "io-util"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "io-std", "io-util", "process", "time"] }
+
+[[bin]]
+name = "fragmentation-mcp"
+path = "src/bin/fragmentation-mcp.rs"
