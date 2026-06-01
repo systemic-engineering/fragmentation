@@ -11,8 +11,8 @@
 //! - A non-existent method yields JSON-RPC error `-32601` (Method not found).
 
 use fragmentation_mcp::{
-    Mcp, MethodName, Request, RequestId, Response, ToolName, ToolRegistry,
-    JSON_RPC_VERSION, TWELVE_TOOL_NAMES,
+    Mcp, MethodName, Request, RequestId, Response, ToolName, ToolRegistry, JSON_RPC_VERSION,
+    TWELVE_TOOL_NAMES,
 };
 
 #[test]
@@ -36,7 +36,7 @@ fn twelve_tools_named_per_spec_section_3_6() {
     assert_eq!(TWELVE_TOOL_NAMES.len(), 12);
     for name in expected {
         assert!(
-            TWELVE_TOOL_NAMES.iter().any(|t| t.as_str() == name),
+            TWELVE_TOOL_NAMES.iter().any(|t| *t == name),
             "missing tool name: {name}"
         );
     }
@@ -117,7 +117,8 @@ fn unknown_method_yields_method_not_found() {
 #[test]
 fn mcp_constructs_with_default_registry() {
     let mcp = Mcp::new();
-    let names: Vec<&str> = mcp.tool_names().iter().map(ToolName::as_str).collect();
+    let tool_names = mcp.tool_names();
+    let names: Vec<&str> = tool_names.iter().map(ToolName::as_str).collect();
     assert!(names.contains(&"fragmentation.commit"));
     assert_eq!(names.len(), 12);
 }
