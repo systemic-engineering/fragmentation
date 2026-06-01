@@ -1,8 +1,10 @@
 //! T2 RED — the shard sub-tools + scheduler tick.
 //!
-//! These tests reference types and behaviours that DO NOT EXIST in
-//! `src/lib.rs` yet at the moment of the RED commit. The GREEN
-//! commit's job is to make them compile and pass.
+//! T4 NOTE: `ShardId(uuid::Uuid)` became `ShardId(SpectralUuid)` per the
+//! CRDT spec (`reality-shard-as-crdt.md`). Two opens-without-content
+//! share the canonical `ShardId::EMPTY` (the deduplication property);
+//! tests that relied on `ShardId::new() != ShardId::new()` have been
+//! migrated to honor the new semantics.
 //!
 //! Per `docs/specs/fragmentation-mcp.md` §3.4 (shard sub-tools), §4
 //! (HamiltonScheduler at the agent altitude), and §9 T2 (scope +
@@ -10,7 +12,7 @@
 //!
 //! What the tests pin:
 //!
-//! 1. `ShardId(uuid::Uuid)` newtype — no bare UUIDs cross the wire.
+//! 1. `ShardId(SpectralUuid)` newtype — no bare UUIDs cross the wire.
 //! 2. `BudgetMb(u64)` newtype — no bare megabytes cross the wire.
 //! 3. The four `fragmentation.shard.*` sub-tools (open / status /
 //!    flush / close) exist and dispatch as separate callables.
@@ -34,18 +36,30 @@ use fragmentation_mcp::{
 // ---------------------------------------------------------------------------
 
 #[test]
-fn shard_id_wraps_uuid() {
-    let id = ShardId::new();
+fn shard_id_wraps_spectral_uuid() {
+    // Post-T4: ShardId wraps SpectralUuid. Display is still the
+    // 36-char hyphenated form (wire-stable with the prior
+    // uuid::Uuid v4 output).
+    let id = ShardId::EMPTY;
     let s = id.to_string();
-    // RFC 4122 UUID hyphenated: 36 chars.
-    assert_eq!(s.len(), 36, "ShardId should serialize as a hyphenated UUID: {s}");
-    // Two `ShardId::new()` calls must NOT collide.
-    assert_ne!(id, ShardId::new());
+    assert_eq!(
+        s.len(),
+        36,
+        "ShardId should serialize as a hyphenated 36-char string: {s}"
+    );
+    // The CRDT semilattice's bottom element: two reads of EMPTY are
+    // byte-identical. The dedup property is a feature.
+    assert_eq!(ShardId::EMPTY, ShardId::EMPTY);
+    // Content-derived ids DIFFER for different content_hash values.
+    let a = ShardId::from_content(0, &[0x11u8; 32]);
+    let b = ShardId::from_content(0, &[0x22u8; 32]);
+    assert_ne!(a, b);
 }
 
 #[test]
 fn shard_id_round_trips_through_string() {
-    let id = ShardId::new();
+    // Round-trip a content-derived ShardId through Display → parse.
+    let id = ShardId::from_content(0x0001_2345_6789_ABCD, &[0x77u8; 32]);
     let s = id.to_string();
     let parsed = ShardId::parse(&s).expect("parse ShardId from its own Display");
     assert_eq!(id, parsed);
@@ -204,7 +218,10 @@ fn shard_status_returns_budget_and_scheduler_stats() {
 #[test]
 fn shard_status_unknown_id_yields_invalid_params() {
     let mcp = Mcp::new();
-    let bogus = ShardId::new();
+    // Synthesize an unknown shard_id by deriving from a content hash
+    // that no shard in the registry could have produced. Different from
+    // ShardId::EMPTY (which is what `shard.open` would have created).
+    let bogus = ShardId::from_content(0xDEAD_BEEF_CAFE, &[0xAAu8; 32]);
     let line = format!(
         r#"{{"jsonrpc":"2.0","id":21,"method":"tools/call","params":{{"name":"fragmentation.shard.status","arguments":{{"shard_id":"{bogus}"}}}}}}"#
     );

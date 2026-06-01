@@ -1,29 +1,43 @@
 //! The per-session `Shard` + its `ShardRegistry`.
 //!
-//! T2 of `docs/specs/fragmentation-mcp.md` (§4 — HamiltonScheduler
-//! at the agent altitude; §3.4 — the four shard sub-tools).
+//! T4 of `docs/specs/fragmentation-mcp.md`: `ShardId` becomes a
+//! `prism_core::SpectralUuid` newtype per the CRDT spec
+//! (`reality-shard-as-crdt.md`). 48 bits ACTIVE (the quantized
+//! `SpectralCoordinate<5>`) + 80 bits DARK (the content hash prefix).
+//! The empty shard's address is the canonical `ShardId::EMPTY` —
+//! the bottom of the semilattice; the deduplication property
+//! (two empty shards share an id) is a structural consequence.
+//!
+//! T2's history: `§4` (HamiltonScheduler at the agent altitude), `§3.4`
+//! (the four shard sub-tools), and `§4` 's tick-on-dispatch contract
+//! remain unchanged.
 //!
 //! # What this module owns
 //!
-//! - [`ShardId`] — the wire-altitude shard handle. `uuid::Uuid v4`
-//!   under the hood; serializes as a hyphenated string.
+//! - [`ShardId`] — the wire-altitude shard handle. `SpectralUuid`
+//!   under the hood; serializes as a hyphenated 36-char string
+//!   (the standard UUID-shaped form, byte-stable with the prior
+//!   T3 wire output).
 //! - [`BudgetMb`] / [`BudgetBytes`] — newtypes for the budget. No
 //!   bare `u64` crosses the shard surface (per
 //!   `[[feedback-no-bare-types]]`).
 //! - [`Shard`] — per-session state: the configured budget, the
-//!   stub `HamiltonScheduler` instance, metadata (created-at,
-//!   placeholder for the transit accumulator). T3+ adds the
-//!   `FrgmntStore` body once content tools land.
+//!   stub `HamiltonScheduler` instance, metadata, the
+//!   `FrgmntStore<Fractal<String>>` body for content commits.
 //! - [`ShardRegistry`] — thread-safe map of `ShardId -> Shard`,
-//!   the dispatch layer's source of truth.
+//!   the dispatch layer's source of truth. `open()` returns
+//!   `ShardId::EMPTY` for the empty initial state; content
+//!   commits inside the shard don't (yet) shift the id (the
+//!   id-shifts-with-content semantics arrive in a follow-up tick
+//!   when the semilattice merge mechanics wire fully).
 //!
 //! # Substrate-pull
 //!
 //! `[substrate-pull:realize]` — the shard surface is boundary
 //! Rust at the `@io` altitude. The capability (content storage,
-//! scheduler discipline) lives in the substrate. The Rust here
-//! is binding + wire; T3+ wires the body once `FrgmntStore`
-//! instantiations land for the content tools.
+//! scheduler discipline, the CRDT semilattice algebra) lives in
+//! the substrate. The Rust here is binding + wire; ShardId's
+//! 128-bit body lives in prism_core (the algebra crate).
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -35,8 +49,9 @@ use fragmentation::fragment::{self, ContentAddressed, Fractal};
 use fragmentation::frgmnt_store::FrgmntStore;
 use fragmentation::hamilton_scheduler::{BudgetBytes, HamiltonScheduler, TickCount, TickReport};
 use fragmentation::sha::Sha;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+use prism_core::{SpectralUuid, SpectralUuidParseError};
+use serde::de::{self, Deserializer};
+use serde::{Deserialize, Serialize, Serializer};
 
 // ---------------------------------------------------------------------------
 // Newtypes — no bare primitives cross the shard surface.
@@ -44,45 +59,102 @@ use uuid::Uuid;
 
 /// Per-session shard handle.
 ///
-/// `uuid::Uuid v4` under the hood. The hyphenated 36-char string
-/// form is what crosses the wire; the byte form is for in-process
-/// equality and the `HashMap` key.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct ShardId(pub Uuid);
+/// `SpectralUuid` under the hood (128 bits, golden-ratio-split into
+/// 48 active + 80 dark per `reality-shard-as-crdt.md` §3). The
+/// hyphenated 36-char string form is what crosses the wire — byte-
+/// stable with the prior `uuid::Uuid v4` Display output, so the
+/// wire surface is unchanged.
+///
+/// # Empty-shard determinism
+///
+/// [`Self::EMPTY`] is the canonical empty-shard address (the
+/// bottom element of the CRDT semilattice, `⊥`). Two `open()`
+/// calls on the registry with no committed content return the
+/// SAME id — the deduplication property is a feature, not a
+/// bug. Per the spec §2 + §4's identity-law guarantee.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ShardId(pub SpectralUuid);
+
+// `prism_core::SpectralUuid` is intentionally deps-free (no `serde`),
+// so serde impls live here. Both Serialize and Deserialize go
+// through the 36-char hyphenated string form — the wire-stable
+// representation that the MCP JSON-RPC payloads already use.
+impl Serialize for ShardId {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for ShardId {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        ShardId::parse(&s).map_err(|e| de::Error::custom(e.to_string()))
+    }
+}
 
 impl ShardId {
-    /// Generate a fresh v4 UUID. Cryptographically random; no
-    /// monotonic-counter footgun.
-    pub fn new() -> Self {
-        ShardId(Uuid::new_v4())
+    /// The canonical empty-shard ID — the bottom of the lattice.
+    ///
+    /// `ShardId::EMPTY.0 = SpectralUuid::EMPTY`: active = 0 (λ₀ = 0,
+    /// the void axis), dark = first 10 bytes of BLAKE3 of empty input.
+    /// Deterministic across process lifetimes; the substrate's
+    /// first named address into the void per `@mirror/reality/shard`.
+    pub const EMPTY: Self = ShardId(SpectralUuid::EMPTY);
+
+    /// Derive a `ShardId` from the shard's spectral active position
+    /// and content hash prefix.
+    ///
+    /// - `active` carries the 48-bit quantized `SpectralCoordinate<5>`
+    ///   in its lower 48 bits. T4 ships with `active = 0` (the spectral
+    ///   coord computation lives upstream in `coincidence`; the
+    ///   substrate-pull tick that wires it through happens once the
+    ///   quantization rules pin per the spec §11 Q1).
+    /// - `content_hash` is the 32-byte BLAKE3 prefix (or any hash;
+    ///   prism_core is hash-agnostic). The first 10 bytes form the
+    ///   dark portion.
+    pub fn from_content(active: u64, content_hash: &[u8; 32]) -> Self {
+        ShardId(SpectralUuid::from_parts(active, content_hash))
     }
 
-    /// Parse from the hyphenated string form. Returns
-    /// [`ShardIdParseError`] when the input is not a valid v4 UUID.
+    /// Parse from the hyphenated 36-char string form. Returns
+    /// [`ShardIdParseError`] when the input is malformed.
     pub fn parse(s: &str) -> Result<Self, ShardIdParseError> {
-        Uuid::parse_str(s)
+        SpectralUuid::parse(s)
             .map(ShardId)
-            .map_err(|e| ShardIdParseError(e.to_string()))
+            .map_err(ShardIdParseError)
+    }
+
+    /// Deprecated shim for callers that previously generated a fresh
+    /// `Uuid::new_v4()`. Returns [`Self::EMPTY`] — the canonical
+    /// content-derived id for a shard with no committed content yet.
+    ///
+    /// New callers should use `Self::EMPTY` or `Self::from_content`
+    /// directly. This shim exists only to keep the T2/T3 unit tests'
+    /// `ShardId::new()` calls compiling through the T4 rename; it'll
+    /// be removed once those tests migrate.
+    pub fn new() -> Self {
+        Self::EMPTY
     }
 }
 
 impl Default for ShardId {
     fn default() -> Self {
-        Self::new()
+        Self::EMPTY
     }
 }
 
 impl std::fmt::Display for ShardId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Hyphenated 36-char form — the wire literal.
-        std::fmt::Display::fmt(&self.0.hyphenated(), f)
+        // The SpectralUuid Display impl writes the standard
+        // UUID-hyphenated 36-char form (lowercase hex).
+        std::fmt::Display::fmt(&self.0, f)
     }
 }
 
-/// Parse error for [`ShardId::parse`].
+/// Parse error for [`ShardId::parse`]. Wraps the prism_core
+/// [`SpectralUuidParseError`].
 #[derive(Debug, Clone)]
-pub struct ShardIdParseError(pub String);
+pub struct ShardIdParseError(pub SpectralUuidParseError);
 
 impl std::fmt::Display for ShardIdParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -314,18 +386,39 @@ impl ShardRegistry {
         }
     }
 
-    /// Open a new shard with the given budget. Returns the freshly-
-    /// minted `ShardId`, or an error if the per-shard `.frgmnt/`
-    /// directory cannot be created.
+    /// Open a new shard with the given budget. Returns the canonical
+    /// `ShardId::EMPTY` for a shard with no committed content; the
+    /// deduplication property (two opens with no content share the
+    /// same id) is a CRDT semilattice consequence per
+    /// `reality-shard-as-crdt.md` §2 + §4.
     ///
-    /// T3 wires the disk-backed [`FrgmntStore`] into the shard
-    /// constructor; if the temp-dir allocation fails (out of space,
-    /// permission denied), the shard is not registered and the
-    /// error propagates to the wire as `ERROR_INTERNAL`.
+    /// T4: if a shard with the EMPTY id is already registered, the
+    /// existing shard is kept (the bottom-of-lattice IS deduplicating).
+    /// Re-opening EMPTY is the substrate's idempotent-open contract.
+    /// New budgets passed in subsequent opens are IGNORED on the
+    /// existing EMPTY shard — the first open's budget wins, which
+    /// is honest: the empty shard has no content to bound.
+    ///
+    /// The id-shifts-with-content semantics (post-commit, the shard
+    /// id moves up in the lattice) is a follow-up tick once the
+    /// semilattice merge mechanics wire fully. T4 keeps the id
+    /// stable per session.
+    ///
+    /// If the per-shard `.frgmnt-<id>/` directory cannot be created
+    /// (out of space, permission denied), the shard is not registered
+    /// and the error propagates to the wire as `ERROR_INTERNAL`.
     pub fn open(&self, budget: BudgetMb) -> Result<ShardId, ShardContentError> {
-        let id = ShardId::new();
+        let id = ShardId::EMPTY;
+        // Acquire the lock once for both check + insert.
+        let mut guard = self.lock();
+        if guard.contains_key(&id) {
+            // Idempotent open: the canonical empty shard already
+            // exists. Return the same id; the existing shard's
+            // budget is preserved.
+            return Ok(id);
+        }
         let shard = Shard::new(budget.into_budget_bytes(), id)?;
-        self.lock().insert(id, shard);
+        guard.insert(id, shard);
         Ok(id)
     }
 
@@ -405,11 +498,31 @@ mod tests {
 
     #[test]
     fn shard_id_display_round_trips() {
+        // Post-T4: ShardId::new() returns ShardId::EMPTY (the canonical
+        // content-derived id for a shard with no committed content).
+        // The Display → parse round-trip still holds.
         let id = ShardId::new();
         let s = id.to_string();
         assert_eq!(s.len(), 36);
         let back = ShardId::parse(&s).expect("parse");
         assert_eq!(back, id);
+    }
+
+    #[test]
+    fn shard_id_empty_is_canonical() {
+        // The CRDT bottom element is deterministic and byte-stable.
+        let a = ShardId::EMPTY;
+        let b = ShardId::EMPTY;
+        assert_eq!(a, b);
+        assert_eq!(a.to_string(), b.to_string());
+    }
+
+    #[test]
+    fn shard_id_from_content_is_deterministic() {
+        let hash = [0x42u8; 32];
+        let a = ShardId::from_content(0, &hash);
+        let b = ShardId::from_content(0, &hash);
+        assert_eq!(a, b);
     }
 
     #[test]
@@ -428,6 +541,19 @@ mod tests {
         assert!(reg.close(&id));
         assert!(!reg.contains(&id));
         assert_eq!(reg.len(), 0);
+    }
+
+    #[test]
+    fn two_opens_with_no_content_share_the_empty_id() {
+        // The deduplication property per reality-shard-as-crdt.md §2
+        // surfaced at the wire altitude. Idempotent open.
+        let reg = ShardRegistry::new();
+        let id1 = reg.open(BudgetMb(8)).expect("open 1");
+        let id2 = reg.open(BudgetMb(64)).expect("open 2");
+        assert_eq!(id1, id2);
+        assert_eq!(id1, ShardId::EMPTY);
+        // Only one shard in the registry.
+        assert_eq!(reg.len(), 1);
     }
 
     #[test]

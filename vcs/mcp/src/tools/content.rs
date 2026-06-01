@@ -275,7 +275,9 @@ mod tests {
 
     #[test]
     fn commit_parse_rejects_missing_fields() {
-        let args = json!({"shard_id": uuid::Uuid::new_v4().to_string()});
+        // Post-T4: ShardId is SpectralUuid-backed; we use ShardId::EMPTY's
+        // Display form as a syntactically-valid shard_id for parse tests.
+        let args = json!({"shard_id": crate::shard::ShardId::EMPTY.to_string()});
         assert!(matches!(
             CommitParams::parse(&args),
             Err(CommitParseError::MissingField("path"))
@@ -351,8 +353,12 @@ mod tests {
     #[test]
     fn dispatch_commit_unknown_shard_returns_invalid_params() {
         let reg = ShardRegistry::new();
+        // Post-T4: synthesize an unknown shard_id by deriving one from
+        // a never-used content hash. ShardId::from_content(active=1, hash=0xFF*)
+        // is far from ShardId::EMPTY and not registered.
+        let unknown = crate::shard::ShardId::from_content(1, &[0xFFu8; 32]);
         let args = json!({
-            "shard_id": uuid::Uuid::new_v4().to_string(),
+            "shard_id": unknown.to_string(),
             "path": "x",
             "content": "y",
             "message": "z",
