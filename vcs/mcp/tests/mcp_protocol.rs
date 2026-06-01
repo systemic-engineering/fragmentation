@@ -30,6 +30,24 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 
 const BINARY_NAME: &str = "frgmnt";
 
+/// Extract the structured payload from a `tools/call` response.
+///
+/// Per T7 (MCP 2025-06-18 §tools/call), every `tools/call` result is
+/// wrapped as `{content: [{type: "text", text: "<json>"}], isError:
+/// false}`. This helper unwraps it back to the payload object that
+/// the tool body actually produced.
+fn unwrap_call_content(parsed: &serde_json::Value) -> serde_json::Value {
+    let text = parsed
+        .get("result")
+        .and_then(|r| r.get("content"))
+        .and_then(|c| c.as_array())
+        .and_then(|a| a.first())
+        .and_then(|b| b.get("text"))
+        .and_then(|t| t.as_str())
+        .expect("tools/call result must carry content[0].text per MCP §tools/call");
+    serde_json::from_str(text).expect("content[0].text must parse as JSON payload")
+}
+
 /// Spawn `frgmnt --stdio`. Returns the child + an owned stdin handle
 /// + a buffered stdout reader. Caller drops stdin to signal EOF.
 fn spawn_frgmnt() -> (Child, ChildStdin, BufReader<ChildStdout>) {
@@ -247,9 +265,9 @@ async fn tools_call_after_full_handshake() {
     let parsed: serde_json::Value = serde_json::from_str(&call_line).expect("parse tools/call");
     assert_eq!(parsed.get("id").and_then(|v| v.as_u64()), Some(1));
     assert!(parsed.get("error").is_none(), "tools/call errored: {parsed}");
-    let shard_id = parsed
-        .get("result")
-        .and_then(|r| r.get("shard_id"))
+    let payload = unwrap_call_content(&parsed);
+    let shard_id = payload
+        .get("shard_id")
         .and_then(|s| s.as_str())
         .expect("shard_id");
     assert_eq!(shard_id.len(), 36, "expected hyphenated UUID");
@@ -278,9 +296,8 @@ async fn agent_workflow_round_trip() {
     .await;
     let open_line = read_line(&mut reader).await;
     let open_parsed: serde_json::Value = serde_json::from_str(&open_line).expect("parse open");
-    let shard_id = open_parsed
-        .get("result")
-        .and_then(|r| r.get("shard_id"))
+    let shard_id = unwrap_call_content(&open_parsed)
+        .get("shard_id")
         .and_then(|s| s.as_str())
         .expect("shard_id")
         .to_string();
@@ -297,9 +314,8 @@ async fn agent_workflow_round_trip() {
         commit_parsed.get("error").is_none(),
         "commit errored: {commit_parsed}"
     );
-    let oid = commit_parsed
-        .get("result")
-        .and_then(|r| r.get("oid"))
+    let oid = unwrap_call_content(&commit_parsed)
+        .get("oid")
         .and_then(|s| s.as_str())
         .expect("oid")
         .to_string();
@@ -312,11 +328,11 @@ async fn agent_workflow_round_trip() {
     let read_line_str = read_line(&mut reader).await;
     let read_parsed: serde_json::Value =
         serde_json::from_str(&read_line_str).expect("parse read");
-    let content = read_parsed
-        .get("result")
-        .and_then(|r| r.get("content"))
+    let content = unwrap_call_content(&read_parsed)
+        .get("content")
         .and_then(|s| s.as_str())
-        .expect("content");
+        .expect("content")
+        .to_string();
     assert_eq!(content, "agent payload");
 
     // Step 5: status
@@ -327,9 +343,8 @@ async fn agent_workflow_round_trip() {
     let status_line = read_line(&mut reader).await;
     let status_parsed: serde_json::Value =
         serde_json::from_str(&status_line).expect("parse status");
-    let hot_bytes = status_parsed
-        .get("result")
-        .and_then(|r| r.get("hot_bytes"))
+    let hot_bytes = unwrap_call_content(&status_parsed)
+        .get("hot_bytes")
         .and_then(|v| v.as_u64())
         .expect("hot_bytes");
     assert!(hot_bytes > 0, "expected hot_bytes > 0");
@@ -344,9 +359,8 @@ async fn agent_workflow_round_trip() {
     let close_parsed: serde_json::Value =
         serde_json::from_str(&close_line).expect("parse close");
     assert_eq!(
-        close_parsed
-            .get("result")
-            .and_then(|r| r.get("closed"))
+        unwrap_call_content(&close_parsed)
+            .get("closed")
             .and_then(|b| b.as_bool()),
         Some(true)
     );
@@ -389,14 +403,14 @@ async fn empty_shard_determinism_wire_visible() {
 
     let a: serde_json::Value = serde_json::from_str(&line_a).expect("parse a");
     let b: serde_json::Value = serde_json::from_str(&line_b).expect("parse b");
-    let id_a = a
-        .get("result")
-        .and_then(|r| r.get("shard_id"))
+    let payload_a = unwrap_call_content(&a);
+    let payload_b = unwrap_call_content(&b);
+    let id_a = payload_a
+        .get("shard_id")
         .and_then(|s| s.as_str())
         .expect("a shard_id");
-    let id_b = b
-        .get("result")
-        .and_then(|r| r.get("shard_id"))
+    let id_b = payload_b
+        .get("shard_id")
         .and_then(|s| s.as_str())
         .expect("b shard_id");
     assert_eq!(
@@ -519,16 +533,16 @@ async fn multi_session_concurrent_shards() {
     let open_a = read_line(&mut reader_a).await;
     let open_b = read_line(&mut reader_b).await;
     let shard_a = serde_json::from_str::<serde_json::Value>(&open_a)
+        .map(|v: serde_json::Value| unwrap_call_content(&v))
         .unwrap()
-        .get("result")
-        .and_then(|r| r.get("shard_id"))
+        .get("shard_id")
         .and_then(|s| s.as_str())
         .unwrap()
         .to_string();
     let shard_b = serde_json::from_str::<serde_json::Value>(&open_b)
+        .map(|v: serde_json::Value| unwrap_call_content(&v))
         .unwrap()
-        .get("result")
-        .and_then(|r| r.get("shard_id"))
+        .get("shard_id")
         .and_then(|s| s.as_str())
         .unwrap()
         .to_string();
@@ -547,16 +561,16 @@ async fn multi_session_concurrent_shards() {
     let ca_line = read_line(&mut reader_a).await;
     let cb_line = read_line(&mut reader_b).await;
     let oid_a = serde_json::from_str::<serde_json::Value>(&ca_line)
+        .map(|v: serde_json::Value| unwrap_call_content(&v))
         .unwrap()
-        .get("result")
-        .and_then(|r| r.get("oid"))
+        .get("oid")
         .and_then(|s| s.as_str())
         .unwrap()
         .to_string();
     let oid_b = serde_json::from_str::<serde_json::Value>(&cb_line)
+        .map(|v: serde_json::Value| unwrap_call_content(&v))
         .unwrap()
-        .get("result")
-        .and_then(|r| r.get("oid"))
+        .get("oid")
         .and_then(|s| s.as_str())
         .unwrap()
         .to_string();

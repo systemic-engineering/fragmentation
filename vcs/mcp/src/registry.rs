@@ -487,7 +487,13 @@ impl ToolRegistry {
         // the content sub-tools (`commit` + `read`) via
         // `crate::tools::content`. Everything else stays in the T2
         // not-implemented-yet stub until its tick lands.
-        match tool_str {
+        //
+        // T7: every Response::ok from tool dispatch passes through
+        // `wrap_tool_response` so the wire output matches MCP
+        // 2025-06-18's `CallToolResult` shape. Protocol-level
+        // errors (Response::err) pass through unchanged — they
+        // remain JSON-RPC `error` objects.
+        let raw = match tool_str {
             "fragmentation.shard.open" => self.tool_shard_open(request, &arguments),
             "fragmentation.shard.status" => self.tool_shard_status(request, &arguments),
             "fragmentation.shard.flush" => self.tool_shard_flush(request, &arguments),
@@ -506,7 +512,8 @@ impl ToolRegistry {
                     json!({ "tool": tool_str, "tick": "T3" }),
                 ),
             ),
-        }
+        };
+        wrap_tool_response(raw)
     }
 
     // -----------------------------------------------------------------
@@ -699,4 +706,37 @@ fn shard_not_found(id: crate::types::RequestId, shard: &ShardId) -> Response {
 /// check without constructing a full Request.
 pub fn is_known_method(method: &MethodName) -> bool {
     matches!(method.as_str(), "tools/list" | "tools/call" | "initialize")
+}
+
+/// Wrap a successful tool-dispatch `Response` so its `result` follows
+/// MCP 2025-06-18 §tools/call's `CallToolResult` shape:
+///
+/// ```json
+/// {
+///   "content": [{ "type": "text", "text": "<json-serialized payload>" }],
+///   "isError": false
+/// }
+/// ```
+///
+/// Successful results get wrapped; error responses (Response::err)
+/// pass through unchanged — those are JSON-RPC `error` objects and
+/// belong to the protocol layer, not the tool-result layer.
+///
+/// The text content is JSON-serialized so agents can extract the
+/// structured payload by parsing `text` (per the
+/// `tools_call_text_content_is_json_with_structured_payload` test).
+fn wrap_tool_response(resp: Response) -> Response {
+    match resp.result {
+        Some(payload) => Response::ok(
+            resp.id,
+            json!({
+                "content": [{
+                    "type": "text",
+                    "text": payload.to_string(),
+                }],
+                "isError": false,
+            }),
+        ),
+        None => resp,
+    }
 }

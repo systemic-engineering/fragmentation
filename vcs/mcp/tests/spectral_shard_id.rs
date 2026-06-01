@@ -74,9 +74,18 @@ fn shard_id_round_trips_through_wire() {
     let line = r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"fragmentation.shard.open","arguments":{"budget_mb":8}}}"#;
     let response = mcp.dispatch_line(line);
     let value = serde_json::to_value(&response).expect("serialize");
-    let shard_id_str = value
+    // T7: tools/call result is wrapped in MCP content envelope.
+    let text = value
         .get("result")
-        .and_then(|r| r.get("shard_id"))
+        .and_then(|r| r.get("content"))
+        .and_then(|c| c.as_array())
+        .and_then(|a| a.first())
+        .and_then(|b| b.get("text"))
+        .and_then(|t| t.as_str())
+        .expect("content[0].text");
+    let payload: serde_json::Value = serde_json::from_str(text).expect("text is JSON");
+    let shard_id_str = payload
+        .get("shard_id")
         .and_then(|s| s.as_str())
         .expect("shard_id in result")
         .to_string();

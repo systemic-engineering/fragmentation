@@ -26,6 +26,25 @@
 //! 6. `shard.close` removes the shard; a subsequent call with the
 //!    same `ShardId` returns `ERROR_INVALID_PARAMS` (not a panic).
 
+/// Extract the structured payload from a `tools/call` response.
+///
+/// Per T7 (MCP 2025-06-18 §tools/call), every `tools/call` result is
+/// wrapped as `{content: [{type: "text", text: "<json>"}], isError:
+/// false}`. This helper unwraps it back to the payload object that
+/// the tool body actually produced. NOT for tools/list (which is
+/// unwrapped per spec).
+fn unwrap_call_content(parsed: &serde_json::Value) -> serde_json::Value {
+    let text = parsed
+        .get("result")
+        .and_then(|r| r.get("content"))
+        .and_then(|c| c.as_array())
+        .and_then(|a| a.first())
+        .and_then(|b| b.get("text"))
+        .and_then(|t| t.as_str())
+        .expect("tools/call result must carry content[0].text per MCP §tools/call");
+    serde_json::from_str(text).expect("content[0].text must parse as JSON payload")
+}
+
 use fragmentation_mcp::{
     BudgetMb, Mcp, MethodName, Request, RequestId, ShardId, ToolName, ToolRegistry,
     FIFTEEN_TOOL_NAMES, JSON_RPC_VERSION,
@@ -151,9 +170,9 @@ fn shard_open_returns_a_shard_id() {
         value.get("error").is_none(),
         "shard.open should not error: {value:#?}"
     );
-    let shard_id = value
-        .get("result")
-        .and_then(|r| r.get("shard_id"))
+    let payload = unwrap_call_content(&value);
+    let shard_id = payload
+        .get("shard_id")
         .and_then(|s| s.as_str())
         .expect("shard_id in result");
     let parsed = ShardId::parse(shard_id).expect("parse shard_id");
@@ -194,7 +213,7 @@ fn shard_status_returns_budget_and_scheduler_stats() {
         value.get("error").is_none(),
         "shard.status should not error: {value:#?}"
     );
-    let result = value.get("result").expect("result");
+    let result = unwrap_call_content(&value);
     let budget_bytes = result
         .get("budget_bytes")
         .and_then(|b| b.as_u64())
@@ -252,7 +271,7 @@ fn shard_flush_is_callable_on_open_shard() {
         value.get("error").is_none(),
         "shard.flush should not error on open shard: {value:#?}"
     );
-    let result = value.get("result").expect("result");
+    let result = unwrap_call_content(&value);
     // Stub: no entries to evict; bytes_released = 0.
     assert_eq!(
         result.get("bytes_released").and_then(|b| b.as_u64()),
@@ -309,17 +328,15 @@ fn dispatch_ticks_the_named_shard_before_routing() {
     );
     let r1 = mcp.dispatch_line(&status_line);
     let v1 = serde_json::to_value(&r1).expect("serialize");
-    let tick_1 = v1
-        .get("result")
-        .and_then(|r| r.get("tick_count"))
+    let tick_1 = unwrap_call_content(&v1)
+        .get("tick_count")
         .and_then(|t| t.as_u64())
         .expect("tick_count 1");
 
     let r2 = mcp.dispatch_line(&status_line);
     let v2 = serde_json::to_value(&r2).expect("serialize");
-    let tick_2 = v2
-        .get("result")
-        .and_then(|r| r.get("tick_count"))
+    let tick_2 = unwrap_call_content(&v2)
+        .get("tick_count")
         .and_then(|t| t.as_u64())
         .expect("tick_count 2");
 
@@ -339,9 +356,9 @@ fn open_shard(mcp: &Mcp, budget_mb: u64) -> ShardId {
     );
     let response = mcp.dispatch_line(&line);
     let value = serde_json::to_value(&response).expect("serialize");
-    let shard_id = value
-        .get("result")
-        .and_then(|r| r.get("shard_id"))
+    let payload = unwrap_call_content(&value);
+    let shard_id = payload
+        .get("shard_id")
         .and_then(|s| s.as_str())
         .expect("shard_id in result");
     ShardId::parse(shard_id).expect("parse shard_id")

@@ -14,6 +14,24 @@ use tokio::process::Command;
 
 const BINARY_NAME: &str = "frgmnt";
 
+/// Extract the structured payload from a `tools/call` response.
+///
+/// Per T7 (MCP 2025-06-18 §tools/call), every `tools/call` result is
+/// wrapped as `{content: [{type: "text", text: "<json>"}], isError:
+/// false}`. This helper unwraps it back to the payload object that
+/// the tool body actually produced.
+fn unwrap_call_content(parsed: &serde_json::Value) -> serde_json::Value {
+    let text = parsed
+        .get("result")
+        .and_then(|r| r.get("content"))
+        .and_then(|c| c.as_array())
+        .and_then(|a| a.first())
+        .and_then(|b| b.get("text"))
+        .and_then(|t| t.as_str())
+        .expect("tools/call result must carry content[0].text per MCP §tools/call");
+    serde_json::from_str(text).expect("content[0].text must parse as JSON payload")
+}
+
 #[tokio::test]
 async fn binary_lists_fifteen_tools_over_stdio() {
     let binary = locate_binary();
@@ -120,9 +138,11 @@ async fn binary_opens_a_shard_over_stdio() {
 
     let parsed: serde_json::Value = serde_json::from_str(&line).expect("parse JSON");
     assert_eq!(parsed.get("id").and_then(|v| v.as_u64()), Some(2));
-    let shard_id = parsed
-        .get("result")
-        .and_then(|r| r.get("shard_id"))
+    // T7: tools/call result is wrapped per MCP §tools/call —
+    // result.content[0].text is the JSON-serialized payload.
+    let payload = unwrap_call_content(&parsed);
+    let shard_id = payload
+        .get("shard_id")
         .and_then(|s| s.as_str())
         .expect("shard_id in result");
     assert_eq!(shard_id.len(), 36, "expected hyphenated UUID");
@@ -180,9 +200,10 @@ async fn binary_round_trip_open_commit_read_status() {
     let open_parsed: serde_json::Value =
         serde_json::from_str(&open_line).expect("parse open JSON");
     assert_eq!(open_parsed.get("id").and_then(|v| v.as_u64()), Some(10));
-    let shard_id = open_parsed
-        .get("result")
-        .and_then(|r| r.get("shard_id"))
+    // T7: tools/call results are wrapped per MCP §tools/call.
+    let open_payload = unwrap_call_content(&open_parsed);
+    let shard_id = open_payload
+        .get("shard_id")
         .and_then(|s| s.as_str())
         .expect("shard_id in open result")
         .to_string();
@@ -210,9 +231,9 @@ async fn binary_round_trip_open_commit_read_status() {
         commit_parsed.get("error").is_none(),
         "commit returned error: {commit_parsed}"
     );
-    let oid = commit_parsed
-        .get("result")
-        .and_then(|r| r.get("oid"))
+    let commit_payload = unwrap_call_content(&commit_parsed);
+    let oid = commit_payload
+        .get("oid")
         .and_then(|s| s.as_str())
         .expect("oid in commit result")
         .to_string();
@@ -244,9 +265,9 @@ async fn binary_round_trip_open_commit_read_status() {
         read_parsed.get("error").is_none(),
         "read returned error: {read_parsed}"
     );
-    let content = read_parsed
-        .get("result")
-        .and_then(|r| r.get("content"))
+    let read_payload = unwrap_call_content(&read_parsed);
+    let content = read_payload
+        .get("content")
         .and_then(|s| s.as_str())
         .expect("content in read result");
     assert_eq!(
@@ -274,18 +295,17 @@ async fn binary_round_trip_open_commit_read_status() {
     let status_parsed: serde_json::Value =
         serde_json::from_str(&status_line).expect("parse status JSON");
     assert_eq!(status_parsed.get("id").and_then(|v| v.as_u64()), Some(13));
-    let hot_bytes = status_parsed
-        .get("result")
-        .and_then(|r| r.get("hot_bytes"))
+    let status_payload = unwrap_call_content(&status_parsed);
+    let hot_bytes = status_payload
+        .get("hot_bytes")
         .and_then(|v| v.as_u64())
         .expect("hot_bytes in status result");
     assert!(
         hot_bytes > 0,
         "expected hot_bytes > 0 after commit, got {hot_bytes}"
     );
-    let total_bytes = status_parsed
-        .get("result")
-        .and_then(|r| r.get("total_bytes"))
+    let total_bytes = status_payload
+        .get("total_bytes")
         .and_then(|v| v.as_u64())
         .expect("total_bytes in status result");
     assert!(
