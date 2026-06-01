@@ -63,22 +63,221 @@ pub const FIFTEEN_TOOL_NAMES: [&str; 15] = [
 
 /// A registered MCP tool.
 ///
-/// T1 ships name + description only. T2 keeps the same shape; the
-/// per-tool JSON Schema (`inputSchema`) per the MCP 2025-06-18 spec
-/// lands in T3.
+/// T6 adds `input_schema` (serialized as `inputSchema` per MCP
+/// 2025-06-18 §tools) carrying the JSON Schema that describes the
+/// tool's arguments. Clients (Claude Code, Cursor, Claude Desktop)
+/// validate `tools/list` responses against this field and refuse to
+/// load tool surfaces that omit it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tool {
     pub name: ToolName,
     pub description: String,
+    #[serde(rename = "inputSchema")]
+    pub input_schema: Value,
 }
 
 impl Tool {
-    pub fn new(name: impl Into<ToolName>, description: impl Into<String>) -> Self {
+    pub fn new(
+        name: impl Into<ToolName>,
+        description: impl Into<String>,
+        input_schema: Value,
+    ) -> Self {
         Tool {
             name: name.into(),
             description: description.into(),
+            input_schema,
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// T6 — JSON Schemas per tool.
+//
+// Per MCP 2025-06-18 §tools, every tool's `inputSchema` MUST be a
+// JSON Schema object (at minimum `{"type": "object"}`). T6 publishes
+// real argument schemas — wired tools (commit, read, shard.*) match
+// the live wire payload from T2/T3; un-wired tools publish the
+// EVENTUAL shape per `docs/specs/fragmentation-mcp.md` so the agent
+// surface shows the intended interface even while bodies still
+// return ERROR_NOT_IMPLEMENTED_YET. Bodies catch up; schemas don't
+// have to wait.
+//
+// Conventions:
+//   shard_id  — SpectralUuid in standard 36-char hyphenated form
+//   oid       — hex string identifying content (40+ hex chars)
+// ---------------------------------------------------------------------------
+
+fn schema_shard_open() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "budget_mb": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Memory budget for the session shard, in megabytes."
+            }
+        },
+        "required": ["budget_mb"]
+    })
+}
+
+fn schema_shard_only() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "shard_id": {
+                "type": "string",
+                "description": "SpectralUuid identifying the shard (36-char hyphenated form)."
+            }
+        },
+        "required": ["shard_id"]
+    })
+}
+
+fn schema_commit() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "shard_id": {
+                "type": "string",
+                "description": "SpectralUuid of the target shard."
+            },
+            "path": {
+                "type": "string",
+                "description": "Logical path inside the shard (virtual; not a host filesystem path)."
+            },
+            "content": {
+                "type": "string",
+                "description": "Content to commit. UTF-8."
+            },
+            "message": {
+                "type": "string",
+                "description": "Commit message."
+            }
+        },
+        "required": ["shard_id", "path", "content", "message"]
+    })
+}
+
+fn schema_read() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "shard_id": {
+                "type": "string",
+                "description": "SpectralUuid of the target shard."
+            },
+            "oid": {
+                "type": "string",
+                "description": "Content OID (hex) returned by a prior commit."
+            }
+        },
+        "required": ["shard_id", "oid"]
+    })
+}
+
+fn schema_snapshot() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "shard_id": {
+                "type": "string",
+                "description": "SpectralUuid of the target shard. Snapshot returns a checkpoint OID."
+            }
+        },
+        "required": ["shard_id"]
+    })
+}
+
+fn schema_diff() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "shard_id": { "type": "string", "description": "SpectralUuid of the shard the OIDs live in." },
+            "from_oid": { "type": "string", "description": "OID of the source side." },
+            "to_oid":   { "type": "string", "description": "OID of the target side." }
+        },
+        "required": ["shard_id", "from_oid", "to_oid"]
+    })
+}
+
+fn schema_merge() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "shard_id": { "type": "string" },
+            "base":     { "type": "string", "description": "Common ancestor OID." },
+            "ours":     { "type": "string", "description": "OID of our side." },
+            "theirs":   { "type": "string", "description": "OID of their side." }
+        },
+        "required": ["shard_id", "ours", "theirs"]
+    })
+}
+
+fn schema_branch() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "shard_id": { "type": "string" },
+            "name":     { "type": "string", "description": "Branch name (e.g. `feature/x`)." },
+            "oid":      { "type": "string", "description": "OID the branch points at." }
+        },
+        "required": ["shard_id", "name", "oid"]
+    })
+}
+
+fn schema_refs_list() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "shard_id": { "type": "string", "description": "Optional shard scope; omit for global refs." }
+        }
+    })
+}
+
+fn schema_refs_update() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "shard_id":     { "type": "string" },
+            "name":         { "type": "string", "description": "Ref name." },
+            "oid":          { "type": "string", "description": "New OID." },
+            "expected_oid": { "type": "string", "description": "Expected current OID for CAS; omit to create." }
+        },
+        "required": ["shard_id", "name", "oid"]
+    })
+}
+
+fn schema_history() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "shard_id": { "type": "string" },
+            "from_oid": { "type": "string", "description": "Walk start; omit for HEAD." },
+            "limit":    { "type": "integer", "minimum": 1, "description": "Max entries; omit for unbounded." }
+        },
+        "required": ["shard_id"]
+    })
+}
+
+fn schema_search() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "shard_id": { "type": "string" },
+            "query":    { "type": "string", "description": "Search query against the content-addressed graph." }
+        },
+        "required": ["shard_id", "query"]
+    })
+}
+
+fn schema_observe() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "shard_id": { "type": "string", "description": "Optional shard scope; omit for global observations." }
+        }
+    })
 }
 
 /// The tool registry — names + dispatch.
@@ -106,72 +305,91 @@ impl ToolRegistry {
     /// `with_default_tools` once the shard category split into
     /// four sub-tools.
     pub fn with_default_tools() -> Self {
-        let descriptions: &[(&str, &str)] = &[
+        // (name, description, input_schema). Schemas published per T6
+        // for MCP-spec conformance; clients (Claude Code, Cursor,
+        // Claude Desktop) refuse `tools/list` entries without
+        // `inputSchema`.
+        let entries: Vec<(&str, &str, Value)> = vec![
             (
                 "fragmentation.commit",
-                "Atomic content-addressed commit. T3 wires the body.",
+                "Atomic content-addressed commit. Body wired in T3.",
+                schema_commit(),
             ),
             (
                 "fragmentation.snapshot",
-                "Working-state checkpoint without commit. T3 wires the body.",
+                "Working-state checkpoint without commit. T-future wires the body.",
+                schema_snapshot(),
             ),
             (
                 "fragmentation.read",
-                "Read content by SpectralCoordinate<5>. T3 wires the body.",
+                "Read content by OID from a shard's FrgmntStore. Body wired in T3.",
+                schema_read(),
             ),
             (
                 "fragmentation.diff",
-                "Splinter-Merkle structured diff. T3 wires the body.",
+                "Splinter-Merkle structured diff between two OIDs. T-future wires the body.",
+                schema_diff(),
             ),
             (
                 "fragmentation.merge",
-                "Substrate-aware merge (three-way + kintsugi). T3 wires the body.",
+                "Substrate-aware merge (three-way + kintsugi). T-future wires the body.",
+                schema_merge(),
             ),
             (
                 "fragmentation.branch",
-                "Cheap content-addressed branch creation. T3 wires the body.",
+                "Cheap content-addressed branch creation. T-future wires the body.",
+                schema_branch(),
             ),
             (
                 "fragmentation.refs.list",
-                "List refs with their OIDs. T3 wires the body.",
+                "List refs with their OIDs. T-future wires the body.",
+                schema_refs_list(),
             ),
             (
                 "fragmentation.refs.update",
-                "CAS-safe ref update. T3 wires the body.",
+                "CAS-safe ref update. T-future wires the body.",
+                schema_refs_update(),
             ),
             (
                 "fragmentation.history",
-                "Walk the commit DAG. T3 wires the body.",
+                "Walk the commit DAG. T-future wires the body.",
+                schema_history(),
             ),
             (
                 "fragmentation.search",
-                "Query the content-addressed graph. T3 wires the body.",
+                "Query the content-addressed graph. T-future wires the body.",
+                schema_search(),
             ),
             (
                 "fragmentation.shard.open",
                 "Allocate a new session shard with a budget. Returns ShardId.",
+                schema_shard_open(),
             ),
             (
                 "fragmentation.shard.status",
                 "Diagnostic snapshot of a shard (budget, hot/cold/total, tick count).",
+                schema_shard_only(),
             ),
             (
                 "fragmentation.shard.flush",
                 "Force a flush of a shard's hot cache to disk.",
+                schema_shard_only(),
             ),
             (
                 "fragmentation.shard.close",
                 "Close a session shard; release in-RAM state.",
+                schema_shard_only(),
             ),
             (
                 "fragmentation.observe",
-                "Algedonic observation channel (Beer-shape). T3 wires the body.",
+                "Algedonic observation channel (Beer-shape). T-future wires the body.",
+                schema_observe(),
             ),
         ];
         let mut tools = Vec::with_capacity(15);
         let mut by_name = HashMap::with_capacity(15);
-        for (i, (name, desc)) in descriptions.iter().enumerate() {
-            let tool = Tool::new(*name, *desc);
+        for (i, (name, desc, schema)) in entries.into_iter().enumerate() {
+            let tool = Tool::new(name, desc, schema);
             by_name.insert(tool.name.clone(), i);
             tools.push(tool);
         }
@@ -219,6 +437,8 @@ impl ToolRegistry {
     }
 
     fn handle_tools_list(&self, request: &Request) -> Response {
+        // Per MCP 2025-06-18 §tools each entry MUST carry an
+        // `inputSchema` (JSON Schema object). T6 publishes them.
         let tools_value: Vec<Value> = self
             .tools
             .iter()
@@ -226,6 +446,7 @@ impl ToolRegistry {
                 json!({
                     "name": t.name.as_str(),
                     "description": t.description,
+                    "inputSchema": t.input_schema,
                 })
             })
             .collect();
