@@ -72,12 +72,45 @@ Three verbs: `collapse` (tree → artifact), `refract` (artifact → tree),
 
 ## Practice
 
-TDD is non-negotiable. Red before green. The pre-commit hook enforces it.
+**TDD is non-negotiable. 🔴 before 🟢. No shortcuts.**
+
+Every `.rs` (or other implementation) change is a TDD pair commit:
+
+1. **🔴 RED** — the failing test lands FIRST, in its own commit. Verify
+   it actually fails (`cargo test`); a compile-fail isn't a RED.
+2. **🟢 GREEN** — the implementation that makes the test pass lands
+   next, in its own commit. Verify it passes AND that all prior tests
+   still pass (no regressions).
+
+**No exceptions** for any of:
+- "Small" changes (1-line, 5-line, single-file — RED first)
+- "Obvious" fixes ("clearly correct" — then writing the test is trivial; do it)
+- "Mechanical" refactors (the test proves you didn't break behaviour)
+- Things already proven manually (the manual proof isn't reproducible; the test IS)
+- Spec-conformance fixes (write the test that captures the spec)
+- Bugs Alex hit in production (the test reproducing the bug IS the RED)
+
+**Recovery when an implementation got started without RED:**
 
 ```
-nix develop -c cargo test          # all tests pass
-nix develop -c cargo clippy -- -D warnings  # clean
-nix develop -c cargo fmt -- --check         # clean
+git stash push -- <impl-files>      # set aside the impl
+<write the test that captures the impl's intent>
+cargo test <test-name>              # verify FAIL (this is RED)
+git add tests/... && git commit     # commit 🔴
+git stash pop                       # restore impl
+cargo test <test-name>              # verify PASS
+git add src/... && git commit       # commit 🟢
+```
+
+**The pre-commit hook enforces sequence — 🔴 must immediately precede 🟢.**
+The hook is the structural enforcement; the discipline is the cultural one.
+
+Use cargo directly (direnv keeps the shell warm):
+
+```
+cargo test                       # all tests pass
+cargo clippy -- -D warnings      # clean
+cargo fmt -- --check             # clean
 ```
 
 Work on your own branch. Never commit directly to main. Merge requires
