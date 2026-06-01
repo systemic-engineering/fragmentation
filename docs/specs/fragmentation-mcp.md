@@ -540,7 +540,14 @@ time, additional_context)` per
 structured-tuple shape. Reyes/Henao/Hassall 2024 verbatim; not
 freshly invented.
 
-### 3.6 The tool list — twelve in total
+### 3.6 The tool list — twelve categories, fifteen callables
+
+The §3.6 surface is twelve CATEGORIES (the row labels below); the
+SHARD category expands into four sub-tools per §3.4
+(`open`/`status`/`flush`/`close`), so the net wire callable count
+is **fifteen**. T2 of §9 split the previously-aggregate
+`fragmentation.shard` slot to make the per-sub-tool dispatch
+explicit at the wire.
 
 | Tool | Category | Realtime-eligible? |
 |---|---|---|
@@ -554,13 +561,18 @@ freshly invented.
 | `fragmentation.refs.update` | refs | yes (always) |
 | `fragmentation.history` | refs | soft-default |
 | `fragmentation.search` | refs | soft-default |
-| `fragmentation.shard.open` / `.status` / `.flush` / `.close` | shard | management, n/a |
+| `fragmentation.shard.open` / `.status` / `.flush` / `.close` | shard (4 sub-tools) | management, n/a |
 | `fragmentation.observe` | observation | always-hot |
 
 "Realtime-eligible" means the tool can be invoked via
 `crystallize_bounded(deadline)` in the underlying dispatch. Soft-
 default means the contract is best-effort unless the agent
 explicitly declares `realtime: "hard"` and a deadline.
+
+Implementation surface (T2): the fifteen names live as
+`FIFTEEN_TOOL_NAMES` in `vcs/mcp/src/registry.rs`; the four shard
+sub-tools route through `vcs/mcp/src/shard.rs`'s `ShardRegistry`,
+which holds each shard's `HamiltonScheduler` instance.
 
 ---
 

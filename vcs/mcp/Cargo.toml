@@ -8,10 +8,12 @@ repository = "https://github.com/systemic-engineering/fragmentation"
 keywords = ["mcp", "json-rpc", "agent", "git", "content-addressed"]
 categories = ["command-line-utilities", "development-tools"]
 
-# Per fragmentation-mcp.md §6's Cargo.toml sketch. T1 lands the stdio
-# transport + the twelve-tool registry stubs. `http` and `git-interop`
-# features are reserved slots; their `dep:` lines wait for T4 (HTTP)
-# and T4 (git crosswalk). The stub features compile to no-ops in T1.
+# Per fragmentation-mcp.md §6's Cargo.toml sketch. T1 landed the stdio
+# transport + the twelve-tool registry stubs; T2 wires the four
+# shard sub-tools and the HamiltonScheduler tick on dispatch.
+# `http` and `git-interop` are reserved slots; their `dep:` lines
+# wait for T4 (HTTP) and T4 (git crosswalk). The stub features
+# compile to no-ops until then.
 [features]
 default = ["stdio"]
 stdio = []
@@ -23,11 +25,18 @@ fragmentation = { path = "../.." }
 prism-core = { path = "../../../prism/core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# T2: shard IDs are UUIDs (v4 random). `serde` for wire serde,
+# `v4` for the generator. No bare strings cross the shard surface
+# (per [[feedback-no-bare-types]]).
+uuid = { version = "1", features = ["v4", "serde"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "io-std", "io-util"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "io-std", "io-util", "process", "time"] }
 
+# T2: binary renamed `fragmentation-mcp` → `frgmnt`. Per Alex's
+# directive ("build fragmentation as a frgmnt binary"). Single-word
+# binary name; same crate; PATH-friendly.
 [[bin]]
-name = "fragmentation-mcp"
-path = "src/bin/fragmentation-mcp.rs"
+name = "frgmnt"
+path = "src/bin/frgmnt.rs"

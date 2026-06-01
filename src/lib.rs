@@ -46,6 +46,7 @@ pub mod encoding;
 pub mod fragment;
 #[cfg(feature = "concurrent")]
 pub mod frgmnt_store;
+pub mod hamilton_scheduler;
 pub mod keys;
 #[cfg(feature = "project")]
 pub mod manifest;
