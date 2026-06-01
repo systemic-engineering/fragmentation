@@ -74,9 +74,14 @@ fn registry_dispatches_tools_list() {
 
 #[test]
 fn tool_call_for_stub_returns_not_implemented_yet() {
+    // T3 wired `fragmentation.commit` + `fragmentation.read`; the
+    // remaining ten tools (snapshot, diff, merge, branch, refs.*,
+    // history, search, observe) still carry the
+    // ERROR_NOT_IMPLEMENTED_YET stub. `fragmentation.snapshot` is
+    // chosen here as a stable T4+ sentinel.
     let registry = ToolRegistry::with_default_tools();
     let params = serde_json::json!({
-        "name": "fragmentation.commit",
+        "name": "fragmentation.snapshot",
         "arguments": {}
     });
     let request = Request {

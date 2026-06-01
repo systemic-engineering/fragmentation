@@ -5,14 +5,17 @@
 //! category, so the net wire callable count is fifteen. T2 splits
 //! `fragmentation.shard` into `shard.open` / `.status` / `.flush` /
 //! `.close` and wires their bodies against [`crate::shard::ShardRegistry`].
+//! T3 wires `fragmentation.commit` + `fragmentation.read` via
+//! [`crate::tools::content`], and `shard.status` reads real numbers
+//! off each shard's [`fragmentation::frgmnt_store::FrgmntStore`].
 //!
-//! Every other tool still returns [`crate::ERROR_NOT_IMPLEMENTED_YET`]
-//! from `tools/call`; T3 wires the content surface bodies.
+//! Every remaining tool still returns [`crate::ERROR_NOT_IMPLEMENTED_YET`]
+//! from `tools/call`; T4+ wires the rest.
 //!
 //! Substrate-pull: `[substrate-pull:realize]` — the registry is
 //! boundary Rust at the dispatch altitude. The capability (shard
-//! state + scheduler ticks) lives in `shard::ShardRegistry`; the
-//! registry here is the wire binding.
+//! state + scheduler ticks + content storage) lives in `shard` and
+//! `fragmentation`; the registry here is the wire binding.
 
 use std::collections::HashMap;
 
@@ -20,8 +23,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::shard::{BudgetMb, ShardId, ShardRegistry};
+use crate::tools::content as content_tools;
 use crate::types::{MethodName, ToolName};
-use crate::wire::{Request, Response, ResponseError, ERROR_INVALID_PARAMS, ERROR_METHOD_NOT_FOUND};
+use crate::wire::{
+    Request, Response, ResponseError, ERROR_INTERNAL, ERROR_INVALID_PARAMS, ERROR_METHOD_NOT_FOUND,
+};
 
 /// Substrate-defined error code for "the tool exists but T3+ has not
 /// implemented its body yet". OUTSIDE JSON-RPC's reserved
@@ -256,19 +262,27 @@ impl ToolRegistry {
             .cloned()
             .unwrap_or_else(|| json!({}));
 
-        // Shard sub-tools route to the live ShardRegistry; everything
-        // else is still T1's not-implemented-yet stub.
+        // Shard sub-tools route to the live ShardRegistry. T3 wires
+        // the content sub-tools (`commit` + `read`) via
+        // `crate::tools::content`. Everything else stays in the T2
+        // not-implemented-yet stub until its tick lands.
         match tool_str {
             "fragmentation.shard.open" => self.tool_shard_open(request, &arguments),
             "fragmentation.shard.status" => self.tool_shard_status(request, &arguments),
             "fragmentation.shard.flush" => self.tool_shard_flush(request, &arguments),
             "fragmentation.shard.close" => self.tool_shard_close(request, &arguments),
+            "fragmentation.commit" => {
+                content_tools::dispatch_commit(request.id, &arguments, &self.shards)
+            }
+            "fragmentation.read" => {
+                content_tools::dispatch_read(request.id, &arguments, &self.shards)
+            }
             _ => Response::err(
                 request.id,
                 ResponseError::with_data(
                     ERROR_NOT_IMPLEMENTED_YET,
-                    format!("tool `{tool_str}` registered in T1; body lands in T3+"),
-                    json!({ "tool": tool_str, "tick": "T2" }),
+                    format!("tool `{tool_str}` registered in T1; body lands in T4+"),
+                    json!({ "tool": tool_str, "tick": "T3" }),
                 ),
             ),
         }
@@ -289,7 +303,18 @@ impl ToolRegistry {
             );
         };
         let budget = BudgetMb(budget_mb_raw);
-        let id = self.shards.open(budget);
+        // T3 wires disk-backed storage at shard construction. If the
+        // tempdir allocation fails (out of space, permission denied),
+        // the wire sees ERROR_INTERNAL with the substrate's message.
+        let id = match self.shards.open(budget) {
+            Ok(id) => id,
+            Err(e) => {
+                return Response::err(
+                    request.id,
+                    ResponseError::new(ERROR_INTERNAL, format!("shard.open: {e}")),
+                );
+            }
+        };
         Response::ok(
             request.id,
             json!({
@@ -306,20 +331,39 @@ impl ToolRegistry {
         };
         // `Mcp::dispatch_line` already pre-ticked the shard at the
         // dispatch entry; the body reads post-tick state via `with`.
-        let snapshot = self
-            .shards
-            .with(&id, |shard| (shard.budget(), shard.tick_count()));
-        let Some((budget, tick_count)) = snapshot else {
+        //
+        // T3 reads real numbers off the shard's FrgmntStore:
+        //   hot_bytes — BoundedStore::total_bytes() (resident cache)
+        //   hot_entries — BoundedStore::len() (entry count)
+        //   cold_bytes — 0 in T3; the on-disk `.frgmnt/objects/`
+        //     byte-scan is T-future (per
+        //     `docs/specs/fragmentation-mcp.md` §3.4's
+        //     `cold_entries` slot).
+        //   total_bytes — hot_bytes + cold_bytes (= hot_bytes for now)
+        let snapshot = self.shards.with(&id, |shard| {
+            (
+                shard.budget(),
+                shard.tick_count(),
+                shard.hot_bytes() as u64,
+                shard.hot_entries() as u64,
+            )
+        });
+        let Some((budget, tick_count, hot_bytes, hot_entries)) = snapshot else {
             return shard_not_found(request.id, &id);
         };
+        let cold_bytes: u64 = 0;
+        let cold_entries: u64 = 0;
+        let total_bytes = hot_bytes + cold_bytes;
         Response::ok(
             request.id,
             json!({
                 "shard_id": id.to_string(),
                 "budget_bytes": budget.as_u64(),
-                "hot_bytes": 0,
-                "cold_bytes": 0,
-                "total_bytes": 0,
+                "hot_bytes": hot_bytes,
+                "hot_entries": hot_entries,
+                "cold_bytes": cold_bytes,
+                "cold_entries": cold_entries,
+                "total_bytes": total_bytes,
                 "tick_count": tick_count.as_u64(),
                 "scheduler": "stub",
             }),

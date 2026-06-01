@@ -44,6 +44,7 @@
 pub mod mcp;
 pub mod registry;
 pub mod shard;
+pub mod tools;
 pub mod types;
 pub mod wire;
 
@@ -52,8 +53,12 @@ pub use mcp::Mcp;
 pub use registry::{
     is_known_method, Tool, ToolRegistry, ERROR_NOT_IMPLEMENTED_YET, FIFTEEN_TOOL_NAMES,
 };
-pub use shard::{BudgetMb, Shard, ShardId, ShardIdParseError, ShardRegistry};
-pub use types::{JsonRpcVersion, MethodName, RequestId, ToolName};
+pub use shard::{BudgetMb, Shard, ShardContentError, ShardId, ShardIdParseError, ShardRegistry};
+pub use tools::content::ERROR_OID_NOT_FOUND;
+pub use types::{
+    CommitContent, CommitMessage, ContentPath, JsonRpcVersion, MethodName, OidString, RequestId,
+    ToolName,
+};
 pub use wire::{
     ParseError, Request, Response, ResponseError, ERROR_INTERNAL, ERROR_INVALID_PARAMS,
     ERROR_INVALID_REQUEST, ERROR_METHOD_NOT_FOUND, ERROR_PARSE,

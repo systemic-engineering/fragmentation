@@ -74,6 +74,138 @@ impl From<String> for ToolName {
     }
 }
 
+// ---------------------------------------------------------------------------
+// T3 content-tool newtypes.
+//
+// Per `[[feedback-no-bare-types]]`: no bare `String` / `Vec<u8>` /
+// `PathBuf` crosses the content-tool surface. Each carries its own
+// altitude on the wire.
+// ---------------------------------------------------------------------------
+
+/// Git-compatible content OID — hex-encoded SHA-1, 40 chars.
+///
+/// Returned by `fragmentation.commit`, consumed by `fragmentation.read`.
+/// Internally `fragmentation::fragment::content_oid` produces these as
+/// `String`s; the newtype carries the discipline at the wire boundary.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct OidString(String);
+
+impl OidString {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl From<String> for OidString {
+    fn from(s: String) -> Self {
+        OidString(s)
+    }
+}
+
+impl From<&str> for OidString {
+    fn from(s: &str) -> Self {
+        OidString(s.to_string())
+    }
+}
+
+/// Commit message — the human-readable text describing a `fragmentation.commit`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct CommitMessage(String);
+
+impl CommitMessage {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl From<String> for CommitMessage {
+    fn from(s: String) -> Self {
+        CommitMessage(s)
+    }
+}
+
+impl From<&str> for CommitMessage {
+    fn from(s: &str) -> Self {
+        CommitMessage(s.to_string())
+    }
+}
+
+/// In-repo path — the logical path a commit's content lives at
+/// (e.g. `"src/lib.rs"`).
+///
+/// `String` rather than `PathBuf` at the wire altitude: the MCP
+/// boundary is always UTF-8, never an OS-specific byte sequence,
+/// and the substrate paths are virtual (the shard's content
+/// store, not the host filesystem). The newtype is the discipline.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct ContentPath(String);
+
+impl ContentPath {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl From<String> for ContentPath {
+    fn from(s: String) -> Self {
+        ContentPath(s)
+    }
+}
+
+impl From<&str> for ContentPath {
+    fn from(s: &str) -> Self {
+        ContentPath(s.to_string())
+    }
+}
+
+/// Content payload — the bytes of a commit.
+///
+/// T3 wires UTF-8 string content only (the spec's `content` field is
+/// a string at the JSON-RPC surface; binary content lands when the
+/// MCP spec's `"contents":[{ "type":"blob", ... }]` shape is wired).
+/// The newtype here lets the GREEN code be unambiguous about what
+/// crosses the boundary.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct CommitContent(String);
+
+impl CommitContent {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl From<String> for CommitContent {
+    fn from(s: String) -> Self {
+        CommitContent(s)
+    }
+}
+
+impl From<&str> for CommitContent {
+    fn from(s: &str) -> Self {
+        CommitContent(s.to_string())
+    }
+}
+
 /// JSON-RPC 2.0 protocol version sentinel.
 ///
 /// The literal `"2.0"`. A unit-like newtype: type-system discipline at
