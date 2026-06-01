@@ -1,24 +1,23 @@
-//! T1 RED — the scaffold tests.
+//! T1 scaffold tests — refined in T2 to track the §3.4/§3.6 split.
 //!
-//! These tests reference types and functions that DO NOT EXIST in
-//! `src/lib.rs` yet. The RED commit's job is to assert the contract;
-//! the GREEN commit's job is to make them compile and pass.
+//! These tests pin the wire envelope + the dispatch shape. T2
+//! refined the shard-tool count from one aggregate slot to four
+//! sub-tools, so the constants here are now `FIFTEEN_TOOL_NAMES`
+//! and the registry constructor is `with_default_tools`.
 //!
-//! Per `docs/specs/fragmentation-mcp.md` §9 T1:
-//! - JSON-RPC 2.0 envelope parses round-trip.
-//! - Tool registry names the twelve §3.6 tools.
-//! - `tools/list` dispatch returns the twelve names.
-//! - A non-existent method yields JSON-RPC error `-32601` (Method not found).
+//! Per `docs/specs/fragmentation-mcp.md` §3.6 (twelve categories,
+//! fifteen callables) + §9 T1 acceptance criteria.
 
 use fragmentation_mcp::{
-    Mcp, MethodName, Request, RequestId, Response, ToolName, ToolRegistry, JSON_RPC_VERSION,
-    TWELVE_TOOL_NAMES,
+    Mcp, MethodName, Request, RequestId, Response, ToolName, ToolRegistry, FIFTEEN_TOOL_NAMES,
+    JSON_RPC_VERSION,
 };
 
 #[test]
-fn twelve_tools_named_per_spec_section_3_6() {
-    // §3.6 says "twelve in total" — these are the row labels in the
-    // table at line 545 of fragmentation-mcp.md.
+fn fifteen_callables_per_spec_section_3_6_refined() {
+    // §3.6 says "twelve in total" — those twelve are CATEGORIES.
+    // §3.4 names four sub-tools for the SHARD category, so the
+    // total wire callable count is 11 + 4 = 15.
     let expected = [
         "fragmentation.commit",
         "fragmentation.snapshot",
@@ -30,13 +29,16 @@ fn twelve_tools_named_per_spec_section_3_6() {
         "fragmentation.refs.update",
         "fragmentation.history",
         "fragmentation.search",
-        "fragmentation.shard",
+        "fragmentation.shard.open",
+        "fragmentation.shard.status",
+        "fragmentation.shard.flush",
+        "fragmentation.shard.close",
         "fragmentation.observe",
     ];
-    assert_eq!(TWELVE_TOOL_NAMES.len(), 12);
+    assert_eq!(FIFTEEN_TOOL_NAMES.len(), 15);
     for name in expected {
         assert!(
-            TWELVE_TOOL_NAMES.iter().any(|t| *t == name),
+            FIFTEEN_TOOL_NAMES.iter().any(|t| *t == name),
             "missing tool name: {name}"
         );
     }
@@ -53,7 +55,7 @@ fn request_round_trips_through_json() {
 
 #[test]
 fn registry_dispatches_tools_list() {
-    let registry = ToolRegistry::with_twelve_tools();
+    let registry = ToolRegistry::with_default_tools();
     let request = Request {
         jsonrpc: JSON_RPC_VERSION,
         id: RequestId::from(1u64),
@@ -67,12 +69,12 @@ fn registry_dispatches_tools_list() {
         .and_then(|r| r.get("tools"))
         .and_then(|t| t.as_array())
         .expect("tools array");
-    assert_eq!(tools.len(), 12);
+    assert_eq!(tools.len(), 15);
 }
 
 #[test]
 fn tool_call_for_stub_returns_not_implemented_yet() {
-    let registry = ToolRegistry::with_twelve_tools();
+    let registry = ToolRegistry::with_default_tools();
     let params = serde_json::json!({
         "name": "fragmentation.commit",
         "arguments": {}
@@ -96,7 +98,7 @@ fn tool_call_for_stub_returns_not_implemented_yet() {
 
 #[test]
 fn unknown_method_yields_method_not_found() {
-    let registry = ToolRegistry::with_twelve_tools();
+    let registry = ToolRegistry::with_default_tools();
     let request = Request {
         jsonrpc: JSON_RPC_VERSION,
         id: RequestId::from(3u64),
@@ -120,7 +122,8 @@ fn mcp_constructs_with_default_registry() {
     let tool_names = mcp.tool_names();
     let names: Vec<&str> = tool_names.iter().map(ToolName::as_str).collect();
     assert!(names.contains(&"fragmentation.commit"));
-    assert_eq!(names.len(), 12);
+    assert!(names.contains(&"fragmentation.shard.open"));
+    assert_eq!(names.len(), 15);
 }
 
 #[test]

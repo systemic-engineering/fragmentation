@@ -1,7 +1,9 @@
 //! Integration test — the binary spawns, accepts a `tools/list`
-//! over stdin, returns the twelve tool names over stdout.
+//! over stdin, returns the fifteen tool names over stdout.
 //!
-//! Per `docs/specs/fragmentation-mcp.md` §9 T1 acceptance criteria.
+//! Per `docs/specs/fragmentation-mcp.md` §9 T1 acceptance criteria,
+//! refined by T2 to track the four shard sub-tools (net 15) + the
+//! binary rename to `frgmnt` (Alex's directive).
 
 use std::process::Stdio;
 use std::time::Duration;
@@ -9,10 +11,10 @@ use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 
-const BINARY_NAME: &str = "fragmentation-mcp";
+const BINARY_NAME: &str = "frgmnt";
 
 #[tokio::test]
-async fn binary_lists_twelve_tools_over_stdio() {
+async fn binary_lists_fifteen_tools_over_stdio() {
     let binary = locate_binary();
     let mut child = Command::new(&binary)
         .arg("--stdio")
@@ -20,7 +22,7 @@ async fn binary_lists_twelve_tools_over_stdio() {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .expect("spawn fragmentation-mcp");
+        .expect("spawn frgmnt");
 
     let mut stdin = child.stdin.take().expect("stdin");
     let stdout = child.stdout.take().expect("stdout");
@@ -51,7 +53,7 @@ async fn binary_lists_twelve_tools_over_stdio() {
         .and_then(|r| r.get("tools"))
         .and_then(|t| t.as_array())
         .expect("tools array");
-    assert_eq!(tools.len(), 12, "expected twelve tool names");
+    assert_eq!(tools.len(), 15, "expected fifteen tool callables");
 
     let names: Vec<&str> = tools
         .iter()
@@ -68,7 +70,10 @@ async fn binary_lists_twelve_tools_over_stdio() {
         "fragmentation.refs.update",
         "fragmentation.history",
         "fragmentation.search",
-        "fragmentation.shard",
+        "fragmentation.shard.open",
+        "fragmentation.shard.status",
+        "fragmentation.shard.flush",
+        "fragmentation.shard.close",
         "fragmentation.observe",
     ] {
         assert!(
@@ -86,7 +91,7 @@ async fn binary_lists_twelve_tools_over_stdio() {
 }
 
 #[tokio::test]
-async fn binary_returns_not_implemented_yet_for_any_tool_call() {
+async fn binary_opens_a_shard_over_stdio() {
     let binary = locate_binary();
     let mut child = Command::new(&binary)
         .arg("--stdio")
@@ -94,13 +99,13 @@ async fn binary_returns_not_implemented_yet_for_any_tool_call() {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .expect("spawn fragmentation-mcp");
+        .expect("spawn frgmnt");
 
     let mut stdin = child.stdin.take().expect("stdin");
     let stdout = child.stdout.take().expect("stdout");
     let mut reader = BufReader::new(stdout).lines();
 
-    let request = r#"{"jsonrpc":"2.0","id":42,"method":"tools/call","params":{"name":"fragmentation.commit","arguments":{}}}"#;
+    let request = r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"fragmentation.shard.open","arguments":{"budget_mb":64}}}"#;
     stdin.write_all(request.as_bytes()).await.expect("write");
     stdin.write_all(b"\n").await.expect("write newline");
     stdin.flush().await.expect("flush");
@@ -113,13 +118,13 @@ async fn binary_returns_not_implemented_yet_for_any_tool_call() {
         .expect("response line");
 
     let parsed: serde_json::Value = serde_json::from_str(&line).expect("parse JSON");
-    assert_eq!(parsed.get("id").and_then(|v| v.as_u64()), Some(42));
-    let code = parsed
-        .get("error")
-        .and_then(|e| e.get("code"))
-        .and_then(|c| c.as_i64())
-        .expect("error code");
-    assert_eq!(code, fragmentation_mcp::ERROR_NOT_IMPLEMENTED_YET);
+    assert_eq!(parsed.get("id").and_then(|v| v.as_u64()), Some(2));
+    let shard_id = parsed
+        .get("result")
+        .and_then(|r| r.get("shard_id"))
+        .and_then(|s| s.as_str())
+        .expect("shard_id in result");
+    assert_eq!(shard_id.len(), 36, "expected hyphenated UUID");
 
     let status = tokio::time::timeout(Duration::from_secs(5), child.wait())
         .await
@@ -128,7 +133,7 @@ async fn binary_returns_not_implemented_yet_for_any_tool_call() {
     assert!(status.success());
 }
 
-/// Locate the freshly-built `fragmentation-mcp` binary. cargo sets
+/// Locate the freshly-built `frgmnt` binary. cargo sets
 /// `CARGO_BIN_EXE_<name>` for integration tests of bin crates; we
 /// use that to avoid PATH dependencies.
 fn locate_binary() -> std::path::PathBuf {
