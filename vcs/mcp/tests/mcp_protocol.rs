@@ -642,6 +642,149 @@ async fn graceful_response_to_id_with_null() {
 }
 
 // ---------------------------------------------------------------------------
+// 13. T6 — inputSchema published for every tool (MCP-spec conformance).
+//
+// Per MCP 2025-06-18 §tools, every entry in `tools/list` MUST carry
+// an `inputSchema` field. Clients (Claude Code, Cursor, Claude
+// Desktop) validate the response and refuse to load tool surfaces
+// that omit it.
+//
+// T1–T5 emitted only `name` + `description`. Alex hit the
+// validation failure on first attempt to drive `frgmnt` from
+// Claude Code:
+//
+//   Reconnected to frgmnt, but fetching tools failed: [
+//     {"path":["tools",0,"inputSchema"],
+//      "message":"Invalid input: expected object, received undefined"},
+//     ... (15 errors, one per tool)
+//   ]
+//
+// This test reproduces that validation and lands as RED before the
+// schemas exist.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn tools_list_emits_input_schema_for_every_tool() {
+    let (mut child, mut stdin, mut reader) = spawn_frgmnt();
+
+    write_line(&mut stdin, INITIALIZE_REQUEST).await;
+    let _ = read_line(&mut reader).await;
+    write_line(&mut stdin, NOTIFICATIONS_INITIALIZED).await;
+    write_line(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#,
+    )
+    .await;
+    drop(stdin);
+
+    let list_line = read_line(&mut reader).await;
+    let parsed: serde_json::Value =
+        serde_json::from_str(&list_line).expect("parse tools/list");
+    let tools = parsed
+        .get("result")
+        .and_then(|r| r.get("tools"))
+        .and_then(|t| t.as_array())
+        .expect("tools array");
+    assert_eq!(tools.len(), 15);
+
+    for (i, tool) in tools.iter().enumerate() {
+        let name = tool
+            .get("name")
+            .and_then(|n| n.as_str())
+            .unwrap_or("<missing>");
+
+        // The load-bearing assertion: inputSchema must be present.
+        let schema = tool.get("inputSchema").unwrap_or_else(|| {
+            panic!("tool {i} (`{name}`) missing required field `inputSchema`");
+        });
+
+        // The substrate's minimum claim: every schema is a JSON
+        // object with `type` = `"object"`. Per JSON Schema
+        // 2020-12, this is the minimum well-formed input schema.
+        assert!(
+            schema.is_object(),
+            "tool `{name}` has non-object inputSchema: {schema}"
+        );
+        assert_eq!(
+            schema.get("type").and_then(|v| v.as_str()),
+            Some("object"),
+            "tool `{name}` inputSchema.type is not \"object\": {schema}"
+        );
+    }
+
+    let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
+}
+
+// ---------------------------------------------------------------------------
+// 14. T6 — wired-tool schemas carry their required-args.
+//
+// Beyond "schema present", the spec calls for the schema to describe
+// the actual argument shape. For the four tools T2/T3 wired against
+// real bodies (shard.open, shard.status, commit, read), we know the
+// required arguments exactly — lock them in so future spec drift
+// surfaces immediately.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn wired_tool_schemas_publish_required_arguments() {
+    let (mut child, mut stdin, mut reader) = spawn_frgmnt();
+
+    write_line(&mut stdin, INITIALIZE_REQUEST).await;
+    let _ = read_line(&mut reader).await;
+    write_line(&mut stdin, NOTIFICATIONS_INITIALIZED).await;
+    write_line(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#,
+    )
+    .await;
+    drop(stdin);
+
+    let list_line = read_line(&mut reader).await;
+    let parsed: serde_json::Value =
+        serde_json::from_str(&list_line).expect("parse tools/list");
+    let tools = parsed
+        .get("result")
+        .and_then(|r| r.get("tools"))
+        .and_then(|t| t.as_array())
+        .expect("tools array");
+
+    let expectations: &[(&str, &[&str])] = &[
+        ("fragmentation.shard.open", &["budget_mb"]),
+        ("fragmentation.shard.status", &["shard_id"]),
+        ("fragmentation.shard.flush", &["shard_id"]),
+        ("fragmentation.shard.close", &["shard_id"]),
+        (
+            "fragmentation.commit",
+            &["shard_id", "path", "content", "message"],
+        ),
+        ("fragmentation.read", &["shard_id", "oid"]),
+    ];
+
+    for (tool_name, required) in expectations {
+        let tool = tools
+            .iter()
+            .find(|t| t.get("name").and_then(|n| n.as_str()) == Some(*tool_name))
+            .unwrap_or_else(|| panic!("tool `{tool_name}` not in tools/list"));
+        let schema = tool
+            .get("inputSchema")
+            .unwrap_or_else(|| panic!("tool `{tool_name}` missing inputSchema"));
+        let req = schema
+            .get("required")
+            .and_then(|r| r.as_array())
+            .unwrap_or_else(|| panic!("tool `{tool_name}` schema missing `required` array"));
+        let actual: Vec<&str> = req.iter().filter_map(|v| v.as_str()).collect();
+        for field in *required {
+            assert!(
+                actual.iter().any(|a| a == field),
+                "tool `{tool_name}` schema.required missing `{field}` (got {actual:?})"
+            );
+        }
+    }
+
+    let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
+}
+
+// ---------------------------------------------------------------------------
 // Binary location — see binary_stdio.rs for the standard cargo idiom.
 // ---------------------------------------------------------------------------
 
