@@ -16,9 +16,13 @@ Depends on:
   Clone>` content-addressed cache with `.frgmnt/` disk spillover. THIS
   is the structure that backs the new `Crystallizations<H>` table; the
   scheduler governs which entries stay hot.
-- `fragmentation/src/lib.rs` — the module surface this spec extends. Two
-  new modules (`scheduler`, `pure`) plus one rewrite (the existing
-  `spectral_coordinate` is unrelated and stays).
+- `fragmentation/src/lib.rs` — the module surface this spec extends.
+  One new module (`scheduler`) plus the FrgmntStore mode-flag delta
+  (§5.6). No `pure` module — Pure is an AST verdict, not a Rust
+  marker (§4).
+- `mirror/bootstrap/src/body.rs` (new) — the Body = prism + glass +
+  AST restructure (§5.1). Replaces today's `Arc<dyn Fn(...)>`
+  closure shape; the AST is what the analyses walk.
 - `fragmentation/src/bounded_store.rs` — `BoundedStore<N>` with byte-LIFO
   eviction. The scheduler's promotion/eviction hook lives one layer up.
 - `fragmentation/docs/specs/mirror-native-vcs.md` (commit `a224792`) —
@@ -37,9 +41,10 @@ Depends on:
   the engineering bar this spec is graded against.
 - `mirror/docs/cicd/prior-art.md` (commit landed 2026-06-01) — the
   Nix `__noChroot` leak, the Bazel `--config=` flag leak, the Cargo
-  `build.rs` leak. The Pure trait section names what each of those
-  leaks looks like in mirror terms; the structural defense is
-  `requires deterministic(...)` plus the `Pure` marker.
+  `build.rs` leak. The Pure AST-analysis section (§4) names what
+  each of those leaks looks like in mirror terms; the structural
+  defense is `requires deterministic(...)` plus the `Pure` AST
+  verdict.
 - `mirror/docs/specs/kintsugi-minimum-runnable.md` — Tick B (the
   `@cli` body-evaluation tick) does not depend on the scheduler
   landing; Tick C (the build-graph altitude) does. The HamiltonScheduler
@@ -68,16 +73,17 @@ Depends on:
   scheduler's algedonic priority is the structural inheritance; this
   is the canonical reference cited where the lineage is real.
 - `prism/core/src/lib.rs` — `prism_core` re-exports `Loss`,
-  `Transparency`, `PropertyVerdict`, `Imperfect`. The `Pure` trait
-  joins this family. Section §4 names the home and the dependency
-  direction.
+  `Transparency`, `PropertyVerdict`, `Imperfect`. The `Pure` and
+  `WcetBounded` named properties join this family as
+  `PropertyVerdict`-shaped verdicts, NOT as new traits. Section
+  §4 names the home and the analysis shape.
 - `prism/imperfect/src/transparency.rs` — the `PropertyVerdict` /
-  `Transparency<P>` algebra that `Pure` integrates with. A Pure
-  property's verdict is a `PropertyVerdict::Pass` when the body
-  satisfies the marker, `Fail(Diagnostic)` when it provably does not,
-  `Partial { confidence, diagnostics }` when the property checker
-  cannot prove either way. This is the existing seam; no new
-  framework.
+  `Transparency<P>` algebra the AST-analysis verdicts integrate
+  with. A Pure verdict is `PropertyVerdict::Pass` when the AST
+  contains only pure-by-construction nodes, `Fail(Diagnostic)` when
+  an impurity is located at a substrate path,
+  `Partial { confidence, diagnostics }` when the analysis cannot
+  classify a site. This is the existing seam; no new framework.
 - AGENTS.md (fragmentation) — "Boundary Rust is not frozen capability."
   The HamiltonScheduler is boundary Rust; it carries no capability
   (no I/O, no global state, no clock); it carries *binding* between
@@ -92,14 +98,16 @@ Unblocks:
   definition" comment) — applied to the table that should have had
   it from the start.
 - C7 of [[kintsugi-thesis]] ("property checks deterministic") moves
-  from ⚠️ to ✅ via the `Pure` marker trait. A `Body<H>` constrained
-  to `Pure + Fn(...)` is by-construction deterministic; the property
-  check `requires deterministic(body)` becomes a type-system
+  from ⚠️ to ✅ via the `check_pure` AST analysis (§4.2). A
+  `Body<H>` whose AST discharges Pure as `Pass` is by-construction
+  deterministic; the verdict is content-addressable; the property
+  check `requires deterministic(body)` becomes a substrate
   invariant rather than an audit pass.
 - C9 of [[kintsugi-thesis]] ("@io boundary discipline") gets the
-  compile-time half: `Pure` distinguishes pure Rust bodies from
-  `@io`-wrapped bodies at the type level, so the substrate can refuse
-  to register a body marked `Pure` whose declaration is `@io`.
+  AST-analysis half: `check_pure` mechanically detects `@io`-namespaced
+  calls in a body's AST and emits a Fail verdict located at the call
+  site. The substrate refuses to admit a Pure-required body whose
+  AST contains `@io`.
 - A general path for the build-graph altitude of kintsugi. The
   scheduler's `GraphObservation` lifts from "spectral-db's 16
   features" to "the build graph's 16 features"; the four strategies
@@ -141,13 +149,26 @@ The claim has three load-bearing readings:
    discipline applies to anything `Fragmentable + Clone` — not just
    to spectral-db's eigenvalue vectors.
 
-3. **Property altitude.** Fragmentation owns the marker traits that
-   make Rust-side determinism *guaranteed at compile time*, not
-   audited after the fact. That's the `Pure` trait. The `Body<H>` of a
-   crystallization, constrained to `Pure + Fn(...)`, has no escape
-   hatch for `SystemTime::now()` or env reads. Sub-Turing by
-   composition with the Rust type system. Lives in `prism_core` (§4
-   names the home and the reasons); fragmentation depends on it.
+3. **Property altitude.** Fragmentation owns the discipline that
+   makes Rust-side determinism *verifiable from content*, not audited
+   from convention. That's the AST-analysis verdict family (`Pure`,
+   `WcetBounded`) carried by the existing `prism_core::PropertyVerdict`
+   / `Transparency<Ref>` algebra. The `Body<H>` of a crystallization
+   is structured (prism + glass + AST, §5.1) precisely so the AST
+   IS what the analyses walk; the verdicts are content-addressable
+   because the AST is content-addressable. Sub-Turing by composition
+   with the substrate's own content discipline; no new Rust
+   type-system features required. §4 names the home and the analysis
+   shape.
+
+4. **Realtime altitude.** Fragmentation owns the hard-realtime /
+   soft-realtime contract over the content store — the discipline
+   inherited line-for-line from Margaret Hamilton's Apollo executive
+   (§1.2). The store carries a per-entry `RealtimeClass`; the
+   dispatcher offers `crystallize` (soft) and `crystallize_bounded`
+   (hard); the scheduler honours priority drops under overload. This
+   is what makes the substrate viable for critical-industry consumers
+   without forcing them to invent a bypass.
 
 The consequences of the claim:
 
@@ -158,34 +179,42 @@ The consequences of the claim:
   fragmentation surface where it makes sense) and via direct
   fragmentation dependency where it doesn't. The `Crystallizations<H>`
   table at `bootstrap/src/crystallize.rs:434` migrates to a
-  fragmentation-backed store with a scheduler hook.
-- The Pure trait lives in `prism_core`, not in fragmentation. Reason:
-  Pure is a property at the same algebraic altitude as `Loss` and
-  `Transparency` (both `prism_core` re-exports from `terni`); placing
-  it elsewhere fragments the property surface. The dependency direction
-  is `fragmentation -> prism_core`, not the reverse. See §4.4.
-- Future Rust-substrate primitives (the marker traits the body system
-  depends on; the cross-language FFI shape; the BEAM-side equivalents)
-  belong in fragmentation unless they're property-shaped, in which
-  case they belong in prism_core. The recurring decision lens:
-  *substrate management* (memory, content, lifetime, ordering) →
-  fragmentation; *substrate property* (purity, transparency, loss,
-  verdict) → prism_core.
+  fragmentation-backed store with a scheduler hook; the `Body<H>`
+  type at the same site restructures to a (prism, glass, AST) triple
+  (§5.1).
+- Property verdicts — `Pure`, `WcetBounded`, the family that grows
+  next — are named in `prism_core` and computed by AST analyses
+  (§4). No new Rust marker trait. The dependency direction is
+  `fragmentation -> prism_core`, not the reverse. See §4.4.
+- Future Rust-substrate primitives (the body system's interpreter;
+  the cross-language FFI shape; the BEAM-side equivalents) belong
+  in fragmentation unless they're property-shaped, in which case
+  they belong in prism_core. The recurring decision lens:
+  *substrate management* (memory, content, lifetime, ordering,
+  realtime class) → fragmentation; *substrate property* (purity,
+  transparency, loss, verdict, WCET bound) → prism_core.
 
-The claim refuses two re-conflations the substrate has tried before:
+The claim refuses three re-conflations the substrate has tried
+before:
 
 - **"The scheduler is engine-specific."** No. The scheduler is a
   management discipline over content-addressed entries with access
-  patterns. Spectral-db is one consumer; mirror's crystallizations
-  table is another; any future consumer with a hot/cold distinction
-  is a third. The discipline is general; the strategies are general;
-  the four-strategy taxonomy maps onto any content-addressed cache
-  with eviction.
-- **"Pure belongs with the body type."** No. Pure is a property the
-  body satisfies, not a wrapper around the body. The property algebra
-  is `prism_core`'s; the body is fragmentation's (when content-
-  addressed) or mirror's (when grammar-substrate). The trait at
-  `prism_core::Pure` is consumed where the body lives.
+  patterns and realtime classes. Spectral-db is one consumer;
+  mirror's crystallizations table is another; any future consumer
+  with a hot/cold distinction is a third. The discipline is general;
+  the strategies are general; the four-strategy taxonomy maps onto
+  any content-addressed cache with eviction.
+- **"Pure is a Rust marker on the body type."** No. Pure is a
+  *property the body's AST satisfies* (or doesn't), produced by an
+  AST analysis, carried as `PropertyVerdict::Pass | Partial | Fail`.
+  The body's AST is content; the analysis is mechanical; the verdict
+  is content-addressable. See §4.
+- **"Realtime is the consumer's problem."** No. The substrate makes
+  the contract first-class: hard-realtime entries pinned-resident,
+  hard-realtime dispatch with deadline, drops surfaced as
+  `Transparency<Ref>::Opaque({path → Fail(NotResident)})`. Critical-
+  industry consumers depend on the substrate honouring this, not on
+  themselves bypassing it (§1.5).
 
 ---
 
@@ -240,32 +269,91 @@ shape as VSM System 3's response to Cyberstride exception reports.
 Mirror reaches it from compiler diagnostics; the cyberneticians
 reached it from variety engineering. Independent rediscovery.
 
-### 1.2 Hamiltonian mechanics — energy-conserving evolution
+### 1.2 Margaret Hamilton — the woman who knew what to drop
 
-The name `HamiltonScheduler` is older than the Prism-Scheduler design.
-It names the discipline that cold subtrees release to disk *without
-information loss*: the content-addressed property guarantees that what
-gets evicted from RAM can be reconstructed exactly from disk, modulo
-the `H`-world's hash collision resistance. The total information
-content of the system is conserved across the hot↔cold boundary; only
-the *kinetic* representation (in-RAM) is swapped for the *potential*
-representation (on-disk).
+**The HamiltonScheduler is named for Margaret Hamilton.** Not for
+Hamiltonian mechanics — that is coincidence-of-name, addressed at the
+end of this section. The real lineage is the woman who wrote a
+system that knew what to drop under load, and flew it to the moon
+on 74 kilobytes.
 
-Hamiltonian mechanics: `H(p, q) = T(p) + V(q)`, kinetic plus potential,
-total energy conserved under the system's evolution. The metaphor
-maps cleanly: `H(hot, cold) = |hot| + |cold|`, the total content
-stays constant; eviction is a canonical transformation from kinetic
-(hot, fast-access, RAM) to potential (cold, content-addressed, disk);
-rehydration is the inverse transformation. No information is created
-or destroyed; only its representation moves between conjugate
-coordinates.
+Margaret Hamilton (b. 1936) led the Software Engineering Division at
+MIT's Charles Stark Draper Laboratory, where she ran the team that
+built the Apollo onboard flight software (1961-). She coined
+**"software engineering"** as a discipline — the term itself is
+hers, asserted against an industry that did not yet consider software
+an engineering practice. She was awarded the **Presidential Medal of
+Freedom (2016)** by Barack Obama for that work. After Apollo she
+founded Hamilton Technologies and developed the Universal Systems
+Language (USL) — the less-cited follow-on that tried to formalise
+what Apollo had taught her.
 
-Where the metaphor stops: real Hamiltonian systems are continuous and
-time-reversible; the scheduler's evolution is discrete (per-tick) and
-strategically biased (Fate selects to *minimise* pressure, not to
-preserve a specific energy level). The conservation law that holds
-is *content* conservation, not *energy* conservation. But the
-name names what's conserved, and the discipline names how.
+The load-bearing inheritance is the **1202 alarm**, Apollo 11, lunar
+descent, 1969. The Lunar Module's executive overloaded — a
+misconfigured rendezvous radar was flooding the computer with
+unscheduled interrupts. The Apollo Guidance Computer had 64 KB of
+rope ROM and 2 KB of erasable RAM. There was no room to fail
+silently and no room to fail safely.
+
+Hamilton's **priority-driven asynchronous executive** did the thing
+that made the landing possible: it **dropped low-priority work**
+(the radar updates) and **kept the landing-priority tasks running**
+(the navigation, the throttle, the displays). It **announced the
+drop** — that's what the 1202 alarm WAS, a structured diagnostic
+surfaced to the crew, not a silent corruption. The astronauts saw
+the alarm, looked at Mission Control, were told to proceed, and
+landed. They trusted her code because her code had told them the
+truth.
+
+The shape Hamilton invented — and the shape the HamiltonScheduler
+inherits, directly — is four-property:
+
+1. **Bounded resources.** Memory, time, dispatch slots are finite
+   and known. The scheduler operates within a stated bound; the
+   bound is part of the contract, not an aspirational note.
+2. **Priority discipline.** Work is ordered. High-priority work is
+   not preempted by low-priority work, regardless of order of
+   arrival or queue pressure.
+3. **Graceful drop under overload.** When the bound is approached,
+   low-priority work is dropped first. The scheduler chooses what
+   to release; nothing is silently corrupted to make room.
+4. **No silent failure.** Drops are surfaced as structured
+   diagnostics — Hamilton's 1202; mirror's
+   `PropertyVerdict::Partial { confidence, diagnostics }` or
+   `Fail(Diagnostic)`. The substrate above the scheduler must be
+   able to *see* what was dropped and decide what to do next.
+
+These are not metaphor either. They map line-for-line to the
+realtime-discipline §1.5 below, to the four `Strategy` variants in
+§3.5 (Abyss is the algedonic-low pole; Explorer is the
+algedonic-high pole; Pathfinder and Cartographer are the priority
+gradient between), and to `Transparency<P>`'s
+`Pass/Partial/Fail-with-diagnostics` shape carrying the discipline
+through the type system.
+
+Margaret Hamilton must be **cited by name in the eventual Rust
+doc-comments** for `scheduler::hamilton`. The module-level rustdoc
+block opens with her — name, work, the 1202 alarm, the four-property
+shape — before it opens with type signatures. The lineage is
+load-bearing; the substrate honours it by reading her name on the
+way in.
+
+#### 1.2.1 Coincidence-of-name — Hamiltonian mechanics
+
+William Rowan Hamilton (1805–1865) gave the world
+`H(p, q) = T(p) + V(q)` — kinetic plus potential, total energy
+conserved under time evolution. There is a clean reading of the
+scheduler's hot↔cold conservation in that frame: in-RAM
+representation is the "kinetic" coordinate; on-disk
+content-addressed bytes are the "potential" coordinate;
+total content is conserved across the boundary. That reading is
+mnemonically useful and intellectually fine.
+
+It is **not** the source of the name. The HamiltonScheduler is
+Margaret Hamilton's, not William Rowan Hamilton's. The mechanics
+reading is a coincidence the substrate is happy to carry, but the
+lineage section opens with the woman, not with the equation, because
+that is the truth of where the discipline comes from.
 
 ### 1.3 The original spectral-db `Scheduler` (the metronome)
 
@@ -318,6 +406,106 @@ Explorer (partition healing)."*
 
 This quote stands. Replace `PrismScheduler` with `HamiltonScheduler`,
 lift `graph` to `store`, and the design is what fragmentation gets.
+
+### 1.5 Hard + soft realtime — the discipline made explicit
+
+The content store gives **hard-realtime guarantees where possible**
+and **soft-realtime guarantees everywhere else**. This is engineering
+substance, not aesthetics: Alex's background includes realtime
+computation; the substrate inherits the discipline from there as well
+as from Apollo. Hard-realtime is non-optional for critical industries
+— safety verdicts on the control loop of a medical device, a
+fly-by-wire trim authority, an inverter's current-limit response
+are not allowed to miss their deadline. The substrate must be able
+to serve those consumers without making them invent their own
+bypass.
+
+**Hard-realtime contract** (the load-bearing subset):
+
+- **WCET is bounded and known.** Worst-case execution time is a
+  computable property of the body; the scheduler refuses to admit
+  a hard-realtime body whose WCET is unbounded or unknown.
+- **No disk I/O on the critical path.** A hard-realtime
+  `crystallize_bounded` call MUST be served from memory-resident
+  state. Cache miss returns a structured
+  `Transparency::single(path, PropertyVerdict::Fail(
+      Diagnostic::new("NotResident")))` verdict; it does NOT block
+  on a disk read.
+- **No unbounded allocations.** Allocation, if any, comes from a
+  bounded pool sized at admission time.
+- **No GC-like pauses.** Reference-counting decrements that could
+  cascade into deallocation chains are deferred (epoch-style or
+  explicit-queue) past the critical-path window.
+- **Locks bounded or lock-free.** No mutex acquisition with
+  unbounded waiters; lock-free queues where contention is plausible.
+- **Dispatch latency measurable to a constant.** The scheduler's
+  `decide` step on a hard-realtime tick has a bounded number of
+  branches; the bound is part of the documented WCET.
+
+**Soft-realtime contract** (the typical case):
+
+- **Statistical guarantees.** "95% of ticks complete within X ms";
+  exceedances are graceful, not catastrophic.
+- **Graceful degradation.** Slow disk, full cache, contended lock
+  — the substrate adapts; throughput drops; the call still
+  eventually completes.
+- **Typical-case fast, occasional disk OK.** Cache misses fall back
+  to `.frgmnt/objects/` reads; the call returns the value, just
+  slower.
+
+The four substrate consequences this discipline introduces — each
+elaborated in later sections:
+
+1. **`FrgmntStore` carries a mode flag.** Hard-realtime entries are
+   *pinned* memory-resident; soft-realtime entries get the existing
+   disk-spillover behaviour. §5.6 names the type-level shape.
+2. **Dispatcher offers two shapes.**
+   `crystallize_bounded(ref, deadline)` for hard-realtime;
+   `crystallize(ref)` for soft-realtime. The caller declares which
+   contract applies; the substrate cannot guess. §5.7 names the
+   signatures.
+3. **WCET is a PropertyVerdict.** "This body's worst-case
+   execution time is bounded by D" is a property the AST satisfies
+   (or doesn't). It joins `Pure` in the `prism_core::PropertyVerdict`
+   family. Hard-realtime admission requires
+   `Pure ∧ WcetBounded(D)` to discharge as `Pass`. §4.7 names the
+   verdict.
+4. **HamiltonScheduler honours priorities under hard-realtime
+   overload.** This is Margaret Hamilton's 1202 made literal: when
+   the bound is approached, soft-realtime work is dropped first.
+   Hard-realtime work either meets its budget OR returns
+   `NotResident`-as-Fail with the budget exhausted; it never
+   silently misses. §3.8 names the dispatch rule.
+
+The HamiltonScheduler's lineage section is load-bearing precisely
+because this is what the lineage is *for*. It is not
+"scheduler with priorities" — it is bounded WCET, drop-under-load,
+structured diagnostic on the drop, no silent failure. The four
+properties from §1.2 map exactly:
+
+| Hamilton's discipline (1969)   | Substrate realisation (today) |
+|---|---|
+| Bounded resources              | `BoundedStore<N>` byte budget + admission bounds |
+| Priority discipline            | `Hard` work admitted ahead of `Soft` under pressure |
+| Graceful drop under overload   | `Soft` work dropped first; `Hard` returns `NotResident` rather than block |
+| No silent failure              | `Transparency<Ref>` with `Fail(Diagnostic)` payload — the 1202 made type-level |
+
+#### 1.5.1 Hardware floors — the speed-of-light analogue
+
+Hard-realtime is bounded *below* by what the local hardware allows.
+The substrate cannot observe sub-nanosecond on a CPU whose TSC has
+nanosecond granularity; cannot measure FP loss below machine epsilon;
+cannot account for cache effects below cache-line granularity. The
+hardware floor is the upper bound on observable precision — the
+speed-of-light analogue. The HamiltonScheduler honours it by stating
+its WCET claims *to* the hardware floor; cross-hardware claims are
+weaker by the ratio of the two floors.
+
+The measurement primitive that carries these claims into the
+substrate — wall-clock time, FP precision loss, cache pressure,
+budget-exhaustion-as-Fail — is `@mirror/lens/transit`. See
+[[lens-transit]] for the full design; §8.1 below names the
+integration point at the scheduler altitude.
 
 ---
 
@@ -756,173 +944,232 @@ impl AdaptiveInterval {
 }
 ```
 
----
+### 3.8 Realtime class — the 1202 discipline made dispatch-level
 
-## 4. The `Pure` trait — compile-time determinism
+The HamiltonScheduler honours hard-realtime priority at admission and
+at overload. Two pieces of state make this dispatch-level:
 
-### 4.1 What Pure is
-
-A marker trait for bodies (and functions in general) that satisfy:
-
-1. **Same input → same output.** No clock reads, no
-   `SystemTime::now()`, no env reads, no thread-local reads, no
-   global state reads, no `std::env::var`, no atomic reads of
-   anything mutated outside the function.
-2. **No side effects observable from outside.** No file writes, no
-   network calls, no logging, no atomic writes, no calls to other
-   non-Pure functions.
-3. **No randomness.** No `rand::thread_rng`, no
-   `getrandom::getrandom`, no platform RNG access.
-4. **Floating-point determinism by discipline.** Pure does not by
-   itself rule out FP non-associativity, but `Pure` implies the
-   substrate-side `requires deterministic(...)` declaration, which
-   *does* rule out parallel-reduction kernels (per
-   [[kintsugi-thesis]] §C4).
-
-A `Pure` function is a *pure function in the type-theoretic sense*:
-its behaviour is fully determined by its inputs.
-
-### 4.2 Trait shape
+**Per-entry realtime class.** Every entry in the
+`CrystallizationStore<H>` (§5) carries a `RealtimeClass`:
 
 ```rust
-//! Pure — marker trait for functions/bodies with compile-time
-//! determinism guarantees. A Pure value is a value whose computation
-//! depends only on its inputs.
-//!
-//! `Pure` is implemented by:
-//! - Closures known at construction time to satisfy the discipline
-//!   (the substrate's `requires deterministic(...)` declaration).
-//! - Function pointers to functions whose bodies have been audited
-//!   AND marked `Pure`.
-//! - Built-in `Pure`-by-construction items (pure arithmetic,
-//!   `BTreeMap` operations, content-addressed lookups).
-//!
-//! `Pure` is NOT implemented by:
-//! - Closures that capture `SystemTime`, `Instant`, env vars, thread
-//!   handles, or atomics-of-non-Pure-values.
-//! - Functions that call `std::env::var`, `chrono::Local::now`,
-//!   `rand::*`, or any `@io`-equivalent.
-//! - Bodies that wrap external tool invocations without the
-//!   `requires deterministic(...)` flag set.
-
-/// Marker trait: this value's computation is a pure function of its
-/// inputs. Compile-time determinism guarantee.
-pub trait Pure {}
+/// Realtime contract a registered body declares. Pure newtype —
+/// no bare booleans on the dispatcher surface (no-bare-types).
+pub enum RealtimeClass {
+    /// Hard-realtime. WCET bounded; admission requires
+    /// Pure ∧ WcetBounded(D) (§4.7). Pinned memory-resident; no
+    /// disk fallback on the critical path. Dropped LAST under
+    /// pressure.
+    Hard { deadline: TickInterval },
+    /// Soft-realtime. Best-effort; disk fallback OK; dropped
+    /// FIRST under pressure.
+    Soft,
+}
 ```
 
-The trait has no methods. It carries no runtime cost. It is purely
-a compile-time discipline marker.
+**Per-strategy drop policy.** Each `Strategy` declares which class
+it drops under pressure:
 
-### 4.3 How Pure integrates with `PropertyVerdict`
+| Strategy     | Soft drops? | Hard drops?                                             |
+|--------------|-------------|----------------------------------------------------------|
+| Abyss        | No (read)   | No (read)                                                |
+| Pathfinder   | Eviction OK | Never — hard entries pinned                              |
+| Cartographer | Eviction OK | Never — hard entries pinned                              |
+| Explorer     | Eviction OK | Never — hard entries are the *last* thing to leave RAM   |
 
-From `prism/imperfect/src/transparency.rs` (already landed): the
-`PropertyVerdict` enum has three shapes: `Pass`, `Partial { confidence,
-diagnostics }`, `Fail(Diagnostic)`. `Pure` maps cleanly:
+Under hard-realtime overload — the scheduler observes that admitting
+the next hard-realtime call would exceed `BoundedStore::capacity()`
+— the scheduler does what Margaret Hamilton's executive did at the
+1202 alarm: it drops the lowest-priority work (soft-realtime
+entries, in evict-LRU order) until the hard call fits, OR it
+refuses admission with a structured
+`Transparency::single(path, PropertyVerdict::Fail(
+    Diagnostic::new("NotResident: hard-realtime capacity exhausted")))`
+verdict. It never silently misses; it never blocks indefinitely;
+it never falls back to disk.
 
-- A body that impls `Pure` → `PropertyVerdict::Pass` for the `Pure`
-  property at that body's substrate path.
-- A body that does *not* impl `Pure`, where the substrate declared
-  `requires Pure` → `PropertyVerdict::Fail(Diagnostic::new(
-  "Pure marker missing; body may not be deterministic"))`.
-- A body whose Pure-ness cannot be statically determined (e.g.
-  generic functions where the Pure-ness depends on a type parameter
-  whose constraints are not yet fixed) → `PropertyVerdict::Partial {
-  confidence: 0.5, diagnostics: vec![Diagnostic::new("Pure depends
-  on type parameter; cannot prove either way at this site")] }`.
+This is what the Hamilton name names. The four strategies are the
+shape of the dispatch; the realtime class is the shape of the
+priority discipline; the verdict is the shape of the 1202.
 
-This is the existing `Transparency<P>` seam — Pure adds one more
-property to the algebra; the algebra absorbs it without change. The
-diagnostic propagation, the `Fail` dominance, the `Partial` merging
-are all unchanged.
+---
 
-### 4.4 Pure's home — `prism_core` not fragmentation
+## 4. `Pure` — the AST verdict, not the Rust marker
 
-The tension: Pure could live in fragmentation (where it's *used* most,
-as a constraint on `Body<H>`), or in `prism_core` (where its algebraic
-family lives — `Loss`, `Transparency`, `PropertyVerdict`).
+### 4.1 What Pure is (and what it stopped being)
 
-The choice: `prism_core::pure::Pure`.
+Pure is a **`PropertyVerdict` that the body's AST satisfies, or
+doesn't, under an analysis pass**. It is not a Rust marker trait.
 
-Arguments for `prism_core`:
+The earlier version of this spec placed `Pure` as a `prism_core`
+marker trait — `Body<H>: Pure + Fn(...)`. That homing was wrong
+for an architectural reason that became clearer with the Body =
+prism + glass + AST restructure (§5.1 below). When the body's
+inner representation is an opaque Rust closure, a Rust-level marker
+is the best the substrate can ask for. Once the body's inner
+representation is the **AST**, the property check is an **AST
+analysis**, and the verdict shape `prism_core` already exports —
+`PropertyVerdict::Pass | Partial | Fail` — IS the right home for
+the answer.
 
-1. **Algebraic locality.** Pure is a property at the same altitude
-   as Loss and Transparency. Both are marker-trait-shaped (one is
-   an associated-type-defining trait, the other is a marker); both
-   compose under monoid algebra; both have `PropertyVerdict`
-   discharge. Placing Pure elsewhere fragments the property surface
-   the substrate exports.
-2. **Dependency direction.** `fragmentation` depends on
-   `prism_core` already (`prism_bridge.rs` impls `prism_core::Store`
-   for `FrgmntStore`). The reverse — `prism_core` depending on
-   `fragmentation` — would invert the architecture and pull
-   content-addressed storage primitives into the property layer.
-   Pure-in-prism_core preserves the existing direction.
-3. **Reusability.** Pure is useful beyond fragmentation. Spectral-db's
-   loss functions want it; mirror's `@epistemologic/property/*`
-   bodies want it; future consumers (the Surface model's translation
-   function; the Shatter model's serialization function) want it.
-   The home should be where the most general consumer lives.
+A body's AST satisfies Pure when:
 
-Arguments against (Pure-in-fragmentation):
+1. **Same input → same output.** No AST node reads the clock, the
+   environment, thread-local state, or any external mutable state.
+   The analysis enumerates AST node kinds and verifies each is in
+   the pure-by-construction set (arithmetic, content-addressed
+   lookup, structural recursion over bounded data, calls to other
+   `Pure`-verdicted bodies).
+2. **No side effects observable from outside.** No file writes, no
+   network calls, no `@io`-namespaced calls in the body's AST.
+3. **No randomness.** No `@rand/*`, no platform-RNG-flavoured
+   substrate refs.
+4. **Floating-point determinism by discipline.** The AST does not
+   contain parallel-reduction kernels whose FP order is
+   non-deterministic; `requires deterministic(...)` declarations on
+   any external substrate refs the AST calls are honoured.
 
-- The strongest constraint on the body — `Body<H>: Pure + Fn(...)` —
-  is at the fragmentation altitude. Putting the trait where it's most
-  used has its own ergonomics argument.
-- Mirror's bootstrap depends on both crates already; either choice
-  works for the bootstrap's needs.
+### 4.2 The analysis pass
 
-Counter to the counter: ergonomics losses are small (one `use
-prism_core::Pure` line in fragmentation); algebraic family losses
-are large (Pure separated from PropertyVerdict's home is a
-structural fracture).
+The Pure analysis is a function the substrate exposes:
 
-The choice stands: **`prism_core::pure::Pure`**. Fragmentation depends
-on it the same way it already depends on `prism_core::Loss` and
-`prism_core::Store`.
+```rust
+//! Pure analysis — inspects a Body<H>'s AST and produces a
+//! PropertyVerdict locating any impurity at its substrate path.
 
-Counter-argument worth recording: if `prism_core` becomes too
-opinionated about substrate-pull (today it's relatively
-property-focused), there's an argument for splitting `prism_core`
-into `prism_core` (the optics + beams) and `prism_props` (the
-property algebra including Pure). That refactor is bigger than this
-spec; flagging it as a future-tick consideration.
+/// Substrate path the verdict is located at. Reuses the existing
+/// `prism_core::Ref`-keyed Transparency<Ref> machinery.
+pub type PurityVerdict = Transparency<Ref>;
 
-### 4.5 Why marker trait, not effect system?
+/// Walk the AST; for each node, classify against the pure-by-
+/// construction set; merge verdicts via PropertyVerdict::merge_with
+/// at the substrate paths the impurities (if any) sit at.
+pub fn check_pure<H: MerkleHash>(body: &Body<H>) -> PurityVerdict {
+    body.ast.walk(|node, path| match classify(node) {
+        PureKind::PureByConstruction => PropertyVerdict::Pass,
+        PureKind::CallsExternal(reference) => verdict_for_reference(reference, path),
+        PureKind::ReadsClock => PropertyVerdict::Fail(
+            Diagnostic::new("Pure: AST reads clock at this site"),
+        ),
+        PureKind::UnknownAtThisAltitude => PropertyVerdict::Partial {
+            confidence: confidence_bound(),
+            diagnostics: vec![Diagnostic::new("Pure: site not classifiable")],
+        },
+        /* ... */
+    })
+}
+```
 
-Mirror is sub-Turing. An effect system — Eff, Frank, Koka — would be
-in scope but is heavy:
+The analysis is itself a `@mirror/lens/*` consumer — a lens over
+the AST. The verdict is `Transparency<Ref>`-shaped: `Clear` when
+the whole AST is pure-by-construction; `Opaque({path → verdict})`
+when impurities exist, with each impurity located at its substrate
+path. The merge law is the existing `PropertyVerdict::merge_with`
+from `prism/imperfect/src/transparency.rs`; `Fail` dominates;
+`Partial`s combine diagnostics; `Pass`es are neutral.
+
+### 4.3 Why this is structurally cleaner than the marker trait
+
+The marker-trait approach made three concessions the AST-verdict
+approach does not have to make:
+
+1. **The marker had no payload.** `impl Pure for FooBody {}` carries
+   no diagnostic about *why* the body is pure or *where* it is
+   impure. The verdict approach carries
+   `Transparency<Ref>::Opaque({path → PropertyVerdict})` — located,
+   structured, audit-channel-ready (per Beer's algedonic discipline,
+   §1.1).
+2. **The marker propagated through Rust generics; the AST is its
+   own propagation.** Marker propagation — "impl Pure for X iff
+   impl Pure for Y" — collides with `dyn Trait` and with closure
+   types whose impl-blocks have to be hand-written. The AST walks
+   itself; recursion through called bodies is a substrate-ref
+   resolution, not a trait-coherence problem.
+3. **The marker required audit discipline.** `impl Pure for FooBody {}`
+   could be added to a body whose AST contains a clock read; the
+   Rust compiler cannot tell. The AST-verdict approach **mechanically
+   inspects** — the verdict is generated, not declared.
+
+The verdict approach also collapses cleanly with the realtime work
+(§1.5, §3.8): the WCET property check (§4.7) is the same shape,
+the same algebra, the same verdict carrier. `Pure` and
+`WcetBounded(D)` are two property analyses over the same AST;
+admission to the hard-realtime class requires both to discharge as
+`Pass` (or `Partial` with acceptable confidence).
+
+### 4.4 The verdict's home — `prism_core::PropertyVerdict`, no new trait
+
+The earlier draft homed `Pure` in `prism_core::pure::Pure` as a
+marker trait. With the AST-verdict framing, Pure does not need a
+new trait at all: it is a **named property** that the existing
+`PropertyVerdict` algebra carries. The home is
+`prism_core::PropertyVerdict` (already present), keyed at a
+substrate path the analysis selects, e.g.
+`@property/pure/<body-ref>`.
+
+The earlier draft's argument for `prism_core` over fragmentation
+(algebraic locality, dependency direction, reusability) all still
+apply — they just apply to the *verdict carrier* (already in
+`prism_core`) rather than to a new marker trait. The structural win
+is larger: no new surface, no propagation through Rust generics, no
+audit discipline for hand-written `impl Pure for Foo {}` blocks.
+The verdict is computed from the AST; the AST is content; content
+is content-addressable; the verdict is reproducible from the body's
+OID alone.
+
+Where the `Pure` *name* surfaces:
+
+- `prism_core::properties::Pure` — a `pub const PURE: PropertyName`
+  (or moral equivalent newtype) naming the property in the
+  `Transparency<Ref>`-keyed map. Not a trait; a stable name the
+  substrate and consumers agree on.
+- `fragmentation::scheduler::admit` — admission for hard-realtime
+  work consults `check_pure(body)` and `check_wcet(body, deadline)`,
+  refuses admission unless both discharge as `Pass` (or `Partial`
+  within a documented confidence bound).
+
+Future refactor still worth recording: if `prism_core` becomes too
+opinionated about substrate-pull, there's an argument for splitting
+out a `prism_props` crate (the property algebra including `Pure`,
+`WcetBounded`, and the analysis-pass framework). Bigger than this
+spec; flagged.
+
+### 4.5 Why an AST analysis, not an effect system?
+
+Mirror is sub-Turing. An effect system — Eff, Frank, Koka — is in
+scope but the cost is the wrong shape:
 
 - The effect-system approach: `Body: Fn(...) -> Imperfect<...>`
   becomes `Body: Eff<Pure>` (the body's effects are bounded by a
-  permission set; Pure is the empty permission set).
-- The marker-trait approach: `Body: Pure + Fn(...)` (Pure is just a
-  presence/absence marker).
+  permission set; Pure is the empty permission set). Cost: effect
+  rows, effect handlers, effect inference, effect inheritance
+  through generics, integration with `dyn Trait`. Its own research
+  area.
+- The AST-analysis approach: `Body<H>` carries its AST; the analysis
+  walks the AST. Cost: one analysis pass per property; reuses the
+  existing `PropertyVerdict` + `Transparency<Ref>` algebra. No new
+  type-system features.
 
-Marker-trait cost: low. One trait, one impl per Pure body, audit
-discipline for impls. The compiler enforces trait presence; the
-audit discipline enforces that the impl is honest.
-
-Effect-system cost: high. Effect rows, effect handlers, effect
-inference, effect inheritance through generics, effect leakage through
-closures, integration with `dyn Trait` (effect-system polymorphism
-is its own research area). The cost is the wrong shape for mirror's
-v1.0; future work could revisit.
-
-The marker-trait approach delivers C7's compile-time check at a
-cost that fits the substrate. The effect system would deliver more
-(richer guarantees about *which* impurity a body has), but the
-delta is not what kintsugi needs to close.
+The AST-analysis approach also has the property that effect systems
+strain to deliver: **the verdict is content-addressable**. Same
+AST → same verdict, by construction — because the AST has bytes,
+the bytes have an OID, and the analysis is a pure function of the
+OID. Effect-system verdicts attach to Rust types whose identity
+shifts across compiler versions; AST-analysis verdicts attach to
+content the substrate already content-addresses.
 
 ### 4.6 Pure and `@io`
 
-A Body marked `Pure` cannot legally be an `@io` body. The substrate
-enforces this through the `glass_wall` property check (per
-[[kintsugi-thesis]] §C2): a body whose substrate declaration is `@io`
-must *not* declare `requires Pure`. The substrate refuses such a
-declaration at compile time.
+A body whose AST contains `@io`-namespaced calls cannot discharge
+Pure as `Pass`. The analysis detects the `@io` call site, locates
+the impurity at its substrate path, and returns
+`PropertyVerdict::Fail(Diagnostic::new("Pure: @io call at this
+site"))`. The substrate's `glass_wall` property check
+(per [[kintsugi-thesis]] §C2) consults this verdict.
 
-For `@io` bodies that *are* deterministic (e.g. a `rustc` invocation
-with pinned flags), the discipline is different:
+For `@io` bodies that *are* deterministic under named flags (e.g. a
+`rustc` invocation with `codegen_units = 1`, `incremental = false`,
+`source_date_epoch = 0`), the discipline is different:
 
 ```mirror
 grammar @io/rustc {
@@ -939,11 +1186,59 @@ grammar @io/rustc {
 
 This is the [[kintsugi-thesis]] §C9 substrate-level change. The
 `requires deterministic(@io_body, flags = {...})` declaration is
-the `@io` analogue of the `Pure` marker: it doesn't claim the body
+the `@io` analogue of the Pure verdict: it doesn't claim the body
 is pure (it can't; the body's literally an external tool), it claims
-the body is deterministic *under the named flag set*. This is owed
-work; the Pure trait lands the compile-time-marker half today and
-leaves the `requires deterministic(@io)` half for a future tick.
+the body is deterministic *under the named flag set*. The AST
+analysis can read the declaration and downgrade `Fail(@io)` to
+`Partial(@io, confidence = flag-coverage)` accordingly. Closing
+§C9 fully remains owed work; the AST-analysis framing makes the
+closure path cleaner than the marker-trait framing did.
+
+### 4.7 `WcetBounded(D)` — the realtime sibling verdict
+
+Hard-realtime admission (§1.5, §3.8) requires a second property
+verdict alongside Pure:
+
+```rust
+/// Substrate path name for the WCET-bounded property.
+pub const WCET_BOUNDED: PropertyName = /* ... */;
+
+/// Verdict shape:
+///   Pass        — AST has bounded WCET ≤ D under analysis.
+///   Partial    — AST has bounded WCET probabilistically, with
+///                 a confidence bound the analysis surfaces.
+///   Fail       — AST has an unbounded loop, unbounded recursion,
+///                 or a call to a body whose own WCET is unbounded.
+pub fn check_wcet<H: MerkleHash>(body: &Body<H>, deadline: TickInterval)
+    -> Transparency<Ref> { /* ... */ }
+```
+
+The analysis walks the AST and checks: bounded recursion, bounded
+data, no unbounded loops, all called bodies themselves have
+`WcetBounded` verdicts whose deadlines sum to within `D`. This is
+a standard WCET analysis, lifted into the substrate's verdict
+algebra rather than reinvented.
+
+The hard-realtime admission rule:
+
+```
+admit_hard(body, deadline) := combine(
+    check_pure(body),
+    check_wcet(body, deadline),
+) discharges as Pass-or-Partial-above-threshold
+```
+
+This is the literal substrate realisation of Margaret Hamilton's
+admission discipline (§1.2): a hard-realtime task may run iff its
+worst-case behaviour is bounded and its determinism is provable.
+If either verdict fails, admission is refused; the caller sees a
+structured `Transparency<Ref>` payload telling them which property
+failed and where in the AST it failed.
+
+The measurement primitive that *observes* whether actual execution
+stays within the declared `WcetBounded(D)` claim is
+[[lens-transit]]. The verdict declares the bound; transit measures
+the reality; the substrate compares.
 
 ---
 
@@ -951,9 +1246,100 @@ leaves the `requires deterministic(@io)` half for a future tick.
 
 The `HashMap<Ref, Body<H>>` at `mirror/bootstrap/src/crystallize.rs:434`
 migrates to a fragmentation-backed content-addressed store with
-HamiltonScheduler governance. The shape of the change:
+HamiltonScheduler governance. The shape of the change is larger than
+the earlier draft acknowledged: `Body<H>` itself becomes structured.
 
-### 5.1 New field type
+### 5.1 Body becomes prism + glass + AST
+
+Today: `Body<H> = Arc<dyn Fn(Optic<(), Splinter<H>>) -> Imperfect<...>>`
+— an opaque, non-content-addressable Rust closure. The closure's
+bytes do not exist in a stable sense; the closure's identity does
+not survive recompilation. §9.2 of the earlier draft named this as
+an open question. It is no longer an open question; it is solved
+by restructuring `Body<H>`.
+
+After the restructure, `Body<H>` carries the three pieces it always
+should have: a **prism** (the five-operation lens), a **glass** (the
+structural-edge construct — the 9-keyword floor that names what is
+runnable through the substrate boundary), and an **AST** (the
+body's content, read *through* the prism *through* the glass):
+
+```rust
+/// A realised substrate action body. Structured — NOT an opaque Rust
+/// closure.
+///
+/// The body is the prism AND the glass: the prism through which the
+/// AST ought to be read. The dispatcher's `crystallize()` step is
+/// the act of interpreting the AST through the prism through the
+/// glass.
+///
+/// Content-addressable by construction: the AST has bytes; the bytes
+/// have an OID via BLAKE3 Merkle (§5.2); the body's identity IS its
+/// content OID, recoverable across Rust recompilations, across
+/// processes, across machines.
+pub struct Body<H: MerkleHash> {
+    /// The five-operation lens — focus / project / split / zoom /
+    /// refract — selected for this body. Tells the interpreter HOW
+    /// to traverse the AST.
+    pub prism: Prism,
+    /// The structural-edge construct: the 9-keyword floor that fixes
+    /// which boundary-side operations the AST is allowed to invoke.
+    /// The glass wall made transparent: the substrate can SEE through
+    /// it because what's on the other side IS structured AST content.
+    pub glass: Glass,
+    /// The AST itself. Content-addressed; reproducible; analysable;
+    /// the property-verdict carrier (§4) reads THIS to discharge
+    /// Pure, WcetBounded, etc.
+    pub ast: Ast<H>,
+}
+
+/// Newtype around the structured five-operation selector. No bare
+/// enum on the body surface (no-bare-types).
+pub struct Prism(/* ... */);
+
+/// Newtype around the structural-edge construct — the 9-keyword
+/// floor's boundary-side surface.
+pub struct Glass(/* ... */);
+
+/// AST with `H`-world content addressing.
+pub struct Ast<H: MerkleHash> { /* ... */ }
+```
+
+What this restructure simultaneously collapses:
+
+1. **Pure body OID (§9.2) — solved.** The AST has bytes; the bytes
+   have an OID; `Body<H>` is content-addressable by construction.
+   No "function-pointer-as-OID" hack; no per-machine identity; no
+   cross-recompile drift. Same AST + same prism + same glass →
+   same OID, on any machine, under any rustc.
+
+2. **Glass wall — transparent.** The Rust-substrate boundary stops
+   being opaque. We can SEE through it because what's on the other
+   side IS structured AST content. Rust becomes the AST interpreter;
+   no bodies live in Rust. The "glass wall" name finally names what
+   it is: a wall you can see through, not a black box at the
+   altitude transition.
+
+3. **Self-hosting direction.** Bodies live in mirror's own substrate
+   — in grammars, with substrate refs, with the substrate's existing
+   declaration discipline. `@kintsugi/fracture/rename.mirror` IS a
+   Body; its AST is the mirror substrate; the dispatcher loads the
+   AST through the prism through the glass and runs it. The
+   [[kintsugi-minimum-runnable]] spec already implied this; the
+   restructure makes it the only possible shape.
+
+4. **Reproducibility chain.** `BodyEntry<H>` is `Reconstructable`
+   trivially because Body's bytes ARE the AST bytes plus the prism
+   selector plus the glass selector. The persistent-mode disk
+   spillover from §5.4 (in the earlier draft, an open problem about
+   serialising a closure) is no longer an open problem.
+
+5. **Property verdicts.** §4's restructure (Pure as an AST-analysis
+   verdict) presupposes this restructure. Without an AST inside the
+   body, the only available property check is a Rust-marker audit.
+   With an AST, the check is mechanical and reproducible.
+
+The field type changes accordingly:
 
 Before:
 
@@ -974,23 +1360,29 @@ pub struct Crystallizations<H: MerkleHash> {
 }
 
 /// Thin wrapper over `FrgmntStore<BodyEntry<H>>`. The store's
-/// content-addressed keying maps directly to Ref byte order.
+/// content-addressed keying maps directly to Ref byte order; the
+/// stored value's content OID is the (prism, glass, AST) triple's
+/// Merkle hash under `H`.
 pub struct CrystallizationStore<H: MerkleHash> {
     inner: FrgmntStore<BodyEntry<H>>,
 }
 
 /// One (Ref, Body<H>) pair as a Fragmentable entry. The Ref's bytes
-/// are the content key; the Body is the carried data. BodyEntry is
-/// what the scheduler observes and what the store hot/cold-manages.
+/// are the content key; the Body — prism + glass + AST — is the
+/// carried data. BodyEntry is what the scheduler observes, what the
+/// store hot/cold-manages, and what the property analyses (§4) walk.
 pub struct BodyEntry<H: MerkleHash> {
     pub path: Ref,
     pub body: Body<H>,
+    pub realtime: RealtimeClass,  // §3.8
 }
 ```
 
-The `Body<H>` itself doesn't gain Pure as a hard requirement *yet*
-(see §6.1 — the Pure constraint lands in a follow-on tick). The
-field type change is independent of the Pure constraint.
+The migration is structurally larger than the earlier draft — the
+closure goes away, the AST arrives. But the FrgmntStore wrapper
+shape and the scheduler hook are exactly as the earlier draft
+named them; the inside of `Body<H>` changed, not the outside of
+`Crystallizations<H>`.
 
 ### 5.2 Content-addressed keying via Ref
 
@@ -1041,17 +1433,15 @@ From `frgmnt_store.rs` (already landed): `FrgmntStore<N: Fragmentable
   `.frgmnt/objects/` disk spillover. Evicted entries persist; cache
   misses fall back to disk reads.
 
-`BodyEntry<H>` must impl `Reconstructable` for the persistent mode
-to apply. The body itself (`Arc<dyn Fn(...)>`) is not directly
-serialisable; the persistent mode therefore stores a *body reference*
-(the substrate ref + the body's content-OID computed at registration
-time) rather than the body bytes. On disk-read, the reference is
-resolved against an in-RAM body-registry that ships with the bootstrap.
-
-This is the deep problem from §6.2 ("Where does the Pure body's OID
-get computed?"). The migration honors it by deferring: the in-RAM
-body-registry is a known limitation, audited as cross-process
-non-reproducibility, named in the open questions.
+With the Body=prism+glass+AST restructure (§5.1), `BodyEntry<H>`
+impls `Reconstructable` trivially: the (prism, glass, AST) triple
+IS a content-addressable byte payload; serialising the triple
+serialises the body. The earlier draft's open question — "the body
+itself (`Arc<dyn Fn(...)>`) is not directly serialisable" — is
+dissolved. Persistent mode stores the AST bytes plus the prism and
+glass selectors plus the substrate ref; rehydration reads them back
+and reconstructs the `Body<H>` value. Same bytes, same body, every
+process, every machine.
 
 ### 5.5 Scheduler hook — when does hot↔cold fire?
 
@@ -1069,6 +1459,85 @@ eviction; it goes through the FrgmntStore facade. This preserves the
 invariant that BoundedStore is the byte-bounded primitive and
 FrgmntStore is the disk-aware layer; the scheduler is one altitude
 up from both.
+
+### 5.6 `FrgmntStore` mode flag — hard vs soft realtime
+
+The store gains a per-entry mode flag carried by the `RealtimeClass`
+field on `BodyEntry<H>` (§5.1). The store's behaviour bifurcates:
+
+```rust
+/// Mode-aware insert. Hard entries are pinned: they cannot be
+/// evicted to disk, cannot be admitted if pinning would exceed
+/// the hard-resident byte budget. Soft entries get the existing
+/// LIFO-evict-to-disk behaviour.
+impl<H: MerkleHash> CrystallizationStore<H> {
+    pub fn insert(&mut self, entry: BodyEntry<H>) -> Imperfect<
+        Inserted,
+        AdmissionError,
+        Transparency<Ref>,
+    > {
+        match entry.realtime {
+            RealtimeClass::Hard { deadline } => self.admit_hard(entry, deadline),
+            RealtimeClass::Soft => self.admit_soft(entry),
+        }
+    }
+}
+```
+
+The hard-resident byte budget is a substrate-level configuration:
+`FrgmntStore::new_with_realtime_budget(hard_bytes, soft_bytes)`.
+Hard-resident bytes are bounded; soft entries get whatever's left of
+the total store capacity. Admission of a hard entry that would
+exceed `hard_bytes` returns `Transparency::single(path,
+PropertyVerdict::Fail(Diagnostic::new(
+    "NotResident: hard-realtime budget exhausted")))`. Cache miss on
+a hard entry returns the same Fail verdict; never blocks; never
+falls back to disk.
+
+Soft entries get the existing semantics unchanged: bounded cache,
+LIFO eviction, disk spillover, fall-back-to-disk on miss.
+
+### 5.7 Dispatcher offers two shapes
+
+The `Crystallizations<H>` dispatcher exposes two methods. The
+caller declares which contract applies; the substrate cannot guess.
+
+```rust
+impl<H: MerkleHash> Crystallizations<H> {
+    /// Soft-realtime dispatch. Cache miss may fall back to disk;
+    /// disk read may block; verdict carries whatever loss the
+    /// interpretation incurred. The existing crystallize() shape.
+    pub fn crystallize(
+        &self,
+        path: &Ref,
+        input: Optic<(), Splinter<H>>,
+    ) -> Imperfect<Splinter<H>, CrystallizeError, Transparency<Ref>>;
+
+    /// Hard-realtime dispatch. Cache miss returns NotResident-as-
+    /// Fail immediately; never blocks; never falls back to disk;
+    /// admission required `check_pure ∧ check_wcet ≤ deadline` at
+    /// registration time (§4.7). The dispatcher checks the
+    /// deadline against the body's declared WCET and refuses if
+    /// the declared bound exceeds the requested deadline.
+    pub fn crystallize_bounded(
+        &self,
+        path: &Ref,
+        input: Optic<(), Splinter<H>>,
+        deadline: TickInterval,
+    ) -> Imperfect<Splinter<H>, CrystallizeError, Transparency<Ref>>;
+}
+```
+
+The split is mirrored by the scheduler's drop discipline (§3.8):
+under pressure, soft-realtime work is dropped first; hard-realtime
+work either meets its budget or returns a structured Fail verdict.
+The substrate above the dispatcher — the kintsugi engine, the
+build-graph altitude, the CLI surface — declares which contract
+applies, the dispatcher honours it.
+
+This is the Apollo 1202 made API: the caller of a hard-realtime
+dispatch is the astronaut; the substrate is Hamilton's executive;
+the Fail verdict is the alarm. Nothing silently misses.
 
 ---
 
@@ -1093,26 +1562,39 @@ The migration order:
    `GraphObservation`, `Strategy`, `MetronomeScheduler`,
    `HamiltonScheduler`, `CrystallizationStore`. New code; no
    existing surface broken.
-2. **Pure in prism_core.** Land the `Pure` trait, an empty marker.
-   No callers yet; constraint propagation happens in §6.3.
-3. **Migrate `Crystallizations<H>`.** Replace the `HashMap` field;
-   add the scheduler field; route `crystallize`/`register` through
-   the new store; preserve the public API of `crystallize`,
+2. **AST analyses in prism_core / mirror.** Land `check_pure` and
+   `check_wcet` (§4.2, §4.7) as substrate-side AST analyses with
+   `PropertyVerdict`-shaped output. No new traits; existing
+   verdict carriers reused.
+3. **Migrate `Body<H>` to prism+glass+AST.** Replace the
+   `Arc<dyn Fn(...)>` shape with the structured triple (§5.1).
+   This is the largest single piece of work; it touches every
+   call site that constructs a `Body<H>` value and every site that
+   invokes one. The interpreter (Rust-side AST evaluator) becomes
+   the new dispatcher core.
+4. **Migrate `Crystallizations<H>`.** Replace the `HashMap` field;
+   add the scheduler field; add `crystallize_bounded` alongside the
+   existing `crystallize` (§5.7); route `crystallize`/`register`
+   through the new store; preserve the public API of `crystallize`,
    `register`, `knows`, `new` (`new` now constructs a
    `MetronomeScheduler` by default).
-4. **Add Pure constraint.** `Body<H>` becomes `Pure + Fn(Optic<(),
-   Splinter<H>>) -> Imperfect<...>`. This breaks all existing body
-   constructions until they add `impl Pure for <closure type>` or
-   the body-construction macro is updated.
-5. **Wire scheduler through bootstrap.** Bootstrap's main loop calls
+5. **Wire admission through Pure + WcetBounded verdicts.**
+   `register_hard(c, deadline)` consults `check_pure` and
+   `check_wcet` on the body's AST; refuses registration if either
+   verdict fails. `register_soft(c)` (existing `register` renamed)
+   skips the analysis. Pure verdict moves from `\` (parked) to
+   `Pass` for the audited refs.
+6. **Wire scheduler through bootstrap.** Bootstrap's main loop calls
    `crystallizations.tick()` periodically; the scheduler observes
-   and decides.
-6. **Audit + tests.** All existing tests that exercise iteration
+   and decides; hard-realtime entries are pinned-resident.
+7. **Audit + tests.** All existing tests that exercise iteration
    order across the registry get updated to expect deterministic
-   Ref-byte-order. New tests cover the scheduler's tick semantics.
+   Ref-byte-order. New tests cover the scheduler's tick semantics,
+   the hard/soft admission split, the NotResident-as-Fail discipline.
 
-No shim. No deprecation. The pre-cascade `HashMap<Ref, Body<H>>` is
-gone after step 3.
+No shim. No deprecation. The pre-cascade `HashMap<Ref, Body<H>>`
+is gone after step 4; the `Arc<dyn Fn(...)>` Body shape is gone after
+step 3.
 
 ---
 
@@ -1126,11 +1608,13 @@ Each piece carries `[substrate-pull:realize]` per AGENTS.md
 | `Scheduler` trait | `fragmentation/src/scheduler.rs` | `[substrate-pull:realize]` — trait surface only, no capability |
 | `GraphObservation` | `fragmentation/src/scheduler.rs` | `[substrate-pull:realize]` — pure observation, no capability |
 | `Strategy` + `ScheduleAction` | `fragmentation/src/scheduler/strategy.rs` | `[substrate-pull:realize]` — closed sum type, no capability |
+| `RealtimeClass` (Hard / Soft) | `fragmentation/src/scheduler/realtime.rs` | `[substrate-pull:realize]` — closed sum type, no capability |
 | `MetronomeScheduler` impl | `fragmentation/src/scheduler/metronome.rs` | `[substrate-pull:realize]` — deterministic dispatch, no I/O |
-| `HamiltonScheduler` impl | `fragmentation/src/scheduler/hamilton.rs` | `[substrate-pull:realize]` — Fate dispatch (substrate-side), Rust binding (boundary-side) |
-| `Pure` trait | `prism_core/src/pure.rs` | `[substrate-pull:realize]` — empty marker, no method, no capability |
-| `CrystallizationStore<H>` | `mirror/bootstrap/src/crystallize.rs` | `[substrate-pull:realize]` — thin wrapper over `FrgmntStore<BodyEntry<H>>` |
-| `BodyEntry<H>` | `mirror/bootstrap/src/crystallize.rs` | `[substrate-pull:realize]` — `(Ref, Body<H>)` pair, Fragmentable impl |
+| `HamiltonScheduler` impl | `fragmentation/src/scheduler/hamilton.rs` | `[substrate-pull:realize]` — Fate dispatch (substrate-side), Rust binding (boundary-side), 1202 drop discipline (§3.8) |
+| `Body<H> = (Prism, Glass, Ast<H>)` | `mirror/bootstrap/src/body.rs` | `[substrate-pull:realize]` — structured, content-addressable; the glass wall made transparent (§5.1) |
+| `check_pure`, `check_wcet` | `prism_core::properties` + analysis crate | `[substrate-pull:realize]` — AST analyses, `PropertyVerdict`-shaped output, no new traits |
+| `CrystallizationStore<H>` | `mirror/bootstrap/src/crystallize.rs` | `[substrate-pull:realize]` — thin wrapper over `FrgmntStore<BodyEntry<H>>`, mode-aware (§5.6) |
+| `BodyEntry<H>` | `mirror/bootstrap/src/crystallize.rs` | `[substrate-pull:realize]` — `(Ref, Body<H>, RealtimeClass)` triple, Fragmentable impl |
 
 Nothing in this assembly carries capability beyond what already exists
 in the substrate. The scheduler is binding (which strategy maps to
@@ -1152,17 +1636,56 @@ deltas marked:
 | Substrate declarations (OID) | ✅ | ✅ |
 | Fracture inputs (candidate OID) | ✅ | ✅ |
 | Loss verdict composition (PropertyVerdict::merge_with) | ✅ | ✅ |
-| Property check determinism | ⚠️ audit | ✅ by `Pure` trait |
+| Property check determinism | ⚠️ audit | ✅ by `check_pure` AST analysis (§4.2) |
+| **Body OID is content-addressable** | ❌ (`Arc<dyn Fn>`) | ✅ (Body = prism + glass + AST, §5.1) |
 | @fate model weights (store OID) | ✅ | ✅ |
 | @fate cache key includes model OID | ⚠️ | ⚠️ (Fate-side work, not closed here) |
 | @fate inference seed-pinned | ❌ | ❌ (Fate-side work, not closed here) |
 | Au value cache key composition | ⚠️ | ⚠️ (depends on Fate work) |
 | **Crystallizations iteration order** | ❌ HashMap | ✅ FrgmntStore + Ref-byte-order |
-| @io tool wrapper determinism flags | ❌ | ⚠️ (Pure trait gives the non-@io half) |
+| @io tool wrapper determinism flags | ❌ | ⚠️ (AST analysis names `@io` sites; flag declarations owed) |
+| Hard-realtime admission discipline | ❌ | ✅ (`check_pure ∧ check_wcet` at registration, §4.7) |
 | Cross-machine toolchain reproducibility | ❌ | ❌ (v1.x) |
 
-Two claims close. One partially closes. Five remain owed; none of
-those five is this spec's territory.
+Three claims close (Pure, body-OID, Crystallizations iteration
+order). The hard-realtime admission row is genuinely new — not on
+the earlier chain table because the realtime discipline only got
+named in this spec; named here so the chain accounts for it.
+
+### 8.1 Transit — the measurement carrier
+
+The chain table above states *claims*. Observing whether the substrate
+actually honours those claims requires measurement. [[lens-transit]]
+is the substrate-side benchmark facility that measures computation
+loss to hardware precision and carries the verdict as a
+`Transparency<P>` payload.
+
+The HamiltonScheduler integrates with transit at four points:
+
+1. **Hard-realtime WCET observation.** When a hard-realtime body
+   crystallizes, transit measures actual execution time. If actual
+   exceeds the declared `WcetBounded(D)` deadline, transit emits a
+   Fail verdict at the body's substrate path; the scheduler can
+   demote the body's class or refuse future hard-realtime
+   admission. The `WcetBounded` verdict declares the bound; transit
+   observes the reality; the scheduler compares.
+2. **Soft-realtime statistical envelope.** Transit accumulates
+   per-body timing histograms; the soft-realtime contract
+   ("95% under X ms") is a Partial verdict whose confidence is the
+   empirical quantile.
+3. **Drop accounting.** When the scheduler drops soft-realtime work
+   under hard-realtime pressure (§3.8), transit records the drop
+   as a structured Diagnostic at the dropped body's substrate path.
+   The 1202 alarm shape, kept type-level: drops are visible, located,
+   ordered.
+4. **Hardware-floor declaration.** Transit names the local
+   hardware's precision floor (machine epsilon for FP; nanosecond
+   cycle granularity for time). The scheduler's WCET claims are
+   stated *to* this floor; cross-hardware comparison goes through
+   transit's documented hardware-translation rules.
+
+See [[lens-transit]] for the full design; this section names the
+integration points only.
 
 ---
 
@@ -1204,31 +1727,24 @@ This is the honest framing: the scheduler is structurally
 deterministic; Fate is the load-bearing dependency for actual
 determinism. C4 closes that dependency.
 
-### 9.2 Pure body OID computation
+### 9.2 Pure body OID computation — RESOLVED (§5.1)
 
-`Body<H>: Pure + Fn(...)` constrains the body at the Rust type
-level. But the body's *identity* — for caching, for cross-process
-reproducibility, for the `Crystallizations<H>` table's content-
-addressed lookup — needs an OID. Rust binary identity is not
-content-addressed today. Two options:
+This was an open question in the earlier draft. With the
+Body = prism + glass + AST restructure (§5.1), it is solved. The
+(prism, glass, AST) triple has a stable byte serialisation; the
+bytes have an OID via BLAKE3 Merkle; the body's identity IS its
+content OID, reproducible across recompilations, across processes,
+across machines, across rustc versions.
 
-- **Function-pointer-as-OID**. The function's machine-code bytes
-  get hashed at registration. Doesn't survive recompilation; doesn't
-  survive different optimization levels; doesn't survive different
-  rustc versions. Per-machine OID at best.
-- **Source-of-function-as-OID**. The function's substrate-side
-  declaration's OID (the `@x/foo` ref) becomes the body's OID. Works
-  for substrate-realized bodies (`@kintsugi/fracture/rename`'s body
-  is identified by the substrate ref, not by the Rust
-  implementation). Doesn't work for pure-Rust bodies that have no
-  substrate ref.
+The substrate-pull discipline ("every body should have a substrate
+ref") is preserved — the substrate ref is the `BodyEntry<H>.path`;
+the body's content OID is the `BodyEntry<H>.body`'s Merkle hash;
+they are independent and both load-bearing. Pure-Rust bodies
+without substrate refs are still an anti-pattern; the AST is
+mirror's, not Rust's.
 
-The substrate-pull discipline says: every body should have a
-substrate ref; pure-Rust bodies without substrate refs are an
-anti-pattern. So option (b) is the path. But it requires that
-every `Body<H>` registration goes through a substrate declaration —
-which is the substrate-pull discipline applied to body registration.
-That's another tick of work; named here, deferred.
+Kept in the open-questions list as a resolved item, with a pointer
+to §5.1, so the historical record shows the path.
 
 ### 9.3 Cross-language consumers — Gleam, BEAM
 
@@ -1251,16 +1767,24 @@ The FFI shape for the scheduler is not designed here. Sketch:
 
 Neither sketch lands here. Named as open work.
 
-### 9.4 Counter to the `Pure` home choice
+### 9.4 Counter to the `prism_core` home for verdicts
 
-Per §4.4 — Pure is placed in `prism_core` over fragmentation. The
-counter-argument is that `prism_core` is the optics-and-beams crate,
-and it has been gathering property-shaped traits (`Loss`,
-`Transparency`, now `Pure`) without an articulated theory of why
-those belong with optics. A future refactor could split
-`prism_core::pure` and `prism_core::props` into a dedicated property
-crate; the placement of Pure assumes that refactor does not happen,
-or that when it does, Pure moves with its family.
+The AST-analysis approach (§4) homes `Pure` and `WcetBounded` as
+*named properties* on the existing `prism_core::PropertyVerdict` /
+`Transparency<Ref>` algebra. The counter-argument is that
+`prism_core` is the optics-and-beams crate and has been gathering
+property-shaped definitions (`Loss`, `Transparency`, now the named
+property constants) without an articulated theory of why those
+belong with optics. A future refactor could split out a dedicated
+`prism_props` crate; the placement assumes that refactor does not
+happen, or that when it does, the properties move with their family.
+The restructure to AST-verdicts actually *strengthens* this counter
+— there are now more named properties, not fewer.
+
+The AST-walk analyses themselves (`check_pure`, `check_wcet`) may
+belong in a `mirror/analysis` crate rather than in `prism_core`,
+since they require an AST type that's mirror's. Named here as a
+future layering decision.
 
 ### 9.5 The Metronome's fallback path
 
@@ -1284,26 +1808,41 @@ implementation details belong in the next spec.
 ## 10. What this spec is and isn't
 
 **Is:** an architectural anchor. It names where the HamiltonScheduler
-lives (fragmentation), where Pure lives (prism_core), what they
-close in the reproducibility chain (C7, C8, partial C9), and which
-open questions remain. It carries lineage explicitly — Beer, Hamilton,
-the metronome, the Prism-Scheduler plan.
+lives (fragmentation), where the property verdicts live
+(`prism_core::PropertyVerdict` carrying `Pure` and `WcetBounded`),
+what they close in the reproducibility chain (C7, C8, body-OID,
+hard-realtime admission, partial C9), and which open questions
+remain. It carries lineage explicitly — Margaret Hamilton (the
+loadbearing one), Beer, the metronome, the Prism-Scheduler plan. It
+lands two architectural restructures Alex surfaced after the earlier
+draft: Body = prism + glass + AST (§5.1), and hard/soft realtime
+grade as a first-class substrate property (§1.5, §3.8, §5.6).
 
 **Is not:** an implementation spec. The Rust does not land with this
-commit. The next tick (forthcoming) lands the trait, the four impls,
-the `Pure` marker, the `Crystallizations<H>` migration.
+commit. The next tick (forthcoming) lands the trait, the four
+strategies, the AST-analysis verdicts, the `Crystallizations<H>`
+migration, the Body restructure.
 
 **Specifically refuses:**
 
 - A rename of `HamiltonScheduler` to anything else. The Hamilton
-  name predates the Prism-Scheduler plan and carries the
-  energy-conserving-evolution discipline; honouring the lineage is
-  load-bearing per the directive.
+  name honours **Margaret Hamilton** — her priority-driven
+  asynchronous executive, the 1202 alarm, the four-property
+  discipline (§1.2). Hamiltonian mechanics is coincidence-of-name;
+  the woman is the source.
 - A home for the scheduler that is not fragmentation. Spectral-db
   *consumes* the scheduler; it does not host it. The substrate
   management layer is fragmentation.
-- A `Pure` trait that lives outside `prism_core`. The property
-  algebra is `prism_core`'s; Pure joins the family.
+- A `Pure` marker trait. Pure is an **AST analysis** producing a
+  `PropertyVerdict`, not a Rust marker. The verdict is
+  content-addressable; the analysis is mechanical (§4).
+- An opaque `Arc<dyn Fn(...)>` body. Body = prism + glass + AST.
+  The glass wall is transparent; the AST is what's on the other
+  side (§5.1).
+- A scheduler that silently misses hard-realtime deadlines. The
+  1202 discipline is mandatory: drops are structured verdicts;
+  hard-realtime work either meets its budget or returns
+  `NotResident`-as-Fail. No silent failure (§3.8).
 - A compat shim for the `HashMap` → `FrgmntStore` migration. Per
   [[feedback-no-compat-shim]], hard cutover.
 
@@ -1314,11 +1853,15 @@ the `Pure` marker, the `Crystallizations<H>` migration.
 - [[mirror-native-vcs]] §1, §2 — the layering claim this spec extends.
 - [[kintsugi-thesis]] §C7, §C8, §C9 — the reproducibility-chain
   claims this spec closes or partially closes.
+- [[lens-transit]] — the measurement carrier that observes hard-
+  realtime WCET, soft-realtime statistical envelopes, and drop
+  accounting (§8.1). Sibling spec; cross-referenced both ways.
 - [[prior-art]] §1.7 (Nix), §1.8 (Cargo), §1.5 (Bazel) — the leaks
-  the `Pure` trait + scheduler determinism address structurally.
+  the AST-analysis verdicts + scheduler determinism address
+  structurally.
 - [[kintsugi-minimum-runnable]] — Tick A landed `Crystallizations<H>`;
-  this spec migrates its table. Tick B doesn't need the scheduler;
-  Tick C does.
+  this spec migrates its table and restructures `Body<H>`. Tick B
+  doesn't need the scheduler; Tick C does.
 - [[store-vs-db-and-the-cascade]] §1 — the open-foundation / closed-
   engine boundary the scheduler straddles.
 - [[2026-04-05-prism-scheduler]] (spectral-db) — the design migrated
@@ -1327,6 +1870,12 @@ the `Pure` marker, the `Crystallizations<H>` migration.
 - [[cartographer-design]] — the `SpectralBudget` framing; the
   Cartographer strategy's lineage.
 - [[2026-04-03-spectral-swap]] — "Hamilton priority" context.
+- Margaret Hamilton, *Universal Systems Language* (Hamilton
+  Technologies; the follow-on to Apollo); the Apollo 11 1202 alarm
+  contemporaneous flight-software documentation; the
+  Presidential Medal of Freedom 2016 citation. The lineage source
+  for the four-property discipline (§1.2): bounded resources +
+  priority + drop-under-load + structured diagnostic.
 - `~/.reed/visibility/protected/practice/insights/cybernetics/beer-error-propagation.md`
   — Beer's algedonic channel; the canonical reference for the
   scheduler's Cybernetic ancestry.
@@ -1344,8 +1893,13 @@ the `Pure` marker, the `Crystallizations<H>` migration.
 ---
 
 *The substrate that holds the world together is the one that knows
-when to release its grip. Hamilton conserves the content; the
-scheduler conserves the load; Pure conserves the determinism. One
-name per altitude; one trait per property; one assembly that closes
-two claims of the reproducibility chain and tells the truth about
-the rest.*
+what to drop. Margaret Hamilton's executive dropped the radar updates
+and kept the landing-priority tasks; her system told the astronauts
+the truth about what it was doing; they trusted it and landed. The
+HamiltonScheduler inherits the shape: bounded resources, priority
+discipline, graceful drop under overload, no silent failure. The
+four Strategies are the dispatch surface; the realtime classes are
+the priority discipline; the verdicts are the 1202 made type-level.
+One name per altitude; one property per analysis; one assembly that
+closes three claims of the reproducibility chain, adds a fourth, and
+tells the truth about the rest.*
