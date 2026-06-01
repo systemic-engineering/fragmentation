@@ -51,6 +51,17 @@ naked_oid (observer-dependent). This maps directly to Crystal's spectrum
   is the medium-term convergence point (ROADMAP item 13).
 - **conversation** — `Prism<AstNode>` implements `Fragmentable`. The
   compiler writes trees. fragmentation stores them.
+- **fragmentation-mcp** — the FIRST deployment target of the wider
+  stack. New sub-crate at `vcs/mcp/`; MCP server exposing
+  content-addressed primitives + HamiltonScheduler-managed shards to
+  any agent runtime. THIS is the first crate where substrate-pull
+  discipline meets external (non-mirror) consumers; the substrate's
+  reproducibility chain, bounded-RAM discipline, and structured-drop
+  contract become OSS infrastructure other agent runtimes (Claude
+  Code, Cursor, Zed) consume. The development process for the MCP
+  layer must honour the same TDD + adversarial-review discipline as
+  the substrate; the wire is binding, not capability; the capability
+  lives in the substrate. Spec: `docs/specs/fragmentation-mcp.md`.
 
 ### The Binary: `frgmt`
 

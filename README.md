@@ -11,7 +11,23 @@ fragmentation = { git = "https://github.com/systemic-engineering/fragmentation" 
 
 ## What This Is
 
-A Rust library for building trees where every node is identified by its content. Two node types: `Shard` (terminal) and `Fractal` (recursive). Git-compatible SHA-1 hashing. The observer is part of the commit, not the hash.
+A Rust library for building trees where every node is identified by its
+content. Two node types: `Shard` (terminal) and `Fractal` (recursive).
+Git-compatible SHA-1 hashing at the wire boundary; content-addressed
+`SpectralCoordinate<5>` internally. The observer is part of the commit,
+not the hash.
+
+As of 2026-06-01, fragmentation is **also the substrate beneath
+fragmentation-mcp** — a standalone Model Context Protocol server
+that exposes content-addressed primitives + the HamiltonScheduler's
+hot/cold management to any agent runtime (Claude Code, Cursor, Zed,
+any MCP-aware client). See [`docs/specs/fragmentation-mcp.md`](docs/specs/fragmentation-mcp.md)
+for the architecture; the MCP layer lives in the new
+`vcs/mcp/` workspace member. Fragmentation-mcp is the **first deployment
+target** of the wider stack — ships standalone, useful without mirror,
+open-source infrastructure that fills a real gap in the agent-runtime
+ecosystem (existing git-MCPs are CLI wrappers; this one speaks
+content-addressed primitives directly).
 
 ```rust
 use fragmentation::fragment::{Fragment, blob_oid};
@@ -48,6 +64,28 @@ IS the fixed-point witness, and `kintsugi` ensures the measurement
 converges. Fragmentation itself treats cycle detection as an error
 class; the v1/v1.5 boundary is named in
 `docs/specs/mirror-native-vcs.md` §4.6 (Consequence 3).
+## Adapters
+
+Fragmentation ships as a workspace with VCS-adjacent adapter crates:
+
+| Crate | Role |
+|---|---|
+| `fragmentation` | the substrate; content-addressed primitives, hash trait, store types |
+| `fragmentation-git` (`vcs/git/`) | git wire interop; SHA-1 ↔ `SpectralCoordinate<5>` crosswalk; FUSE portal; `frgmt-git` CLI |
+| `fragmentation-jj` (`vcs/jj/`) | jj-native backend (planned; per `docs/specs/mirror-native-vcs.md`) |
+| `fragmentation-mcp` (`vcs/mcp/`, new) | MCP server; agent-runtime substrate; `fragmentation serve --stdio` |
+
+The substrate compiles dependency-free of all adapters; each adapter
+pulls fragmentation as its dependency. `prism_core` stays zero-dep.
+
+Fragmentation-mcp is the **first deployment target** of the wider
+stack — ships standalone, useful without mirror, open-source
+infrastructure that fills a real gap in the agent-runtime ecosystem
+(existing git-MCPs are CLI wrappers; fragmentation-mcp speaks
+content-addressed primitives directly, with bounded RAM via the
+HamiltonScheduler and structured drops via [[docs/specs/lens-transit]]).
+See [`docs/specs/fragmentation-mcp.md`](docs/specs/fragmentation-mcp.md).
+
 
 ## Features
 

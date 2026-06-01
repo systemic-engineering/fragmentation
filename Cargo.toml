@@ -1,4 +1,14 @@
 [workspace]
+# T1 of `docs/specs/fragmentation-mcp.md` adds a new workspace member
+# at `vcs/mcp/` — the FIRST deployment target of the wider stack, an
+# MCP server exposing content-addressed primitives + HamiltonScheduler-
+# managed shards to any agent runtime. It depends on `fragmentation`
+# directly; depends on `fragmentation-git` only via an optional
+# `git-interop` feature for the SHA-1 ↔ `SpectralCoordinate<5>`
+# crosswalk. `prism_core` and `fragmentation` stay dependency-free of
+# the new crate (substrate-pull at the Cargo.toml level). The slot is
+# documented here; the crate manifest lands in the implementation tick,
+# at which point this list grows to include `"vcs/mcp"`.
 members = [".", "vcs/git", "vcs/jj"]
 resolver = "2"
 

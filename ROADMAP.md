@@ -340,6 +340,39 @@ See: `insights/fragmentation/naked-singularity.md`
 
 ## Sequencing
 
+### Near-term (FIRST DEPLOYMENT TARGET) — `fragmentation-mcp` v0.1
+
+The first thing the world gets from this stack is `fragmentation-mcp`
+— a standalone MCP server that exposes fragmentation's content-
+addressed primitives + the HamiltonScheduler's hot/cold management
+to any agent runtime (Claude Code, Cursor, Zed). It ships before
+mirror v1.0; it is useful without mirror; it is open-source
+infrastructure that fills a real gap (existing git-MCPs are CLI
+wrappers; this is content-addressed at the wire).
+
+See `docs/specs/fragmentation-mcp.md` for the full spec. Five ticks
+(~2500 LOC total; ~4 weeks one engineer / ~3 weeks two engineers):
+
+0. `fragmentation/vcs/mcp/` workspace member + Cargo.toml + lib.rs.
+1. T1 — Crate skeleton + MCP JSON-RPC wire (stdio path; ~600 LOC).
+2. T2 — Session-shard model + HamiltonScheduler integration (~400 LOC).
+3. T3 — Content + structural tool surface (twelve tools; ~800 LOC).
+4. T4 — Git wire interop; SHA-1 ↔ `SpectralCoordinate<5>` crosswalk;
+   `--http :PORT` smart-HTTP server (~700 LOC).
+5. T5 — Ship v0.1 to crates.io (Apache-2.0); README + four example
+   `.mcp.json` configurations + GitHub release notes.
+
+This track unblocks the mirror-side `mirror serve --mcp` work (per
+`mirror/docs/specs/lsp-and-mcp.md` and the `claude/mcp-lsp-research`
+research); mirror-mcp consumes fragmentation-mcp as its substrate
+layer rather than re-implementing content storage + session-shard
+management.
+
+The HamiltonScheduler (per `docs/specs/hamilton-scheduler.md`) gets
+its first non-build-graph production consumer here: each agent
+session is a shard; each shard has a `FrgmntStore` + a
+`HamiltonScheduler`; the Apollo 1202 made-API.
+
 ### Near-term (the binary story)
 
 1. `frgmt collapse` — the build verb (depends on flake template)
