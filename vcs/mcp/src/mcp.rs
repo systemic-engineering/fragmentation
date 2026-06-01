@@ -8,28 +8,45 @@
 //! ticked before the registry dispatches the call. The body
 //! reads state (post-tick) and returns.
 //!
+//! T5 splits the dispatch by JSON-RPC §4 / §4.1: Requests get a
+//! Response on the wire; Notifications get NO response but still
+//! advance internal state (notably [`SessionInitialized`] after
+//! `notifications/initialized`). The stdio loop only writes when
+//! [`Mcp::dispatch_line`] returns `Some(Response)`.
+//!
 //! T2 ships:
 //! - [`Mcp::new`] — construct with the default fifteen-tool
 //!   registry (per `ToolRegistry::with_default_tools`).
 //! - [`Mcp::dispatch_line`] — synchronous parse + tick + dispatch
-//!   for one wire-format line.
+//!   for one wire-format line. T5: returns `Option<Response>`.
 //! - [`Mcp::run_stdio`] — async stdio read/write loop.
 //!
 //! Substrate-pull: `[substrate-pull:realize]` — the entry-tick is
 //! boundary binding (when the call lands, the substrate's
 //! scheduler advances); the capability lives in
-//! `fragmentation::hamilton_scheduler`.
+//! `fragmentation::hamilton_scheduler`. The Request/Notification
+//! seam is also boundary-only: it shapes the wire, not the
+//! capability.
+
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use crate::registry::ToolRegistry;
 use crate::shard::ShardId;
-use crate::types::ToolName;
-use crate::wire::{Request, Response, ResponseError, ERROR_PARSE};
+use crate::types::{SessionInitialized, ToolName};
+use crate::wire::{Envelope, Notification, Request, Response, ResponseError, ERROR_PARSE};
 
 /// The MCP server.
+///
+/// `session_initialized` tracks whether the client has sent
+/// `notifications/initialized` — a boolean wire-side state flag
+/// per the MCP 2024-11-05+ lifecycle. T5 wires the flag flip; the
+/// gate (refuse certain methods before initialized) is a refinement
+/// for a later tick.
 pub struct Mcp {
     registry: ToolRegistry,
+    session_initialized: AtomicBool,
 }
 
 impl Default for Mcp {
@@ -42,6 +59,7 @@ impl Mcp {
     pub fn new() -> Self {
         Mcp {
             registry: ToolRegistry::with_default_tools(),
+            session_initialized: AtomicBool::new(false),
         }
     }
 
@@ -53,7 +71,16 @@ impl Mcp {
         self.registry.tool_names()
     }
 
+    /// Session initialization state, per the MCP lifecycle.
+    pub fn session_initialized(&self) -> SessionInitialized {
+        SessionInitialized(self.session_initialized.load(Ordering::Acquire))
+    }
+
     /// Process one wire-format line.
+    ///
+    /// Returns `Some(Response)` for JSON-RPC requests and
+    /// `None` for notifications (per JSON-RPC §4.1: a server MUST
+    /// NOT respond to a notification).
     ///
     /// Parse errors yield a JSON-RPC parse-error response with
     /// `id = 0` (per JSON-RPC §5: the server cannot recover the id
@@ -66,23 +93,41 @@ impl Mcp {
     /// dispatches the call (per the §9 T2 reload-contract
     /// discipline). Unknown or unparseable shard ids are not
     /// ticked here; the body emits the right INVALID_PARAMS.
-    pub fn dispatch_line(&self, line: &str) -> Response {
-        match Request::parse(line) {
-            Ok(req) => {
-                self.pre_tick(&req);
-                self.registry.dispatch(&req)
+    pub fn dispatch_line(&self, line: &str) -> Option<Response> {
+        match Envelope::parse(line) {
+            Ok(Envelope::Request(req)) => {
+                self.pre_tick_request(&req);
+                Some(self.registry.dispatch(&req))
             }
-            Err(err) => Response::err(
+            Ok(Envelope::Notification(notif)) => {
+                self.handle_notification(&notif);
+                None
+            }
+            Err(err) => Some(Response::err(
                 crate::types::RequestId::from(0),
                 ResponseError::new(ERROR_PARSE, format!("parse error: {err}")),
-            ),
+            )),
         }
+    }
+
+    /// Handle a JSON-RPC notification (no response on the wire).
+    ///
+    /// T5 wires only `notifications/initialized` (the load-bearing
+    /// MCP lifecycle event). Other notifications are accepted
+    /// silently — the spec mandates no response, even for unknown
+    /// notification methods.
+    fn handle_notification(&self, notif: &Notification) {
+        if notif.method.as_str() == "notifications/initialized" {
+            self.session_initialized.store(true, Ordering::Release);
+        }
+        // Unknown notifications: per JSON-RPC §4.1, silently accept.
+        // A future tick may log to stderr; we don't write to stdout.
     }
 
     /// Pre-route shard tick. Peeks at `params.arguments.shard_id`;
     /// when it parses to a known shard, ticks once. Otherwise
     /// no-op (the body will surface the right error to the wire).
-    fn pre_tick(&self, request: &Request) {
+    fn pre_tick_request(&self, request: &Request) {
         // Only `tools/call` carries arguments; other methods skip
         // the pre-tick.
         if request.method.as_str() != "tools/call" {
@@ -107,7 +152,8 @@ impl Mcp {
         let _ = self.registry.shards().tick_then_with(&id, |_| ());
     }
 
-    /// Stdio loop. One request per line; one response per line.
+    /// Stdio loop. One request per line; one response per line —
+    /// EXCEPT notifications, which read a line but write nothing.
     ///
     /// MCP 2025-06-18 stdio: newline-delimited JSON. The line-based
     /// framing is what mcp-server-git and the official reference
@@ -121,7 +167,10 @@ impl Mcp {
             if line.trim().is_empty() {
                 continue;
             }
-            let response = self.dispatch_line(&line);
+            let Some(response) = self.dispatch_line(&line) else {
+                // Notification: per JSON-RPC §4.1, write nothing.
+                continue;
+            };
             let serialized = serde_json::to_string(&response)
                 .unwrap_or_else(|e| format!(r#"{{"error":"serialize: {e}"}}"#));
             stdout.write_all(serialized.as_bytes()).await?;

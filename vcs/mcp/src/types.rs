@@ -206,6 +206,25 @@ impl From<&str> for CommitContent {
     }
 }
 
+/// MCP session initialization state, per the 2024-11-05+ lifecycle.
+///
+/// `false` until the client sends `notifications/initialized` after
+/// the `initialize` response. T5 wires the boolean flip; future
+/// ticks may use this to gate methods that the spec restricts to
+/// post-initialization.
+///
+/// Newtype rather than bare `bool` per `[[feedback-no-bare-types]]`:
+/// the state is wire-altitude and load-bearing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct SessionInitialized(pub bool);
+
+impl SessionInitialized {
+    pub fn as_bool(self) -> bool {
+        self.0
+    }
+}
+
 /// JSON-RPC 2.0 protocol version sentinel.
 ///
 /// The literal `"2.0"`. A unit-like newtype: type-system discipline at

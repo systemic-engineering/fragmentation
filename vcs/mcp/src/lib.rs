@@ -57,11 +57,11 @@ pub use shard::{BudgetMb, Shard, ShardContentError, ShardId, ShardIdParseError, 
 pub use tools::content::ERROR_OID_NOT_FOUND;
 pub use types::{
     CommitContent, CommitMessage, ContentPath, JsonRpcVersion, MethodName, OidString, RequestId,
-    ToolName,
+    SessionInitialized, ToolName,
 };
 pub use wire::{
-    ParseError, Request, Response, ResponseError, ERROR_INTERNAL, ERROR_INVALID_PARAMS,
-    ERROR_INVALID_REQUEST, ERROR_METHOD_NOT_FOUND, ERROR_PARSE,
+    Envelope, Notification, ParseError, Request, Response, ResponseError, ERROR_INTERNAL,
+    ERROR_INVALID_PARAMS, ERROR_INVALID_REQUEST, ERROR_METHOD_NOT_FOUND, ERROR_PARSE,
 };
 
 /// The JSON-RPC 2.0 version sentinel as a value. Use this when

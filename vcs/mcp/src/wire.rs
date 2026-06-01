@@ -4,6 +4,16 @@
 //! shape; nothing here knows about MCP semantics — it stays close to
 //! `https://www.jsonrpc.org/specification`. MCP semantics live in
 //! [`crate::registry`] and [`crate::mcp`].
+//!
+//! T5 splits the on-the-wire envelope along the JSON-RPC §4 / §4.1
+//! seam: a Request carries `id` and MUST receive a response; a
+//! Notification omits `id` and MUST NOT receive one. `Envelope` is
+//! the tagged choice at the parse boundary. The MCP client sends
+//! `notifications/initialized` after `initialize` (per MCP
+//! 2024-11-05+ lifecycle); without this seam, the server would
+//! emit a parse-error response for the notification and break the
+//! handshake. The bug was load-bearing: Claude Code couldn't drive
+//! `frgmnt` until T5 landed the split.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -14,8 +24,8 @@ use crate::types::{JsonRpcVersion, MethodName, RequestId};
 ///
 /// Per JSON-RPC 2.0 §4: a request MUST carry `jsonrpc`, MAY carry
 /// `params` (omitted when there are none), and MUST carry `method`.
-/// `id` is REQUIRED for requests (vs. notifications, which omit it);
-/// T1 supports requests only — notification handling lands in T2.
+/// `id` is REQUIRED for requests (vs. notifications, which omit it
+/// — see [`Notification`]).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Request {
     pub jsonrpc: JsonRpcVersion,
@@ -32,6 +42,73 @@ impl Request {
     /// wrong protocol version, missing `id`/`method`, invalid JSON).
     pub fn parse(payload: &str) -> Result<Self, ParseError> {
         serde_json::from_str(payload).map_err(ParseError::from_serde)
+    }
+}
+
+/// JSON-RPC 2.0 notification envelope.
+///
+/// Per JSON-RPC §4.1: a notification is a Request without `id`. The
+/// server MUST NOT respond to a notification — not even on error.
+/// MCP uses notifications for the lifecycle handshake
+/// (`notifications/initialized`) and the cancellation channel
+/// (`notifications/cancelled` — not yet wired).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Notification {
+    pub jsonrpc: JsonRpcVersion,
+    pub method: MethodName,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub params: Option<Value>,
+}
+
+impl Notification {
+    /// Parse a JSON-RPC notification from a wire-format string.
+    ///
+    /// Strict on the inverse: a notification MUST NOT carry `id`.
+    /// Use [`Envelope::parse`] when the caller hasn't already
+    /// classified the payload.
+    pub fn parse(payload: &str) -> Result<Self, ParseError> {
+        // First parse loosely, then assert no `id`. We can't just
+        // deserialize into Notification — serde happily ignores
+        // extra fields, so an erroneously-id'd payload would
+        // silently become a notification.
+        let value: Value = serde_json::from_str(payload).map_err(ParseError::from_serde)?;
+        if value.get("id").is_some() {
+            return Err(ParseError {
+                message: "notification must not carry `id`".to_string(),
+            });
+        }
+        serde_json::from_value(value).map_err(ParseError::from_serde)
+    }
+}
+
+/// The parsed wire envelope — either a Request (id present) or a
+/// Notification (id absent). T5's tagged choice at the parse
+/// boundary; the dispatcher routes accordingly.
+#[derive(Debug, Clone)]
+pub enum Envelope {
+    Request(Request),
+    Notification(Notification),
+}
+
+impl Envelope {
+    /// Parse a JSON-RPC envelope. Disambiguates by the presence of
+    /// `id`: present → Request, absent → Notification. A payload
+    /// with neither (no `id`, no `method`) is a Request parse
+    /// failure (the more strict shape).
+    pub fn parse(payload: &str) -> Result<Self, ParseError> {
+        // Peek at the raw JSON to decide. This costs an extra
+        // value-parse on every line, but is correct (vs. trying
+        // Request first then falling back, which would mask real
+        // Request validation errors).
+        let value: Value = serde_json::from_str(payload).map_err(ParseError::from_serde)?;
+        if value.get("id").is_some() {
+            let req: Request = serde_json::from_value(value).map_err(ParseError::from_serde)?;
+            Ok(Envelope::Request(req))
+        } else {
+            let n: Notification =
+                serde_json::from_value(value).map_err(ParseError::from_serde)?;
+            Ok(Envelope::Notification(n))
+        }
     }
 }
 
