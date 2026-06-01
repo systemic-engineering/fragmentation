@@ -1652,6 +1652,49 @@ order). The hard-realtime admission row is genuinely new — not on
 the earlier chain table because the realtime discipline only got
 named in this spec; named here so the chain accounts for it.
 
+### 8.0 Use case — agent memory management via `fragmentation-mcp`
+
+The HamiltonScheduler's first production consumer outside the build-
+graph altitude is **agent memory management**, via the
+`fragmentation-mcp` server (per
+[[fragmentation-mcp]]). The mapping is direct and load-bearing:
+
+- An MCP session is a shard. The shard owns one `FrgmntStore<
+  BodyEntry<H>>` + one `HamiltonScheduler` instance + one
+  [[lens-transit]] accumulator.
+- The shard's budget (`fragmentation.shard.open(budget_bytes, ...)`)
+  is the `BoundedStore::capacity()` the scheduler observes via the
+  `pressure_load` and `entry_occupancy` features (§3.2 features
+  #1, #2).
+- The scheduler ticks on every incoming MCP tool call (per the
+  reload-contract discipline from
+  [[../../../mirror/docs/specs/lsp-and-mcp]]'s `@mirror/reload`).
+  Each tick observes → selects a strategy → executes; the
+  resulting `TickResult` carries the strategy choice + the transit
+  report; both ride back to the agent on the wire.
+- The four strategies acquire agent-altitude readings (per
+  [[fragmentation-mcp]] §4.3): **Abyss** = session idle / all-read;
+  **Pathfinder** = focused change crystallization; **Cartographer**
+  = full tick; **Explorer** = boundary recovery (disk corruption,
+  upstream-git fetch failure, ref-update race).
+- The 1202 discipline reaches the wire: under hard-realtime
+  pressure, soft-realtime MCP tool calls (`diff`, `history`,
+  `search`, large `merge`) are dropped FIRST, with a structured
+  `PropertyVerdict::Partial { confidence: 0.0, diagnostics: [...] }`
+  surfaced to the agent on the same tool's response. Hard-realtime
+  calls (`commit`, `read`, `refs.update` invoked with
+  `realtime: "hard"` + a deadline) either meet their budget or
+  return `PropertyVerdict::Fail(NotResident)` immediately; never
+  block on disk. The agent sees the 1202.
+
+This is what makes fragmentation-mcp the first deployment target
+of the wider stack: the HamiltonScheduler's substrate-management
+discipline transfers directly to agent-runtime substrate, and the
+result is a structurally different shape than existing CLI-wrapped
+git-MCPs (which are stateless and unbounded). Bounded RAM by
+construction; structured drops; hard-realtime contracts at the
+wire. See [[fragmentation-mcp]] for the full design.
+
 ### 8.1 Transit — the measurement carrier
 
 The chain table above states *claims*. Observing whether the substrate
