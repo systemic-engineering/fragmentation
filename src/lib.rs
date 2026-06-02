@@ -48,6 +48,12 @@ pub mod fragment;
 pub mod frgmnt_store;
 pub mod hamilton_scheduler;
 pub mod keys;
+// LAPACKPrism — T12.2a (canonical numerical Prism impl per pq.md §6.5).
+// Depends on `prism_core::Prism` from the `prism-bridge` feature; gated
+// on it for now since the trait surface is what consumers use. T12.2a.5
+// will introduce a `lapack` feature for the flang FFI.
+#[cfg(feature = "prism-bridge")]
+pub mod lapack_prism;
 #[cfg(feature = "project")]
 pub mod manifest;
 #[cfg(feature = "singularity")]
