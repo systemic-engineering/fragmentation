@@ -7,6 +7,10 @@ Standalone. Useful without mirror. Open-source. The substrate any agent
 workflow benefits from, with native git interop at the wire and the
 Hamilton-Scheduler managing the agent's working memory.*
 
+*§0.5.5 added 2026-06-02. Reed + Alex + you. T12.2 splits into
+T12.2a (`impl Prism for LAPACKPrism`) + T12.2b (`impl PrismQuery for
+FrgmntMcp` dispatches to LAPACKPrism). Status: load-bearing recognition.*
+
 **Status (2026-06-02, post T9/T10/T11 reframe): Red, RESHAPED.** The
 architecture is pinned; the MCP tool surface has collapsed from 18
 enumerated tools to **3 prism operations** (focus / project / refract)
@@ -224,6 +228,66 @@ stands.
 The refract step IS the lattice join — each refract returns a Beam whose shard-state is `≥` the prior. Strong eventual consistency rides through the wire algebra without protocol additions (see pq spec §9 for the closure argument, [[../../../mirror/docs/specs/reality-shard-as-crdt]] for the semilattice).
 
 The `observe` tool was a separate tool only because the substrate's verdicts had no carrier; now they have one (the `imperfect` field on every Beam, carrying the kintsugi-objective verdict per [[../../../mirror/docs/specs/kintsugi-variety]]), and observation is a field, not a call.
+
+### 0.5.5 T12.2 splits — `impl Prism for LAPACKPrism` + `impl PrismQuery for FrgmntMcp`
+
+The original T12.2 was one tick: `impl PrismQuery for FrgmntMcp`. With
+[[../../../prism/docs/specs/pq]] §6.5 naming `LAPACKPrism` as the
+canonical `Prism` impl that backs pq's wire surface, T12.2 decomposes
+into two:
+
+**T12.2a — `impl Prism for LAPACKPrism`.** The numerical engine. A new
+`LAPACKPrism: Prism` impl that wraps mirror's existing flang-linked
+LAPACK substrate (`mirror/bootstrap/src/spectral.rs` is ≈199KB of
+spectral operations doing eigenvalue work today). The Prism's three
+methods map to LAPACK kernels per the operation table in
+[[../../../prism/docs/specs/pq]] §6.5.2:
+
+- `focus({oid|path|...})` → row/column select on the shard matrix.
+- `project({prefix|match|walk|...})` → projector / regex-selector /
+  adjacency-power / Banach iteration (kintsugi).
+- `refract({to_path|cas|...})` → rank-1 update + persist.
+
+`Beam.imperfect.loss` carries the residual norm (the Cramér-Rao
+residual variance per [[../../../mirror/docs/specs/kintsugi-variety]]
+§3). The 16→5 lift per
+[[../../../mirror/docs/specs/architecture-flang-mirror-numerical-split]]
+is what makes the 16-dim LAPACK work composable at the 5-operation
+altitude.
+
+**T12.2b — `impl PrismQuery for FrgmntMcp` dispatches into LAPACKPrism.**
+The wire-altitude wrapper. Lifts `LAPACKPrism`'s `Prism` to the
+`PrismQuery: Prism` trait per [[../../../prism/docs/specs/pq]] §5.4;
+adds the typed `Target` / `Filter` / `Output` DSLs; the `dispatch` arm
+folds the 18 prior tool cases into 3 chains over `LAPACKPrism`.
+`FrgmntMcp` owns the shard registry and the HamiltonScheduler budget;
+`LAPACKPrism` owns the numerical machinery.
+
+The altitude triple (consistent with [[../../../prism/docs/specs/pq]] §6.5.3):
+
+```
+   PrismQuery (FrgmntMcp)  — the wire trait + Target/Filter/Output DSLs
+        │ dispatches into
+        ▼
+   LAPACKPrism             — the canonical numerical Prism impl
+        │ is-a
+        ▼
+   prism_core::Prism       — the operator algebra (focus / project / refract)
+```
+
+Vocabulary the spec graph uses from this point onward (avoid
+conflation):
+
+- **pq** — the wire DSL.
+- **`PrismQuery`** — the Rust trait at the wire altitude.
+- **`prism_core::Prism`** — the operator algebra.
+- **`LAPACKPrism`** — the canonical Prism impl.
+
+The §9 tick decomposition below predates this reshape; see §9 for the
+T1-T5 v0.1 sequence (the substrate-only ship), and read T12.2a/T12.2b
+as the T9/T10/T11/T12 substrate-chain successors. Implementation tick
+numbering between this spec and the project task tree is reconciled
+at tick-grooming time.
 
 ---
 
