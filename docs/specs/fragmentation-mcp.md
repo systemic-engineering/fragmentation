@@ -1296,11 +1296,31 @@ is the SECOND server on the same wire.
 
 ## 9. Tick decomposition — v0.1 of fragmentation-mcp
 
-Five ticks. T1 lands the crate skeleton. T2–T4 build the tool
-surface, the shard model, the git wire. T5 is shipping. None of
-the ticks require new substrate work; all the load-bearing pieces
-(FrgmntStore, HamiltonScheduler, SpectralCoordinate<5>,
-fragmentation-git) already exist.
+*Status reconciliation (2026-06-02).* This §9 is the **original**
+substrate-only ship plan. Actual shipping of fragmentation-mcp
+landed as T1–T8 on the `mara/fragmentation-mcp-t*` branch chain
+(now on main); read each §9 T1–T5 entry below as the substrate-
+altitude predecessor of what shipped. Subsequent work tracks under
+separate tick families per §0.5:
+
+- **fragmentation-mcp v0.1 (T1–T8) — landed.** §9 describes T1–T5;
+  T6 added `inputSchema` per MCP 2025-06-18, T7 wrapped
+  `CallToolResult` content, T8 made `RequestId` JSON-RPC §4-
+  compliant (Number | String | Null).
+- **Substrate spec (T9, T10) — landed.** `reality-shard-as-crdt`
+  and session bootstrap. See §0.5.1, §0.5.2.
+- **pq + kintsugi reshape (T11.1, T12.1) — landed in prism.**
+  T12.2a / T12.2b (LAPACKPrism substrate + PrismQuery dispatch)
+  pending per §0.5.5 and [[../../../prism/docs/specs/pq]] §6.5.
+- **Mirror CI v0.1 (T11.2–T11.8) — pending.** Lives in
+  [[../../../mirror/docs/specs/kintsugi-ci-v0.1]]; same T11.x
+  numeric range but separate tick tree (mirror repo).
+
+Five ticks (the **original plan**). T1 lands the crate skeleton.
+T2–T4 build the tool surface, the shard model, the git wire. T5
+is shipping. None of the ticks require new substrate work; all the
+load-bearing pieces (FrgmntStore, HamiltonScheduler,
+SpectralCoordinate<5>, fragmentation-git) already exist.
 
 ### T1 — Crate skeleton + MCP wire (the foundation)
 
