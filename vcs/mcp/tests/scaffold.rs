@@ -35,7 +35,7 @@ fn fifteen_callables_per_spec_section_3_6_refined() {
         "fragmentation.shard.close",
         "fragmentation.observe",
     ];
-    assert_eq!(FIFTEEN_TOOL_NAMES.len(), 15);
+    assert_eq!(FIFTEEN_TOOL_NAMES.len(), 18);
     for name in expected {
         assert!(
             FIFTEEN_TOOL_NAMES.iter().any(|t| *t == name),
@@ -69,7 +69,7 @@ fn registry_dispatches_tools_list() {
         .and_then(|r| r.get("tools"))
         .and_then(|t| t.as_array())
         .expect("tools array");
-    assert_eq!(tools.len(), 15);
+    assert_eq!(tools.len(), 18);
 }
 
 #[test]
@@ -128,7 +128,7 @@ fn mcp_constructs_with_default_registry() {
     let names: Vec<&str> = tool_names.iter().map(ToolName::as_str).collect();
     assert!(names.contains(&"fragmentation.commit"));
     assert!(names.contains(&"fragmentation.shard.open"));
-    assert_eq!(names.len(), 15);
+    assert_eq!(names.len(), 18);
 }
 
 #[test]

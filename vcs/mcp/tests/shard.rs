@@ -122,7 +122,7 @@ fn fifteen_tool_names_per_spec_section_3_6_refined() {
         "fragmentation.shard.close",
         "fragmentation.observe",
     ];
-    assert_eq!(FIFTEEN_TOOL_NAMES.len(), 15);
+    assert_eq!(FIFTEEN_TOOL_NAMES.len(), 18);
     for name in expected {
         assert!(
             FIFTEEN_TOOL_NAMES.iter().any(|t| *t == name),
@@ -153,7 +153,7 @@ fn tools_list_returns_fifteen() {
         .and_then(|r| r.get("tools"))
         .and_then(|t| t.as_array())
         .expect("tools array");
-    assert_eq!(tools.len(), 15, "expected fifteen tool callables");
+    assert_eq!(tools.len(), 18, "expected eighteen tool callables");
 }
 
 // ---------------------------------------------------------------------------

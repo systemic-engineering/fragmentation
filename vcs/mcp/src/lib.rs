@@ -43,6 +43,7 @@
 
 pub mod mcp;
 pub mod registry;
+pub mod session;
 pub mod shard;
 pub mod tools;
 pub mod types;

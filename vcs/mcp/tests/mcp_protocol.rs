@@ -189,7 +189,7 @@ async fn notifications_initialized_does_not_crash() {
         .and_then(|r| r.get("tools"))
         .and_then(|t| t.as_array())
         .expect("tools array");
-    assert_eq!(tools.len(), 15);
+    assert_eq!(tools.len(), 18);
 
     let status = tokio::time::timeout(Duration::from_secs(5), child.wait())
         .await
@@ -223,7 +223,7 @@ async fn tools_list_after_full_handshake() {
         .and_then(|r| r.get("tools"))
         .and_then(|t| t.as_array())
         .expect("tools array");
-    assert_eq!(tools.len(), 15);
+    assert_eq!(tools.len(), 18);
 
     let names: Vec<&str> = tools
         .iter()
@@ -699,7 +699,7 @@ async fn tools_list_emits_input_schema_for_every_tool() {
         .and_then(|r| r.get("tools"))
         .and_then(|t| t.as_array())
         .expect("tools array");
-    assert_eq!(tools.len(), 15);
+    assert_eq!(tools.len(), 18);
 
     for (i, tool) in tools.iter().enumerate() {
         let name = tool
