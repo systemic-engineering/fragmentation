@@ -54,3 +54,42 @@ install: build-frgmnt
     install -m 0755 {{FRGMNT_BIN_RELEASE}} {{INSTALL_DIR}}/frgmnt
     @echo "installed: {{INSTALL_DIR}}/frgmnt"
     @echo "ensure PATH contains {{INSTALL_DIR}}"
+
+# Merge the current branch into main.
+#
+# - Refuses if on main, or if working tree is dirty.
+# - Fast-forwards if possible; falls back to --no-ff merge commit.
+# - Runs the test suite after the merge.
+# - Rebuilds + installs the frgmnt binary so the live MCP picks up
+#   the new substrate.
+# - Push stays explicit — run `git push origin main` when ready.
+merge:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    branch=$(git rev-parse --abbrev-ref HEAD)
+    if [ "$branch" = "main" ]; then
+        echo "✖ error: already on main" >&2
+        exit 1
+    fi
+    # Allow only submodule pointer drift (the `m` status line) and untracked
+    # files that are gitignored already (no `??` should appear under normal
+    # operation). Anything else — reject.
+    dirty=$(git status --porcelain | grep -vE '^(\?\? |m  )' || true)
+    if [ -n "$dirty" ]; then
+        echo "✖ error: working tree dirty. Commit or stash first." >&2
+        git status --short >&2
+        exit 1
+    fi
+    echo "→ merging $branch into main"
+    git checkout main
+    git pull --ff-only origin main
+    if ! git merge --ff-only "$branch" 2>/dev/null; then
+        echo "→ ff-only failed; creating merge commit"
+        git merge --no-ff --no-gpg-sign "$branch" -m "🔀 merge $branch into main"
+    fi
+    echo "→ running tests"
+    just test
+    echo "→ rebuilding and installing frgmnt"
+    just install
+    echo "✔ merged $branch into main; frgmnt reinstalled at {{INSTALL_DIR}}/frgmnt"
+    echo "  next: \`git push origin main\` when ready"
