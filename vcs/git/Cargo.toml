@@ -1,0 +1,32 @@
+[package]
+name = "fragmentation-git"
+version = "0.1.0"
+edition = "2021"
+description = "Git transport layer for fragmentation content store"
+
+[features]
+default = []
+fuse = []
+fuse-mount = ["fuse", "dep:fuser", "dep:libc"]
+cli = ["dep:clap"]
+# Forward the substrate's signing/encryption feature flags so the binary can
+# conditionally compile signing paths against the parent crate's gates.
+ssh = ["fragmentation/ssh"]
+gpg = ["fragmentation/gpg"]
+
+[[bin]]
+name = "frgmt-git"
+path = "src/bin/frgmt-git.rs"
+required-features = ["cli"]
+
+[dependencies]
+fragmentation = { path = "../.." }
+git2 = "0.19"
+dashmap = "6"
+clap = { version = "4", features = ["derive"], optional = true }
+fuser = { version = "0.14", optional = true }
+libc = { version = "0.2", optional = true }
+hex = "0.4"
+
+[dev-dependencies]
+tempfile = "3"

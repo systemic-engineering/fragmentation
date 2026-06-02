@@ -1,4 +1,4 @@
-use crate::fragment::Fragmentable;
+use crate::fragment::{ContentAddressed, Fragmentable, TreeShaped};
 
 /// What to do when visiting a fragment.
 #[derive(Clone, Debug, PartialEq, Eq)]

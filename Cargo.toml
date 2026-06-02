@@ -1,3 +1,15 @@
+[workspace]
+# T1 of `docs/specs/fragmentation-mcp.md` lands `vcs/mcp/` as a workspace
+# member — the FIRST deployment target of the wider stack, an MCP server
+# exposing content-addressed primitives + HamiltonScheduler-managed shards
+# to any agent runtime. It depends on `fragmentation` directly; depends on
+# `fragmentation-git` only via an optional `git-interop` feature for the
+# SHA-1 ↔ `SpectralCoordinate<5>` crosswalk (deferred to T4). `prism_core`
+# and `fragmentation` stay dependency-free of the new crate (substrate-pull
+# at the Cargo.toml level).
+members = [".", "vcs/git", "vcs/jj", "vcs/mcp"]
+resolver = "2"
+
 [package]
 name = "fragmentation"
 version = "0.1.0"
@@ -9,33 +21,45 @@ keywords = ["content-addressed", "tree", "fragment", "git", "hash"]
 categories = ["data-structures", "encoding"]
 
 [features]
-git = ["dep:git2"]
+# Default — preserves the v0.1.0 surface for existing consumers
+# (fragmentation-git, mirror's bootstrap, spectral-db's planned consumer).
+# T2/T3 callers should switch to --no-default-features and pick deliberately.
+default = ["concurrent", "prism-bridge", "visibility", "singularity", "project", "supervision"]
+
+# Cut 1 (mirror-store.md §4.5): DashMap-backed concurrent store. Single-threaded
+# callers turn this off; the rest of the substrate (Store, FrgmntStore,
+# BoundedStore) uses std HashMap.
+concurrent = ["dep:dashmap"]
+
+# Prism MerkleTree/Store/Loss impls for Fractal + FrgmntStore. Pulls in
+# `concurrent` because the Store impl is over `FrgmntStore` (which depends
+# on DashMap-backed BoundedStore).
+prism-bridge = ["concurrent"]
+
+# Public/Protected/Private wrappers + Keys/Signature.
+visibility = []
+
+# File-system materialization (naked + singularity).
+singularity = []
+
+# Lens projection (project + manifest).
+project = []
+
+# OTP-style supervision trees over fragments.
+supervision = []
+
+# Signing/encryption back-ends.
 ssh = ["dep:ssh-key", "dep:x25519-dalek", "dep:chacha20poly1305", "dep:hkdf"]
 gpg = []
-cli = ["dep:clap", "git"]
-fuse = ["git"]
-fuse-mount = ["fuse", "dep:fuser", "dep:libc"]
-
-[[bin]]
-name = "fragmentation"
-required-features = ["cli"]
-
-[[bin]]
-name = "frgmnt"
-path = "src/main.rs"
-required-features = ["cli"]
 
 [dependencies]
+prism-core = { path = "../prism/core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
 sha1 = "0.10"
 hex = "0.4"
-dashmap = "6"
-clap = { version = "4", features = ["derive"], optional = true }
-git2 = { version = "0.19", optional = true }
-fuser = { version = "0.14", optional = true }
-libc = { version = "0.2", optional = true }
+dashmap = { version = "6", optional = true }
 ssh-key = { version = "0.6", features = ["std", "ed25519", "crypto"], optional = true }
 x25519-dalek = { version = "2", features = ["static_secrets"], optional = true }
 chacha20poly1305 = { version = "0.10", optional = true }

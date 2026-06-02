@@ -1,6 +1,6 @@
 use fragmentation::diff;
 use fragmentation::encoding;
-use fragmentation::fragment::{self, Fractal, Fragmentable};
+use fragmentation::fragment::{self, ContentAddressed, Fractal, Fragmentable, TreeShaped};
 use fragmentation::store::Store;
 
 // ===========================================================================

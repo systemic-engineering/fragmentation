@@ -1,8 +1,9 @@
 use clap::{Parser, Subcommand};
 use std::io::Read;
 
-use fragmentation::fragment::Fragmentable;
+use fragmentation::fragment::{ContentAddressed, Fragmentable, TreeShaped};
 use fragmentation::{encoding, fragment, keys};
+use fragmentation_git::commit::DraftWriteExt;
 
 #[derive(Parser)]
 #[command(name = "fragmentation")]
@@ -25,7 +26,7 @@ enum Command {
         data: Option<String>,
     },
     /// Encode text, write fragment tree + commit to a git repo. Prints commit SHA.
-        Commit {
+    Commit {
         /// Text to commit. Reads stdin if omitted.
         data: Option<String>,
         /// Commit message.
@@ -45,7 +46,7 @@ enum Command {
         namespace: Option<String>,
     },
     /// Sign a shard. Prints signature bytes as hex.
-        Sign {
+    Sign {
         /// Data to sign. Reads stdin if omitted.
         data: Option<String>,
         /// Path to git repository (for key detection). Defaults to current directory.
@@ -53,7 +54,7 @@ enum Command {
         repo: Option<String>,
     },
     /// Encrypt a shard. Writes ciphertext to stdout.
-        Encrypt {
+    Encrypt {
         /// Data to encrypt. Reads stdin if omitted.
         data: Option<String>,
         /// Path to git repository (for key detection). Defaults to current directory.
@@ -61,7 +62,7 @@ enum Command {
         repo: Option<String>,
     },
     /// Decrypt ciphertext from stdin. Writes plaintext to stdout.
-        Decrypt {
+    Decrypt {
         /// Path to git repository (for key detection). Defaults to current directory.
         #[arg(short, long)]
         repo: Option<String>,
@@ -84,7 +85,7 @@ enum Command {
     },
     /// Create a content-addressed link (Lens) to one or more git objects.
     /// Resolves targets by SHA or git ref (branch, tag, HEAD, etc.).
-        #[command(alias = "ln")]
+    #[command(alias = "ln")]
     Link {
         /// Target SHAs or git refs to link to.
         #[arg(required = true)]
@@ -154,10 +155,36 @@ fn open_repo(repo: Option<String>) -> git2::Repository {
 }
 
 fn detect_keys(repo: &git2::Repository) -> keys::Local {
-    keys::Local::from_repo(repo).unwrap_or_else(|e| {
-        eprintln!("failed to detect keys: {}", e);
-        std::process::exit(1);
-    })
+    // Inlined from the previous fragmentation::keys::Local::from_repo
+    // (deleted in T1/C3 so the substrate carries no git2 import). T2 will
+    // hoist this into a proper fragmentation-git::keys module.
+    let config = match repo
+        .config()
+        .and_then(|c| c.open_level(git2::ConfigLevel::Local))
+    {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("failed to detect keys: failed to read git config: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    let format = config.get_string("gpg.format").unwrap_or_default();
+    let signing_key = config.get_string("user.signingkey").ok();
+
+    match (format.as_str(), signing_key) {
+        #[cfg(feature = "ssh")]
+        ("ssh", Some(key_path)) => match keys::SSH::from_path(&key_path) {
+            Ok(ssh_key) => keys::Local::Ssh(Box::new(ssh_key)),
+            Err(e) => {
+                eprintln!("failed to detect keys (ssh): {}", e);
+                std::process::exit(1);
+            }
+        },
+        #[cfg(feature = "gpg")]
+        ("openpgp" | "", Some(key_id)) => keys::Local::Gpg(keys::GPG::new(key_id)),
+        _ => keys::Local::None,
+    }
 }
 
 fn read_input(data: Option<String>) -> String {
@@ -194,7 +221,7 @@ fn main() {
             let tree = encoding::encode(&input);
             println!("{}", fragment::content_oid(&tree));
         }
-                Command::Commit {
+        Command::Commit {
             data,
             message,
             repo,
@@ -229,7 +256,7 @@ fn main() {
 
             let commit = draft
                 .authored(author)
-                .write(&repository, committer)
+                .write_to_git(&repository, committer)
                 .unwrap_or_else(|e| {
                     eprintln!("failed to write commit: {}", e);
                     std::process::exit(1);
@@ -247,7 +274,7 @@ fn main() {
 
             println!("{}", commit.sha().0);
         }
-                Command::Sign { data, repo } => {
+        Command::Sign { data, repo } => {
             use fragmentation::fragment::{Blob, Fractal};
             use keys::Keys;
 
@@ -271,7 +298,7 @@ fn main() {
                 print!("{}", hex::encode(bytes));
             }
         }
-                Command::Encrypt { data, repo } => {
+        Command::Encrypt { data, repo } => {
             use fragmentation::fragment::Fractal;
             use keys::Keys;
             use std::io::Write;
@@ -295,7 +322,7 @@ fn main() {
                 .write_all(encrypted.ciphertext())
                 .expect("failed to write ciphertext");
         }
-                Command::Decrypt { repo } => {
+        Command::Decrypt { repo } => {
             use fragmentation::fragment::Fractal;
             use keys::{Encrypted, Keys};
             use std::io::Write;
@@ -313,7 +340,7 @@ fn main() {
                 .write_all(decrypted.data().as_bytes())
                 .expect("failed to write plaintext");
         }
-                Command::Link {
+        Command::Link {
             targets,
             data,
             message,
@@ -371,7 +398,7 @@ fn main() {
 
             let commit = draft
                 .authored(author)
-                .write(&repository, committer)
+                .write_to_git(&repository, committer)
                 .unwrap_or_else(|e| {
                     eprintln!("failed to write commit: {}", e);
                     std::process::exit(1);
@@ -417,8 +444,8 @@ fn main() {
             let source_path = std::path::Path::new(&source);
             let output_path = std::path::Path::new(&output);
 
-            let projection =
-                fragmentation::project::project(source_path, &manifest).unwrap_or_else(|e| {
+            let projection = fragmentation::project::project(source_path, &manifest)
+                .unwrap_or_else(|e| {
                     eprintln!("projection failed: {}", e);
                     std::process::exit(1);
                 });
@@ -456,7 +483,7 @@ fn main() {
             let committer = fragmentation::witnessed::Committer::new(&name, &email);
             let ns = resolve_namespace(&repository, namespace);
             let full_ref = format!("refs/{}/{}", ns, ref_name);
-            let fs = fragmentation::fuse::FragmentFs::open(repository, committer, full_ref);
+            let fs = fragmentation_git::fuse::FragmentFs::open(repository, committer, full_ref);
             fuser::mount2(
                 fs,
                 mountpoint,

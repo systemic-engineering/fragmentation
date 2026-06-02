@@ -14,7 +14,7 @@
 use dashmap::DashMap;
 
 use crate::commit::Commit;
-use crate::fragment::{content_oid, Fragmentable};
+use crate::fragment::{content_oid, ContentAddressed, Fragmentable, TreeShaped};
 use crate::sha::HashAlg;
 
 /// Concurrent content-addressed store.
@@ -106,7 +106,6 @@ impl<N: Fragmentable + Clone, H: HashAlg> ConcurrentStore<N, H> {
         self.objects.iter().map(|r| r.key().clone()).collect()
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -259,5 +258,4 @@ mod tests {
         let _names = store.ref_names();
         let _keys = store.keys();
     }
-
 }

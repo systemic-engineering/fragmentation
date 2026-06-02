@@ -1,5 +1,5 @@
 use fragmentation::encoding::{Decode, Encode};
-use fragmentation::fragment::{self, Blob, Fractal, Fragmentable};
+use fragmentation::fragment::{self, Blob, ContentAddressed, Fractal, Fragmentable, TreeShaped};
 use fragmentation::keys::{Keys, Local, LocalError, PlainKeys, Signature};
 use fragmentation::ref_::Ref;
 use fragmentation::sha;
@@ -180,8 +180,8 @@ fn public_commit_implements_draftable() {
     use fragmentation::commit::{Draft, Draftable};
     let shard = make_blob_shard(vec![1, 2, 3]);
     let sig = Local::None.sign(&shard).unwrap();
-    let draft = Draft::root("signed observation", shard);
-    let public: Public<Local, Draft<Fractal<Blob>>> = Public::new(draft, sig);
+    let draft: Draft<Fractal<Blob>, sha::Sha> = Draft::root("signed observation", shard);
+    let public: Public<Local, Draft<Fractal<Blob>, sha::Sha>> = Public::new(draft, sig);
 
     fn accepts_draftable<T: Draftable>(_d: &T) {}
     accepts_draftable(&public);
@@ -206,8 +206,8 @@ fn public_draftable_fractal_method() {
     use fragmentation::commit::{Draft, Draftable};
     let shard = make_blob_shard(vec![1, 2, 3]);
     let sig = Local::None.sign(&shard).unwrap();
-    let draft = Draft::root("test", shard.clone());
-    let public: Public<Local, Draft<Fractal<Blob>>> = Public::new(draft, sig);
+    let draft: Draft<Fractal<Blob>, sha::Sha> = Draft::root("test", shard.clone());
+    let public: Public<Local, Draft<Fractal<Blob>, sha::Sha>> = Public::new(draft, sig);
     // .node() via Draftable → covers visibility.rs:148
     assert_eq!(public.node().data(), shard.data());
 }
@@ -433,55 +433,10 @@ mod gpg_tests {
     }
 }
 
-// ===========================================================================
-// from_repo tests (feature-gated)
-// ===========================================================================
-
-mod from_repo_tests {
-    use super::*;
-
-    #[test]
-    fn from_repo_no_config_returns_plain() {
-        let td = tempfile::tempdir().unwrap();
-        let repo = git2::Repository::init(td.path()).unwrap();
-        let keys = Local::from_repo(&repo).unwrap();
-        assert_eq!(keys, Local::None);
-    }
-
-    #[cfg(feature = "ssh")]
-    #[test]
-    fn from_repo_ssh_format() {
-        let td = tempfile::tempdir().unwrap();
-        let repo = git2::Repository::init(td.path()).unwrap();
-
-        let key = fragmentation::keys::SSH::generate_ed25519().unwrap();
-        let key_path = td.path().join("test_key");
-        key.write_to_file(&key_path).unwrap();
-
-        let mut config = repo.config().unwrap();
-        config.set_str("gpg.format", "ssh").unwrap();
-        config
-            .set_str("user.signingkey", key_path.to_str().unwrap())
-            .unwrap();
-
-        let keys = Local::from_repo(&repo).unwrap();
-        assert!(matches!(keys, Local::Ssh(_)));
-    }
-
-    #[cfg(feature = "gpg")]
-    #[test]
-    fn from_repo_gpg_format() {
-        let td = tempfile::tempdir().unwrap();
-        let repo = git2::Repository::init(td.path()).unwrap();
-
-        let mut config = repo.config().unwrap();
-        config.set_str("gpg.format", "openpgp").unwrap();
-        config.set_str("user.signingkey", "ABCDEF1234").unwrap();
-
-        let keys = Local::from_repo(&repo).unwrap();
-        assert!(matches!(keys, Local::Gpg(_)));
-    }
-}
+// `from_repo` tests moved to `vcs/git/tests/keys_from_repo_test.rs` in T1/C3 —
+// fragmentation's substrate carries no `git2` import, so any test exercising
+// git-config-based key detection lives next to the fragmentation-git crate that
+// owns the integration.
 
 // ===========================================================================
 // Fingerprint tests

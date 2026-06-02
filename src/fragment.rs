@@ -5,32 +5,51 @@ use crate::sha::{HashAlg, Sha};
 /// Raw bytes. The default data type for fragments.
 pub type Blob = Vec<u8>;
 
-/// The interface for anything content-addressed and self-similar.
-/// Turtles all the way down: your children are yourself.
-pub trait Fragmentable {
+// ---------------------------------------------------------------------------
+// Cut 2 (mirror-store.md §4.5 / mirror-native-vcs.md §3.1):
+//
+// `Fragmentable` splits into two traits:
+//
+//   `ContentAddressed`  — the OID-computation contract: self_ref + data.
+//                         Any type whose identity is its content.
+//
+//   `TreeShaped`        — the tree-walking extension: children, targets,
+//                         shape predicates. Recursive structure.
+//
+// `Fragmentable` remains as a deprecated alias for `ContentAddressed +
+// TreeShaped` so the existing call sites keep working through the
+// transition. T2/T3 callers should prefer the narrow trait that matches
+// their use; this trait will be removed once the migration completes.
+// ---------------------------------------------------------------------------
+
+/// The OID-computation contract. Any type whose identity is its content.
+///
+/// Minimum trait for content-addressed storage. A backend that just stores
+/// and reads typed bytes only needs this.
+pub trait ContentAddressed {
     type Data: Encode;
     type Hash: HashAlg;
     fn self_ref(&self) -> &Ref<Self::Hash>;
     fn data(&self) -> &Self::Data;
-    fn children(&self) -> &[Self]
-    where
-        Self: Sized;
-    fn is_shard(&self) -> bool
-    where
-        Self: Sized,
-    {
+}
+
+/// The tree-walking contract. Recursive structure with shape predicates.
+///
+/// Adds the child-listing and lens-target methods on top of
+/// [`ContentAddressed`]. Required by `walk`, `merge`, `content_oid`, and
+/// anything else that has to traverse a fragment.
+pub trait TreeShaped: ContentAddressed
+where
+    Self: Sized,
+{
+    fn children(&self) -> &[Self];
+    fn is_shard(&self) -> bool {
         self.children().is_empty()
     }
-    fn is_fractal(&self) -> bool
-    where
-        Self: Sized,
-    {
+    fn is_fractal(&self) -> bool {
         !self.children().is_empty()
     }
-    fn is_lens(&self) -> bool
-    where
-        Self: Sized,
-    {
+    fn is_lens(&self) -> bool {
         false
     }
     fn targets(&self) -> &[Self::Hash] {
@@ -38,13 +57,41 @@ pub trait Fragmentable {
     }
 }
 
+/// Deprecated alias trait for `ContentAddressed + TreeShaped`. Kept so existing
+/// generic bounds (`T: Fragmentable`) continue to compile through the
+/// T1→T3 transition. Method-call sites must additionally import the
+/// supertrait that carries the method:
+///
+/// ```text
+/// use fragmentation::fragment::{ContentAddressed, TreeShaped};
+/// // then call: node.self_ref()  (from ContentAddressed)
+/// //           node.children()   (from TreeShaped)
+/// ```
+///
+/// Future code should drop `Fragmentable` entirely in favor of the
+/// narrower trait that matches the use. This blanket trait will be removed
+/// in 0.2 per docs/specs/mirror-native-vcs.md §3.1.
+#[deprecated(
+    since = "0.1.1",
+    note = "Use `ContentAddressed` (for OID computation) or `TreeShaped` (for tree walking) instead. \
+            This blanket trait will be removed in 0.2 per docs/specs/mirror-native-vcs.md §3.1."
+)]
+pub trait Fragmentable: ContentAddressed + TreeShaped {}
+
+#[allow(deprecated)]
+impl<T: ContentAddressed + TreeShaped> Fragmentable for T {}
+
 /// A node in the possibility space.
+///
+/// Cut 3 (mirror-store.md §4.5): the recursive variant is `Fractal::Branch`,
+/// not `Fractal::Fractal`. Removing the doubly-named variant lets grep,
+/// rustdoc, and match arms read at the type level.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Fractal<E = Blob, H: HashAlg = Sha> {
     /// Terminal: self-addressed, carries data, stops.
     Shard { ref_: Ref<H>, data: E },
     /// Self-similar: self-addressed, carries data, contains fractal children.
-    Fractal {
+    Branch {
         ref_: Ref<H>,
         data: E,
         fractal: Vec<Fractal<E, H>>,
@@ -66,9 +113,9 @@ impl<H: HashAlg> Fractal<String, H> {
         }
     }
 
-    /// Create a fractal from string-like data. Self-similar, contains other fragments.
+    /// Create a branch from string-like data. Self-similar, contains other fragments.
     pub fn new(ref_: Ref<H>, data: impl Into<String>, fractal: Vec<Fractal<String, H>>) -> Self {
-        Fractal::Fractal {
+        Fractal::Branch {
             ref_,
             data: data.into(),
             fractal,
@@ -91,9 +138,9 @@ impl<E, H: HashAlg> Fractal<E, H> {
         Fractal::Shard { ref_, data }
     }
 
-    /// Create a fractal with typed data. Self-similar, contains other fragments.
+    /// Create a branch with typed data. Self-similar, contains other fragments.
     pub fn new_typed(ref_: Ref<H>, data: E, fractal: Vec<Fractal<E, H>>) -> Self {
-        Fractal::Fractal {
+        Fractal::Branch {
             ref_,
             data,
             fractal,
@@ -106,14 +153,14 @@ impl<E, H: HashAlg> Fractal<E, H> {
     }
 }
 
-impl<E: Encode, H: HashAlg> Fragmentable for Fractal<E, H> {
+impl<E: Encode, H: HashAlg> ContentAddressed for Fractal<E, H> {
     type Data = E;
     type Hash = H;
 
     fn self_ref(&self) -> &Ref<H> {
         match self {
             Fractal::Shard { ref_, .. } => ref_,
-            Fractal::Fractal { ref_, .. } => ref_,
+            Fractal::Branch { ref_, .. } => ref_,
             Fractal::Lens { ref_, .. } => ref_,
         }
     }
@@ -121,15 +168,17 @@ impl<E: Encode, H: HashAlg> Fragmentable for Fractal<E, H> {
     fn data(&self) -> &E {
         match self {
             Fractal::Shard { data, .. } => data,
-            Fractal::Fractal { data, .. } => data,
+            Fractal::Branch { data, .. } => data,
             Fractal::Lens { data, .. } => data,
         }
     }
+}
 
+impl<E: Encode, H: HashAlg> TreeShaped for Fractal<E, H> {
     fn children(&self) -> &[Fractal<E, H>] {
         match self {
             Fractal::Shard { .. } => &[],
-            Fractal::Fractal { fractal, .. } => fractal,
+            Fractal::Branch { fractal, .. } => fractal,
             Fractal::Lens { .. } => &[],
         }
     }
@@ -139,7 +188,7 @@ impl<E: Encode, H: HashAlg> Fragmentable for Fractal<E, H> {
     }
 
     fn is_fractal(&self) -> bool {
-        matches!(self, Fractal::Fractal { .. })
+        matches!(self, Fractal::Branch { .. })
     }
 
     fn is_lens(&self) -> bool {
@@ -153,6 +202,69 @@ impl<E: Encode, H: HashAlg> Fragmentable for Fractal<E, H> {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Merge — tree merge with caller-provided conflict resolution
+// ---------------------------------------------------------------------------
+
+/// Merge two fragment trees node-by-node.
+///
+/// Same hash → unchanged, skip. Different hash → call `resolve(old, new)`.
+/// Children merged positionally: matched children recurse, unmatched
+/// children from either side are preserved (information may not be destroyed).
+///
+/// The resolve function decides conflict winners. The tree walk is free.
+/// Tournament rules, holonomy minimization, annealing — all are just
+/// different resolve functions.
+pub fn merge<F, R>(old: &F, new: &F, resolve: &R) -> F
+where
+    F: Fragmentable + Reconstructable + Clone,
+    F::Data: Clone + crate::encoding::Decode,
+    R: Fn(&F, &F) -> F,
+{
+    // Same content hash → identical, keep old
+    if content_oid(old) == content_oid(new) {
+        return old.clone();
+    }
+
+    // Different content. Resolve this node's data.
+    let resolved = resolve(old, new);
+
+    // Merge children positionally
+    let old_children = old.children();
+    let new_children = new.children();
+    let max_len = old_children.len().max(new_children.len());
+    let mut merged_children = Vec::with_capacity(max_len);
+
+    for i in 0..max_len {
+        match (old_children.get(i), new_children.get(i)) {
+            (Some(o), Some(n)) => {
+                // Both exist — recurse
+                merged_children.push(merge(o, n, resolve));
+            }
+            (Some(o), None) => {
+                // Only in old — preserve (dark dimension)
+                merged_children.push(o.clone());
+            }
+            (None, Some(n)) => {
+                // Only in new — preserve (new structure)
+                merged_children.push(n.clone());
+            }
+            (None, None) => unreachable!(),
+        }
+    }
+
+    // Reconstruct with resolved data and merged children
+    F::reconstruct(
+        resolved.self_ref().clone(),
+        resolved.data().clone(),
+        merged_children,
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Reconstruction
+// ---------------------------------------------------------------------------
 
 /// Reconstruction from stored parts. Required for read-back from
 /// persistent stores (git, disk). Extends Fragmentable with the
@@ -172,7 +284,7 @@ impl<E: Encode + crate::encoding::Decode, H: HashAlg> Reconstructable for Fracta
         if children.is_empty() {
             Fractal::Shard { ref_, data }
         } else {
-            Fractal::Fractal {
+            Fractal::Branch {
                 ref_,
                 data,
                 fractal: children,
@@ -393,5 +505,93 @@ mod tests {
         // The targets() method should return &[MockHash], not &[Sha]
         let t: &[MockHash] = lens.targets();
         assert_eq!(t.len(), 1);
+    }
+
+    // -- merge tests --
+
+    fn sha_ref(name: &str) -> Ref<Sha> {
+        Ref::new(Sha::hash(name.as_bytes()), name)
+    }
+
+    #[test]
+    fn merge_identical_trees_returns_old() {
+        let a: Fractal<String> = Fractal::shard(sha_ref("x"), "hello");
+        let b: Fractal<String> = Fractal::shard(sha_ref("x"), "hello");
+        let merged = merge(&a, &b, &|old, _new| old.clone());
+        assert_eq!(content_oid(&merged), content_oid(&a));
+    }
+
+    #[test]
+    fn merge_different_shards_uses_resolve() {
+        let a: Fractal<String> = Fractal::shard(sha_ref("a"), "old");
+        let b: Fractal<String> = Fractal::shard(sha_ref("b"), "new");
+        // resolve: always pick new
+        let merged = merge(&a, &b, &|_old, new| new.clone());
+        assert_eq!(merged.data(), "new");
+    }
+
+    #[test]
+    fn merge_different_shards_can_pick_old() {
+        let a: Fractal<String> = Fractal::shard(sha_ref("a"), "old");
+        let b: Fractal<String> = Fractal::shard(sha_ref("b"), "new");
+        // resolve: always pick old
+        let merged = merge(&a, &b, &|old, _new| old.clone());
+        assert_eq!(merged.data(), "old");
+    }
+
+    #[test]
+    fn merge_preserves_children_from_old_when_new_has_fewer() {
+        let child1: Fractal<String> = Fractal::shard(sha_ref("c1"), "child1");
+        let child2: Fractal<String> = Fractal::shard(sha_ref("c2"), "child2");
+        let a = Fractal::new(sha_ref("a"), "parent", vec![child1, child2]);
+        // new has only one child
+        let new_child: Fractal<String> = Fractal::shard(sha_ref("c1-new"), "child1-new");
+        let b = Fractal::new(sha_ref("b"), "parent", vec![new_child]);
+
+        let merged = merge(&a, &b, &|_old, new| new.clone());
+        // child2 from old must be preserved (dark dimension)
+        assert_eq!(merged.children().len(), 2);
+        assert_eq!(merged.children()[1].data(), "child2");
+    }
+
+    #[test]
+    fn merge_preserves_children_from_new_when_old_has_fewer() {
+        let child1: Fractal<String> = Fractal::shard(sha_ref("c1"), "child1");
+        let a = Fractal::new(sha_ref("a"), "parent", vec![child1]);
+        let new_child1: Fractal<String> = Fractal::shard(sha_ref("c1"), "child1");
+        let new_child2: Fractal<String> = Fractal::shard(sha_ref("c2-new"), "child2-new");
+        let b = Fractal::new(sha_ref("b"), "parent", vec![new_child1, new_child2]);
+
+        let merged = merge(&a, &b, &|_old, new| new.clone());
+        assert_eq!(merged.children().len(), 2);
+    }
+
+    #[test]
+    fn merge_recurses_into_children() {
+        let leaf_a: Fractal<String> = Fractal::shard(sha_ref("la"), "leaf-old");
+        let leaf_b: Fractal<String> = Fractal::shard(sha_ref("lb"), "leaf-new");
+        let a = Fractal::new(sha_ref("a"), "root", vec![leaf_a]);
+        let b = Fractal::new(sha_ref("b"), "root", vec![leaf_b]);
+
+        // resolve: always pick new
+        let merged = merge(&a, &b, &|_old, new| new.clone());
+        assert_eq!(merged.children()[0].data(), "leaf-new");
+    }
+
+    #[test]
+    fn merge_with_holonomy_strategy() {
+        // Simulate holonomy: shorter data = lower loss
+        let a: Fractal<String> = Fractal::shard(sha_ref("a"), "long-content-high-loss");
+        let b: Fractal<String> = Fractal::shard(sha_ref("b"), "short");
+
+        let merged = merge(&a, &b, &|old, new| {
+            // "holonomy" = data length (lower is better)
+            if new.data().len() < old.data().len() {
+                new.clone()
+            } else {
+                old.clone()
+            }
+        });
+        assert_eq!(merged.data(), "short");
     }
 }

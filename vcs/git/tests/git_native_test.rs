@@ -1,5 +1,5 @@
 #[allow(unused_imports)]
-use fragmentation::fragment::{self, Fractal, Fragmentable};
+use fragmentation::fragment::{self, ContentAddressed, Fractal, Fragmentable, TreeShaped};
 use fragmentation::ref_::Ref;
 use fragmentation::sha;
 
@@ -114,8 +114,9 @@ fn tree_oid_children_order_matters() {
 mod git_native {
     use super::*;
     use fragmentation::commit::{Commit, Draft, Draftable};
-    use fragmentation::git;
     use fragmentation::witnessed::{Author, Committer};
+    use fragmentation_git::commit::DraftWriteExt;
+    use fragmentation_git::git;
 
     fn init_repo() -> (tempfile::TempDir, git2::Repository) {
         let dir = tempfile::tempdir().unwrap();
@@ -192,7 +193,7 @@ mod git_native {
         let (_dir, repo) = init_repo();
         let c = Draft::root("test commit", make_shard("committed"))
             .authored(Author::new("alex", "alex@systemic.engineer"))
-            .write(&repo, Committer::new("reed", "reed@systemic.engineer"))
+            .write_to_git(&repo, Committer::new("reed", "reed@systemic.engineer"))
             .unwrap();
         let git_oid = git2::Oid::from_str(&c.sha().0).unwrap();
         let git_commit = repo.find_commit(git_oid).unwrap();
@@ -205,7 +206,7 @@ mod git_native {
     fn write_sets_sha() {
         let (_dir, repo) = init_repo();
         let c = Draft::root("test", make_shard("x"))
-            .write(&repo, Committer::new("test", "test@test"))
+            .write_to_git(&repo, Committer::new("test", "test@test"))
             .unwrap();
         assert_eq!(c.sha().0.len(), 40);
     }
@@ -214,7 +215,7 @@ mod git_native {
     fn write_sets_timestamp() {
         let (_dir, repo) = init_repo();
         let c = Draft::root("test", make_shard("x"))
-            .write(&repo, Committer::new("test", "test@test"))
+            .write_to_git(&repo, Committer::new("test", "test@test"))
             .unwrap();
         let ts: Result<i64, _> = c.witnessed().timestamp.0.parse();
         assert!(ts.is_ok(), "timestamp should be epoch seconds");
@@ -225,7 +226,7 @@ mod git_native {
     fn write_default_author_from_committer() {
         let (_dir, repo) = init_repo();
         let c = Draft::root("test", make_shard("x"))
-            .write(&repo, Committer::new("mara", "mara@systemic.engineer"))
+            .write_to_git(&repo, Committer::new("mara", "mara@systemic.engineer"))
             .unwrap();
         assert_eq!(c.witnessed().author.name, "mara");
         assert_eq!(c.witnessed().author.email, "mara@systemic.engineer");
@@ -237,7 +238,7 @@ mod git_native {
         let (_dir, repo) = init_repo();
         let c = Draft::root("email commit", make_shard("email-test"))
             .authored(Author::new("mara", "mara@systemic.engineer"))
-            .write(&repo, Committer::new("mara", "mara@systemic.engineer"))
+            .write_to_git(&repo, Committer::new("mara", "mara@systemic.engineer"))
             .unwrap();
         let git_oid = git2::Oid::from_str(&c.sha().0).unwrap();
         let git_commit = repo.find_commit(git_oid).unwrap();
@@ -253,7 +254,7 @@ mod git_native {
         let (_dir, repo) = init_repo();
         let c = Draft::root("split commit", make_shard("split-identity"))
             .authored(Author::new("alex", "alex@example.com"))
-            .write(&repo, Committer::new("reed", "reed@example.com"))
+            .write_to_git(&repo, Committer::new("reed", "reed@example.com"))
             .unwrap();
         let git_oid = git2::Oid::from_str(&c.sha().0).unwrap();
         let git_commit = repo.find_commit(git_oid).unwrap();
@@ -271,7 +272,7 @@ mod git_native {
     fn write_root_has_no_parent() {
         let (_dir, repo) = init_repo();
         let c = Draft::root("root", make_shard("x"))
-            .write(&repo, Committer::new("test", "test@test"))
+            .write_to_git(&repo, Committer::new("test", "test@test"))
             .unwrap();
         assert!(matches!(c, Commit::Root { .. }));
         assert!(c.parent().is_none());
@@ -282,11 +283,11 @@ mod git_native {
         let (_dir, repo) = init_repo();
         let committer = Committer::new("test", "test@test");
         let c1 = Draft::root("first", make_shard("first"))
-            .write(&repo, committer.clone())
+            .write_to_git(&repo, committer.clone())
             .unwrap();
         let c2 = c1
             .child("second", make_shard("second"))
-            .write(&repo, committer)
+            .write_to_git(&repo, committer)
             .unwrap();
         assert!(matches!(c2, Commit::Child { .. }));
         assert!(c2.parent().is_some());
@@ -302,12 +303,12 @@ mod git_native {
         let committer = Committer::new("test", "test@test");
 
         let c1 = Draft::root("first commit", make_shard("first"))
-            .write(&repo, committer.clone())
+            .write_to_git(&repo, committer.clone())
             .unwrap();
 
         let c2 = c1
             .child("second commit", make_shard("second"))
-            .write(&repo, committer)
+            .write_to_git(&repo, committer)
             .unwrap();
 
         let oid1 = git2::Oid::from_str(&c1.sha().0).unwrap();
@@ -322,7 +323,7 @@ mod git_native {
         let (_dir, repo) = init_repo();
         let c1 = Draft::root("first", make_shard("first"))
             .authored(Author::new("alex", "alex@example.com"))
-            .write(&repo, Committer::new("reed", "reed@example.com"))
+            .write_to_git(&repo, Committer::new("reed", "reed@example.com"))
             .unwrap();
 
         let c2 = c1
@@ -341,7 +342,7 @@ mod git_native {
         let (_dir, repo) = init_repo();
         let c = Draft::root("test", make_shard("x"))
             .authored(Author::new("mara", "mara@systemic.engineer"))
-            .write(&repo, Committer::new("mara", "mara@systemic.engineer"))
+            .write_to_git(&repo, Committer::new("mara", "mara@systemic.engineer"))
             .unwrap();
         assert_eq!(c.witnessed().author.name, "mara");
         assert_eq!(c.witnessed().committer.name, "mara");
@@ -354,7 +355,7 @@ mod git_native {
         let (_dir, repo) = init_repo();
         let c = Draft::root("test", make_shard("x"))
             .authored(Author::new("alex", "alex@systemic.engineer"))
-            .write(&repo, Committer::new("reed", "reed@systemic.engineer"))
+            .write_to_git(&repo, Committer::new("reed", "reed@systemic.engineer"))
             .unwrap();
         assert_eq!(c.witnessed().author.name, "alex");
         assert_eq!(c.witnessed().committer.name, "reed");
@@ -368,7 +369,7 @@ mod git_native {
     fn commit_implements_draftable() {
         let (_dir, repo) = init_repo();
         let c = Draft::root("test", make_shard("x"))
-            .write(&repo, Committer::new("test", "test@test"))
+            .write_to_git(&repo, Committer::new("test", "test@test"))
             .unwrap();
         fn accepts_draftable<T: Draftable>(_d: &T) {}
         accepts_draftable(&c);
@@ -378,7 +379,7 @@ mod git_native {
     fn commit_draftable_fractal() {
         let (_dir, repo) = init_repo();
         let c = Draft::root("test", make_shard("payload"))
-            .write(&repo, Committer::new("test", "test@test"))
+            .write_to_git(&repo, Committer::new("test", "test@test"))
             .unwrap();
         let d: &dyn Draftable<Node = Fractal<String>, Hash = sha::Sha> = &c;
         assert_eq!(d.node().data(), "payload");
@@ -388,7 +389,7 @@ mod git_native {
     fn commit_draftable_message() {
         let (_dir, repo) = init_repo();
         let c = Draft::root("the msg", make_shard("x"))
-            .write(&repo, Committer::new("test", "test@test"))
+            .write_to_git(&repo, Committer::new("test", "test@test"))
             .unwrap();
         let d: &dyn Draftable<Node = Fractal<String>, Hash = sha::Sha> = &c;
         assert_eq!(d.message().0, "the msg");
@@ -398,7 +399,7 @@ mod git_native {
     fn commit_root_draftable_parent_none() {
         let (_dir, repo) = init_repo();
         let c = Draft::root("test", make_shard("x"))
-            .write(&repo, Committer::new("test", "test@test"))
+            .write_to_git(&repo, Committer::new("test", "test@test"))
             .unwrap();
         let d: &dyn Draftable<Node = Fractal<String>, Hash = sha::Sha> = &c;
         assert!(d.parent().is_none());
@@ -409,11 +410,11 @@ mod git_native {
         let (_dir, repo) = init_repo();
         let committer = Committer::new("test", "test@test");
         let c1 = Draft::root("first", make_shard("first"))
-            .write(&repo, committer.clone())
+            .write_to_git(&repo, committer.clone())
             .unwrap();
         let c2 = c1
             .child("second", make_shard("second"))
-            .write(&repo, committer)
+            .write_to_git(&repo, committer)
             .unwrap();
         let d: &dyn Draftable<Node = Fractal<String>, Hash = sha::Sha> = &c2;
         assert!(d.parent().is_some());
@@ -425,11 +426,11 @@ mod git_native {
         let (_dir, repo) = init_repo();
         let committer = Committer::new("mara", "mara@test");
         let c1 = Draft::root("first", make_shard("first"))
-            .write(&repo, committer.clone())
+            .write_to_git(&repo, committer.clone())
             .unwrap();
         let c2 = c1
             .child("second", make_shard("second"))
-            .write(&repo, committer)
+            .write_to_git(&repo, committer)
             .unwrap();
         // .witnessed() on Commit::Child → covers commit.rs:157
         let w = c2.witnessed();
@@ -441,11 +442,11 @@ mod git_native {
         let (_dir, repo) = init_repo();
         let committer = Committer::new("test", "test@test");
         let c1 = Draft::root("first", make_shard("first"))
-            .write(&repo, committer.clone())
+            .write_to_git(&repo, committer.clone())
             .unwrap();
         let c2 = c1
             .child("second msg", make_shard("second"))
-            .write(&repo, committer)
+            .write_to_git(&repo, committer)
             .unwrap();
         // .message() via Draftable on Commit::Child → covers commit.rs:219
         let d: &dyn Draftable<Node = Fractal<String>, Hash = sha::Sha> = &c2;
@@ -543,7 +544,7 @@ mod git_native {
         let (_dir, repo) = init_repo();
         let c = Draft::root("roundtrip test", make_shard("roundtrip-commit"))
             .authored(Author::new("mara", "mara@systemic.engineer"))
-            .write(&repo, Committer::new("mara", "mara@systemic.engineer"))
+            .write_to_git(&repo, Committer::new("mara", "mara@systemic.engineer"))
             .unwrap();
 
         let recovered = git::read_commit(&repo, git2::Oid::from_str(&c.sha().0).unwrap()).unwrap();
@@ -566,12 +567,12 @@ mod git_native {
         let committer = Committer::new("test", "test@test");
 
         let c1 = Draft::root("first", make_shard("first"))
-            .write(&repo, committer.clone())
+            .write_to_git(&repo, committer.clone())
             .unwrap();
 
         let c2 = c1
             .child("second", make_shard("second"))
-            .write(&repo, committer)
+            .write_to_git(&repo, committer)
             .unwrap();
 
         let recovered = git::read_commit(&repo, git2::Oid::from_str(&c2.sha().0).unwrap()).unwrap();
@@ -585,7 +586,7 @@ mod git_native {
         let (_dir, repo) = init_repo();
         let c = Draft::root("email roundtrip test", make_shard("email-roundtrip"))
             .authored(Author::new("mara", "mara@systemic.engineer"))
-            .write(&repo, Committer::new("cairn", "cairn@systemic.engineer"))
+            .write_to_git(&repo, Committer::new("cairn", "cairn@systemic.engineer"))
             .unwrap();
 
         let recovered = git::read_commit(&repo, git2::Oid::from_str(&c.sha().0).unwrap()).unwrap();
@@ -606,7 +607,7 @@ mod git_native {
     fn commit_signature_unsigned() {
         let (_dir, repo) = init_repo();
         let c = Draft::root("unsigned commit", make_shard("unsigned"))
-            .write(&repo, Committer::new("test", "test@test"))
+            .write_to_git(&repo, Committer::new("test", "test@test"))
             .unwrap();
         let git_oid = git2::Oid::from_str(&c.sha().0).unwrap();
         let sig = git::commit_signature(&repo, git_oid).unwrap();
@@ -619,7 +620,7 @@ mod git_native {
 
         // Create a base commit to borrow its tree.
         let c = Draft::root("base", make_shard("payload"))
-            .write(&repo, Committer::new("test", "test@test"))
+            .write_to_git(&repo, Committer::new("test", "test@test"))
             .unwrap();
         let base_oid = git2::Oid::from_str(&c.sha().0).unwrap();
         let base_tree = repo.find_commit(base_oid).unwrap().tree().unwrap();
@@ -648,7 +649,7 @@ mod git_native {
         let (_dir, repo) = init_repo();
         // A commit OID has type Commit, hitting the _ arm in read_tree_named.
         let c = Draft::root("test", make_shard("x"))
-            .write(&repo, Committer::new("test", "test@test"))
+            .write_to_git(&repo, Committer::new("test", "test@test"))
             .unwrap();
         let commit_oid = git2::Oid::from_str(&c.sha().0).unwrap();
         assert!(git::read_tree_named(&repo, commit_oid).is_err());
@@ -659,7 +660,7 @@ mod git_native {
         let (_dir, repo) = init_repo();
         // A commit OID has type Commit, hitting the _ arm in read_tree.
         let c = Draft::root("test", make_shard("x"))
-            .write(&repo, Committer::new("test", "test@test"))
+            .write_to_git(&repo, Committer::new("test", "test@test"))
             .unwrap();
         let commit_oid = git2::Oid::from_str(&c.sha().0).unwrap();
         assert!(git::read_tree(&repo, commit_oid).is_err());

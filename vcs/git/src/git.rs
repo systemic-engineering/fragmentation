@@ -1,16 +1,16 @@
-use crate::encoding::{Decode, Encode};
+use fragmentation::encoding::{Decode, Encode};
 
-use crate::fragment::{Fractal, Fragmentable, Reconstructable};
+use fragmentation::fragment::{ContentAddressed, Fractal, Fragmentable, Reconstructable, TreeShaped};
 
-use crate::witnessed::Witnessed;
+use fragmentation::witnessed::Witnessed;
 
 /// Read witness metadata from any git commit.
 /// Returns (Witnessed, Message, tree OID). Works on any commit, not just fragmentation ones.
 pub fn read_witnessed(
     repo: &git2::Repository,
     oid: git2::Oid,
-) -> Result<(Witnessed, crate::witnessed::Message, git2::Oid), Box<dyn std::error::Error>> {
-    use crate::witnessed::{Author, Committer, Message, Timestamp};
+) -> Result<(Witnessed, fragmentation::witnessed::Message, git2::Oid), Box<dyn std::error::Error>> {
+    use fragmentation::witnessed::{Author, Committer, Message, Timestamp};
 
     let commit = repo.find_commit(oid)?;
     let author = Author::new(
@@ -27,14 +27,17 @@ pub fn read_witnessed(
     Ok((witnessed, message, commit.tree_id()))
 }
 
-/// Read a fragmentation commit. Returns Commit<Fractal<String>> (Root or Child) with full metadata.
-/// Only works on commits written by write_commit (fragmentation-format trees).
+/// Read a fragmentation commit. Returns `Commit<Fractal<String>, Sha>` (Root or Child)
+/// with full metadata. Only works on commits written by write_commit (fragmentation-format trees).
+///
+/// The git adapter overrides fragmentation's default `H = SpectralCoordinate<5>` to `Sha`
+/// because git's object model is SHA-1. See `docs/specs/mirror-native-vcs.md` §4.7.
 pub fn read_commit(
     repo: &git2::Repository,
     oid: git2::Oid,
-) -> Result<crate::commit::Commit<Fractal<String>>, Box<dyn std::error::Error>> {
-    use crate::commit::Parent;
-    use crate::sha::Sha;
+) -> Result<fragmentation::commit::Commit<Fractal<String>, fragmentation::sha::Sha>, Box<dyn std::error::Error>> {
+    use fragmentation::commit::Parent;
+    use fragmentation::sha::Sha;
 
     let git_commit = repo.find_commit(oid)?;
     let (witnessed, message, tree_oid) = read_witnessed(repo, oid)?;
@@ -42,10 +45,10 @@ pub fn read_commit(
     let sha = Sha(oid.to_string());
 
     match git_commit.parent_id(0).ok() {
-        None => Ok(crate::commit::Commit::full_root(
+        None => Ok(fragmentation::commit::Commit::full_root(
             fractal, witnessed, message, sha,
         )),
-        Some(parent_oid) => Ok(crate::commit::Commit::full_child(
+        Some(parent_oid) => Ok(fragmentation::commit::Commit::full_child(
             fractal,
             witnessed,
             message,
@@ -74,11 +77,11 @@ pub fn write_tree<E: Encode>(
     repo: &git2::Repository,
     fragment: &Fractal<E>,
 ) -> Result<git2::Oid, git2::Error> {
-    use crate::sha::HashAlg;
+    use fragmentation::sha::HashAlg;
 
     match fragment {
         Fractal::Shard { data, .. } => repo.blob(&data.encode()),
-        Fractal::Fractal { data, fractal, .. } => {
+        Fractal::Branch { data, fractal, .. } => {
             let mut builder = repo.treebuilder(None)?;
 
             let data_oid = repo.blob(&data.encode())?;
@@ -148,13 +151,13 @@ pub fn read_node<N: Reconstructable + Clone>(
 where
     N::Data: Decode,
 {
-    use crate::ref_::Ref;
+    use fragmentation::ref_::Ref;
 
     // Try as blob first (shard).
     if let Ok(blob) = repo.find_blob(oid) {
         let data = N::Data::decode(blob.content()).map_err(|e| format!("decode error: {e}"))?;
         let ref_ = Ref::new(
-            <N::Hash as crate::sha::HashAlg>::from_hex(oid.to_string()),
+            <N::Hash as fragmentation::sha::HashAlg>::from_hex(oid.to_string()),
             "shard",
         );
         return Ok(N::reconstruct(ref_, data, vec![]));
@@ -177,7 +180,7 @@ where
     // Reconstruct and compute the correct content OID.
     let node = N::reconstruct(
         Ref::new(
-            <N::Hash as crate::sha::HashAlg>::from_hex(oid.to_string()),
+            <N::Hash as fragmentation::sha::HashAlg>::from_hex(oid.to_string()),
             "node",
         ),
         data,
@@ -190,10 +193,10 @@ where
 pub(crate) fn write_commit<E: Encode>(
     repo: &git2::Repository,
     fractal: &Fractal<E>,
-    author: &crate::witnessed::Author,
-    committer: &crate::witnessed::Committer,
+    author: &fragmentation::witnessed::Author,
+    committer: &fragmentation::witnessed::Committer,
     message: &str,
-    parent: Option<&crate::sha::Sha>,
+    parent: Option<&fragmentation::sha::Sha>,
 ) -> Result<git2::Oid, git2::Error> {
     let tree_oid = match fractal {
         Fractal::Shard { .. } => {
@@ -202,7 +205,7 @@ pub(crate) fn write_commit<E: Encode>(
             builder.insert(".data", blob_oid, 0o100644)?;
             builder.write()?
         }
-        Fractal::Fractal { .. } | Fractal::Lens { .. } => write_tree(repo, fractal)?,
+        Fractal::Branch { .. } | Fractal::Lens { .. } => write_tree(repo, fractal)?,
     };
     let tree = repo.find_tree(tree_oid)?;
 
@@ -224,15 +227,15 @@ pub(crate) fn write_commit<E: Encode>(
 /// Write a fragment tree using Ref::label as entry names (filesystem mode).
 /// Shard -> blob, Fractal -> tree with .data + label-named children.
 /// Encoding trees keep the numbered format (write_tree); this is for filesystem trees.
-pub fn write_tree_named<E: crate::encoding::Encode>(
+pub fn write_tree_named<E: fragmentation::encoding::Encode>(
     repo: &git2::Repository,
     fragment: &Fractal<E>,
 ) -> Result<git2::Oid, git2::Error> {
-    use crate::sha::HashAlg;
+    use fragmentation::sha::HashAlg;
 
     match fragment {
         Fractal::Shard { data, .. } => repo.blob(&data.encode()),
-        Fractal::Fractal { data, fractal, .. } => {
+        Fractal::Branch { data, fractal, .. } => {
             let mut builder = repo.treebuilder(None)?;
 
             let data_oid = repo.blob(&data.encode())?;
@@ -271,9 +274,9 @@ pub fn write_tree_named<E: crate::encoding::Encode>(
 pub fn read_tree_named(
     repo: &git2::Repository,
     oid: git2::Oid,
-) -> Result<crate::fragment::Fractal<Vec<u8>>, Box<dyn std::error::Error>> {
-    use crate::ref_::Ref;
-    use crate::sha::Sha;
+) -> Result<fragmentation::fragment::Fractal<Vec<u8>>, Box<dyn std::error::Error>> {
+    use fragmentation::ref_::Ref;
+    use fragmentation::sha::Sha;
 
     let obj = repo.find_object(oid, None)?;
 
@@ -282,7 +285,7 @@ pub fn read_tree_named(
             let blob = repo.find_blob(oid)?;
             let data = blob.content().to_vec();
             let ref_ = Ref::new(Sha(oid.to_string()), "self");
-            Ok(crate::fragment::Fractal::shard_typed(ref_, data))
+            Ok(fragmentation::fragment::Fractal::shard_typed(ref_, data))
         }
         Some(git2::ObjectType::Tree) => {
             let tree = repo.find_tree(oid)?;
@@ -301,7 +304,7 @@ pub fn read_tree_named(
                     .map(|l| Sha(l.to_string()))
                     .collect();
                 let ref_ = Ref::new(Sha(oid.to_string()), "self");
-                return Ok(crate::fragment::Fractal::lens_typed(ref_, data, targets));
+                return Ok(fragmentation::fragment::Fractal::lens_typed(ref_, data, targets));
             }
 
             let mut children = Vec::new();
@@ -315,7 +318,7 @@ pub fn read_tree_named(
             }
 
             let ref_ = Ref::new(Sha(oid.to_string()), "self");
-            Ok(crate::fragment::Fractal::new_typed(ref_, data, children))
+            Ok(fragmentation::fragment::Fractal::new_typed(ref_, data, children))
         }
         _ => Err(format!("unexpected object type for oid {}", oid).into()),
     }
@@ -323,25 +326,25 @@ pub fn read_tree_named(
 
 /// Set the label on the top-level Ref of a Fractal<Vec<u8>>.
 fn relabel_named(
-    frag: crate::fragment::Fractal<Vec<u8>>,
+    frag: fragmentation::fragment::Fractal<Vec<u8>>,
     label: &str,
-) -> crate::fragment::Fractal<Vec<u8>> {
-    use crate::ref_::Ref;
+) -> fragmentation::fragment::Fractal<Vec<u8>> {
+    use fragmentation::ref_::Ref;
     match frag {
-        crate::fragment::Fractal::Shard { ref_, data } => crate::fragment::Fractal::Shard {
+        fragmentation::fragment::Fractal::Shard { ref_, data } => fragmentation::fragment::Fractal::Shard {
             ref_: Ref::new(ref_.sha, label),
             data,
         },
-        crate::fragment::Fractal::Fractal {
+        fragmentation::fragment::Fractal::Branch {
             ref_,
             data,
             fractal,
-        } => crate::fragment::Fractal::Fractal {
+        } => fragmentation::fragment::Fractal::Branch {
             ref_: Ref::new(ref_.sha, label),
             data,
             fractal,
         },
-        crate::fragment::Fractal::Lens { ref_, data, target } => crate::fragment::Fractal::Lens {
+        fragmentation::fragment::Fractal::Lens { ref_, data, target } => fragmentation::fragment::Fractal::Lens {
             ref_: Ref::new(ref_.sha, label),
             data,
             target,
@@ -355,8 +358,8 @@ pub fn read_tree(
     repo: &git2::Repository,
     oid: git2::Oid,
 ) -> Result<Fractal<String>, Box<dyn std::error::Error>> {
-    use crate::ref_::Ref;
-    use crate::sha::Sha;
+    use fragmentation::ref_::Ref;
+    use fragmentation::sha::Sha;
 
     let obj = repo.find_object(oid, None)?;
 
@@ -423,7 +426,7 @@ pub fn read_tree(
 ///
 /// After `flush()`, everything is in the git repo. `git clone` includes it.
 pub struct GitStore<N: Fragmentable + Clone> {
-    memory: crate::store::Store<N, N::Hash>,
+    memory: fragmentation::store::Store<N, N::Hash>,
     repo: git2::Repository,
 }
 
@@ -435,7 +438,7 @@ where
     pub fn open(path: &std::path::Path) -> Result<Self, git2::Error> {
         let repo = git2::Repository::discover(path)?;
         Ok(GitStore {
-            memory: crate::store::Store::new(),
+            memory: fragmentation::store::Store::new(),
             repo,
         })
     }
@@ -443,7 +446,7 @@ where
     /// Open a GitStore from an existing git2::Repository.
     pub fn from_repo(repo: git2::Repository) -> Self {
         GitStore {
-            memory: crate::store::Store::new(),
+            memory: fragmentation::store::Store::new(),
             repo,
         }
     }
@@ -451,7 +454,7 @@ where
     /// Flush: collapse + write objects + update git ref.
     /// Returns the number of objects written.
     pub fn flush(&self) -> usize {
-        use crate::repo::Repo;
+        use fragmentation::repo::Repo;
 
         let mut count = 0;
 
@@ -501,8 +504,8 @@ where
 
     /// Refract (hydrate) from a specific tree OID.
     fn refract_from(&mut self, oid: git2::Oid) -> Result<(), git2::Error> {
-        use crate::repo::Repo;
-        use crate::sha::HashAlg;
+        use fragmentation::repo::Repo;
+        use fragmentation::sha::HashAlg;
 
         let tree = self.repo.find_tree(oid)?;
         for entry in tree.iter() {
@@ -524,8 +527,8 @@ where
     /// Collapse: serialize all in-memory refs as entries in one git tree.
     /// Returns the tree OID. Merges with any existing index on disk.
     pub fn collapse_index(&self) -> Result<git2::Oid, git2::Error> {
-        use crate::repo::Repo;
-        use crate::sha::HashAlg;
+        use fragmentation::repo::Repo;
+        use fragmentation::sha::HashAlg;
 
         let existing_tree = self
             .repo
@@ -545,7 +548,7 @@ where
     }
 }
 
-impl<N: Reconstructable + Clone> crate::repo::Repo for GitStore<N>
+impl<N: Reconstructable + Clone> fragmentation::repo::Repo for GitStore<N>
 where
     N::Data: Decode,
 {
@@ -566,11 +569,11 @@ where
         read_node::<N>(&self.repo, git_oid).ok()
     }
 
-    fn write_commit(&mut self, commit: crate::commit::Commit<N, N::Hash>) {
+    fn write_commit(&mut self, commit: fragmentation::commit::Commit<N, N::Hash>) {
         self.memory.write_commit(commit);
     }
 
-    fn read_commit(&self, sha: &N::Hash) -> Option<crate::commit::Commit<N, N::Hash>> {
+    fn read_commit(&self, sha: &N::Hash) -> Option<fragmentation::commit::Commit<N, N::Hash>> {
         self.memory.read_commit(sha)
     }
 

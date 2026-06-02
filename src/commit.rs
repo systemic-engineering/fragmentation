@@ -1,12 +1,17 @@
 use crate::encoding::Encode;
-use crate::fragment::{content_oid, tree_oid_bytes, Fragmentable};
+use crate::fragment::{content_oid, tree_oid_bytes, ContentAddressed, Fragmentable, TreeShaped};
 use crate::repo::Repo;
-use crate::sha::{HashAlg, Sha};
+use crate::sha::HashAlg;
+use crate::spectral_coordinate::SpectralCoordinate;
 use crate::witnessed::{Author, Committer, Message, Timestamp, Witnessed};
 
 /// Typed reference to a parent commit. Not a raw SHA — a graph edge.
+///
+/// Default hash is `SpectralCoordinate<5>` — the substrate hash per
+/// `docs/specs/mirror-native-vcs.md` §4.6. The git adapter overrides to
+/// `Sha` at its boundary per §4.7.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Parent<H: HashAlg = Sha>(pub H);
+pub struct Parent<H: HashAlg = SpectralCoordinate<5>>(pub H);
 
 /// The commit graph interface. Draft and Commit both implement this.
 /// A signed commit (Public<K, T: Draftable>) also implements it.
@@ -21,7 +26,7 @@ pub trait Draftable {
 /// A commit before it has been written to git.
 /// Has content and intent, but no SHA and no witnessed metadata.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Draft<N, H: HashAlg = Sha> {
+pub struct Draft<N, H: HashAlg = SpectralCoordinate<5>> {
     node: N,
     message: Message,
     parent: Option<Parent<H>>,
@@ -31,7 +36,7 @@ pub struct Draft<N, H: HashAlg = Sha> {
 /// A commit that has been written to git.
 /// Root has no parent. Child has a parent. The enum discriminant carries the distinction.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Commit<N, H: HashAlg = Sha> {
+pub enum Commit<N, H: HashAlg = SpectralCoordinate<5>> {
     /// Terminal in the commit graph. No parent.
     Root {
         node: N,
@@ -134,7 +139,6 @@ impl<N, H: HashAlg> Draft<N, H> {
         commit
     }
 }
-
 
 impl<N, H: HashAlg> Draftable for Draft<N, H> {
     type Node = N;
@@ -282,6 +286,7 @@ mod tests {
     use super::*;
     use crate::encoding;
     use crate::fragment::Fractal;
+    use crate::sha::Sha;
     use crate::store::Store;
 
     fn test_fractal() -> Fractal<String> {
@@ -298,7 +303,7 @@ mod tests {
     fn draft_commit_root() {
         let mut store = Store::<Fractal<String>>::new();
         let fractal = test_fractal();
-        let draft = Draft::root("initial", fractal);
+        let draft: Draft<Fractal<String>, Sha> = Draft::root("initial", fractal);
         let commit = draft.commit(&mut store, test_committer(), TEST_TIMESTAMP);
         assert!(matches!(commit, Commit::Root { .. }));
         assert!(!commit.sha().0.is_empty());
@@ -310,7 +315,7 @@ mod tests {
     fn draft_commit_child() {
         let mut store = Store::<Fractal<String>>::new();
         let fractal = test_fractal();
-        let root = Draft::root("root", fractal.clone()).commit(
+        let root = Draft::<Fractal<String>, Sha>::root("root", fractal.clone()).commit(
             &mut store,
             test_committer(),
             TEST_TIMESTAMP,
@@ -321,5 +326,4 @@ mod tests {
         assert!(matches!(child, Commit::Child { .. }));
         assert_ne!(child.sha(), root.sha());
     }
-
 }

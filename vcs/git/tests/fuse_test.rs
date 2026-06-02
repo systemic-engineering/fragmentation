@@ -2,7 +2,7 @@
 
 #[cfg(feature = "fuse")]
 mod fuse_state_tests {
-    use fragmentation::fuse::{FsError, FsInner};
+    use fragmentation_git::fuse::{FsError, FsInner};
     use fragmentation::witnessed::Committer;
 
     fn make_inner(ref_name: &str) -> (tempfile::TempDir, FsInner) {
@@ -113,13 +113,13 @@ mod fuse_state_tests {
         let commit = repo.find_commit(commit_oid).unwrap();
         let tree_oid = commit.tree_id();
 
-        let fractal = fragmentation::git::read_tree_named(&repo, tree_oid).unwrap();
+        let fractal = fragmentation_git::git::read_tree_named(&repo, tree_oid).unwrap();
         let file_child = fractal
             .children()
             .iter()
             .find(|c| c.self_ref().label == "file.txt");
         assert!(file_child.is_some(), "file.txt should be in fractal");
-        use fragmentation::fragment::Fragmentable;
+        use fragmentation::fragment::{ContentAddressed, Fragmentable, TreeShaped};
         assert_eq!(file_child.unwrap().data(), b"fractal content");
     }
 
@@ -306,7 +306,8 @@ mod fuse_state_tests {
     #[test]
     fn read_buffer_invalid_fh_returns_empty() {
         let (_dir, inner) = make_inner("refs/fragmentation/test");
-        assert_eq!(inner.read_buffer(999), &[]);
+        let empty: &[u8] = &[];
+        assert_eq!(inner.read_buffer(999), empty);
     }
 
     #[test]
@@ -314,7 +315,8 @@ mod fuse_state_tests {
         let (_dir, mut inner) = make_inner("refs/fragmentation/test");
         // open_existing on the root dir — creates a fh pointing at a Dir
         let fh = inner.open_existing(1);
-        assert_eq!(inner.read_buffer(fh), &[]);
+        let empty: &[u8] = &[];
+        assert_eq!(inner.read_buffer(fh), empty);
     }
 
     // -----------------------------------------------------------------------
@@ -496,7 +498,7 @@ mod fuse_state_tests {
     #[test]
     fn path_visibility_private() {
         assert_eq!(
-            fragmentation::fuse::path_visibility("private/keys/id.pub"),
+            fragmentation_git::fuse::path_visibility("private/keys/id.pub"),
             "private"
         );
     }
@@ -504,7 +506,7 @@ mod fuse_state_tests {
     #[test]
     fn path_visibility_private_with_leading_slash() {
         assert_eq!(
-            fragmentation::fuse::path_visibility("/private/keys/id.pub"),
+            fragmentation_git::fuse::path_visibility("/private/keys/id.pub"),
             "private"
         );
     }
@@ -512,7 +514,7 @@ mod fuse_state_tests {
     #[test]
     fn path_visibility_protected() {
         assert_eq!(
-            fragmentation::fuse::path_visibility("protected/blog/draft.md"),
+            fragmentation_git::fuse::path_visibility("protected/blog/draft.md"),
             "protected"
         );
     }
@@ -520,7 +522,7 @@ mod fuse_state_tests {
     #[test]
     fn path_visibility_protected_with_leading_slash() {
         assert_eq!(
-            fragmentation::fuse::path_visibility("/protected/blog/draft.md"),
+            fragmentation_git::fuse::path_visibility("/protected/blog/draft.md"),
             "protected"
         );
     }
@@ -528,14 +530,14 @@ mod fuse_state_tests {
     #[test]
     fn path_visibility_public_default() {
         assert_eq!(
-            fragmentation::fuse::path_visibility("songs/ballad.txt"),
+            fragmentation_git::fuse::path_visibility("songs/ballad.txt"),
             "public"
         );
     }
 
     #[test]
     fn path_visibility_public_root_file() {
-        assert_eq!(fragmentation::fuse::path_visibility("README.md"), "public");
+        assert_eq!(fragmentation_git::fuse::path_visibility("README.md"), "public");
     }
 
     // -----------------------------------------------------------------------
@@ -723,7 +725,7 @@ mod fuse_state_tests {
 
     fn make_lens_inner(ref_name: &str) -> (tempfile::TempDir, FsInner) {
         use fragmentation::fragment::Fractal;
-        use fragmentation::git::write_tree_named;
+        use fragmentation_git::git::write_tree_named;
         use fragmentation::ref_::Ref;
         use fragmentation::sha::Sha;
 
@@ -812,9 +814,9 @@ mod fuse_state_tests {
         let repo = git2::Repository::open(dir.path()).unwrap();
         let commit = repo.find_commit(inner.head().unwrap()).unwrap();
         let tree_oid = commit.tree_id();
-        let fractal = fragmentation::git::read_tree_named(&repo, tree_oid).unwrap();
+        let fractal = fragmentation_git::git::read_tree_named(&repo, tree_oid).unwrap();
 
-        use fragmentation::fragment::Fragmentable;
+        use fragmentation::fragment::{ContentAddressed, Fragmentable, TreeShaped};
         let lens_child = fractal
             .children()
             .iter()
@@ -915,10 +917,10 @@ mod fuse_state_tests {
         let commit = repo.find_commit(inner.head().unwrap()).unwrap();
         let tree_oid = commit.tree_id();
 
-        let fractal = fragmentation::git::read_tree_named(&repo, tree_oid).unwrap();
+        let fractal = fragmentation_git::git::read_tree_named(&repo, tree_oid).unwrap();
 
         // Find the @read subtree
-        use fragmentation::fragment::Fragmentable;
+        use fragmentation::fragment::{ContentAddressed, Fragmentable, TreeShaped};
         let read_subtree = fractal
             .children()
             .iter()
@@ -962,8 +964,8 @@ mod fuse_state_tests {
         let commit = repo.find_commit(inner.head().unwrap()).unwrap();
         let tree_oid = commit.tree_id();
 
-        let fractal = fragmentation::git::read_tree_named(&repo, tree_oid).unwrap();
-        use fragmentation::fragment::Fragmentable;
+        let fractal = fragmentation_git::git::read_tree_named(&repo, tree_oid).unwrap();
+        use fragmentation::fragment::{ContentAddressed, Fragmentable, TreeShaped};
 
         let read_subtree = fractal
             .children()
@@ -998,8 +1000,8 @@ mod fuse_state_tests {
         let commit = repo.find_commit(inner.head().unwrap()).unwrap();
         let tree_oid = commit.tree_id();
 
-        let fractal = fragmentation::git::read_tree_named(&repo, tree_oid).unwrap();
-        use fragmentation::fragment::Fragmentable;
+        let fractal = fragmentation_git::git::read_tree_named(&repo, tree_oid).unwrap();
+        use fragmentation::fragment::{ContentAddressed, Fragmentable, TreeShaped};
 
         let read_subtree = fractal
             .children()
@@ -1040,8 +1042,8 @@ mod fuse_state_tests {
         let commit = repo.find_commit(inner.head().unwrap()).unwrap();
         let tree_oid = commit.tree_id();
 
-        let fractal = fragmentation::git::read_tree_named(&repo, tree_oid).unwrap();
-        use fragmentation::fragment::Fragmentable;
+        let fractal = fragmentation_git::git::read_tree_named(&repo, tree_oid).unwrap();
+        use fragmentation::fragment::{ContentAddressed, Fragmentable, TreeShaped};
 
         let read_subtree = fractal
             .children()
@@ -1085,8 +1087,8 @@ mod fuse_state_tests {
         let commit = repo.find_commit(inner.head().unwrap()).unwrap();
         let tree_oid = commit.tree_id();
 
-        let fractal = fragmentation::git::read_tree_named(&repo, tree_oid).unwrap();
-        use fragmentation::fragment::Fragmentable;
+        let fractal = fragmentation_git::git::read_tree_named(&repo, tree_oid).unwrap();
+        use fragmentation::fragment::{ContentAddressed, Fragmentable, TreeShaped};
 
         let read_subtree = fractal
             .children()

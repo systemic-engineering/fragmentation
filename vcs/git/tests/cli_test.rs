@@ -5,7 +5,7 @@ use fragmentation::fragment;
 
 #[test]
 fn shard_prints_blob_oid() {
-    let output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+    let output = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args(["shard", "hello"])
         .output()
         .expect("failed to run fragmentation");
@@ -21,7 +21,7 @@ fn shard_prints_blob_oid() {
 
 #[test]
 fn shard_reads_stdin() {
-    let output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+    let output = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args(["shard"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -44,7 +44,7 @@ fn shard_reads_stdin() {
 
 #[test]
 fn fractal_prints_tree_oid() {
-    let output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+    let output = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args(["fractal", "hello world"])
         .output()
         .expect("failed to run fragmentation");
@@ -61,7 +61,7 @@ fn fractal_prints_tree_oid() {
 
 #[test]
 fn fractal_reads_stdin() {
-    let output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+    let output = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args(["fractal"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -120,7 +120,7 @@ fn init_repo() -> tempfile::TempDir {
 #[test]
 fn commit_writes_root_to_repo() {
     let dir = init_repo();
-    let output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+    let output = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args([
             "commit",
             "--repo",
@@ -146,7 +146,7 @@ fn commit_child_has_parent() {
     let dir = init_repo();
 
     // root commit
-    let root_output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+    let root_output = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args([
             "commit",
             "--repo",
@@ -164,7 +164,7 @@ fn commit_child_has_parent() {
         .to_string();
 
     // child commit
-    let child_output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+    let child_output = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args([
             "commit",
             "--repo",
@@ -214,7 +214,7 @@ fn commit_child_has_parent() {
 #[test]
 fn commit_advances_fragmentation_ref() {
     let dir = init_repo();
-    let output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+    let output = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args([
             "commit",
             "--repo",
@@ -253,7 +253,7 @@ fn commit_advances_fragmentation_ref() {
 #[test]
 fn commit_default_ref_is_default() {
     let dir = init_repo();
-    let output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+    let output = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args([
             "commit",
             "--repo",
@@ -289,7 +289,7 @@ fn commit_default_ref_is_default() {
 fn commit_chain_advances_ref_to_child() {
     let dir = init_repo();
 
-    let root = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+    let root = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args([
             "commit",
             "--repo",
@@ -305,7 +305,7 @@ fn commit_chain_advances_ref_to_child() {
     assert!(root.status.success());
     let root_sha = String::from_utf8(root.stdout).unwrap().trim().to_string();
 
-    let child = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+    let child = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args([
             "commit",
             "--repo",
@@ -350,7 +350,7 @@ fn commit_chain_advances_ref_to_child() {
 #[test]
 fn commit_uses_custom_namespace() {
     let dir = init_repo();
-    let output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+    let output = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args([
             "commit",
             "--repo",
@@ -402,7 +402,7 @@ fn commit_namespace_from_git_config() {
         .output()
         .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+    let output = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args([
             "commit",
             "--repo",
@@ -452,7 +452,7 @@ fn commit_cli_flag_overrides_git_config() {
         .output()
         .unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+    let output = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args([
             "commit",
             "--repo",
@@ -514,7 +514,7 @@ fn mount_uses_custom_namespace() {
     // (no FUSE device in CI), but the failure should not be "unknown argument".
     let dir = init_repo();
     let mountpoint = tempfile::tempdir().unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+    let output = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args([
             "mount",
             "--repo",
@@ -542,7 +542,7 @@ fn mount_uses_custom_namespace() {
 fn sign_prints_empty_hex_without_signing_config() {
     // No gpg.format configured → Local::None → empty signature
     let dir = init_repo();
-    let output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+    let output = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args(["sign", "--repo", dir.path().to_str().unwrap(), "hello"])
         .output()
         .expect("failed to run fragmentation");
@@ -564,7 +564,7 @@ fn sign_prints_empty_hex_without_signing_config() {
 #[test]
 fn sign_reads_stdin() {
     let dir = init_repo();
-    let output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+    let output = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args(["sign", "--repo", dir.path().to_str().unwrap()])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -591,7 +591,7 @@ fn sign_reads_stdin() {
 fn encrypt_decrypt_roundtrip_plain() {
     // Local::None → plaintext passthrough, but the subcommands work
     let dir = init_repo();
-    let encrypt_output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+    let encrypt_output = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args([
             "encrypt",
             "--repo",
@@ -610,7 +610,7 @@ fn encrypt_decrypt_roundtrip_plain() {
     assert!(!ciphertext.is_empty(), "ciphertext should not be empty");
 
     // Decrypt: pipe ciphertext into stdin
-    let decrypt_output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+    let decrypt_output = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args(["decrypt", "--repo", dir.path().to_str().unwrap()])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -634,7 +634,7 @@ fn encrypt_decrypt_roundtrip_plain() {
 #[test]
 fn encrypt_reads_stdin() {
     let dir = init_repo();
-    let output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+    let output = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args(["encrypt", "--repo", dir.path().to_str().unwrap()])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -663,7 +663,7 @@ fn decrypt_fails_with_invalid_utf8_ciphertext() {
     // Local::None decrypt: PlainKeys passes ciphertext directly to String::decode.
     // Invalid UTF-8 bytes → LocalError::Decode → process::exit(1) (main.rs:250-251).
     let dir = init_repo();
-    let output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+    let output = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args(["decrypt", "--repo", dir.path().to_str().unwrap()])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -685,7 +685,7 @@ fn decrypt_fails_with_invalid_utf8_ciphertext() {
 #[test]
 fn commit_fails_with_invalid_repo_path() {
     // open_repo calls process::exit(1) when git2::Repository::open fails
-    let output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+    let output = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args([
             "commit",
             "--repo",
@@ -706,7 +706,7 @@ fn commit_fails_with_invalid_repo_path() {
 fn commit_fails_with_nonexistent_parent_sha() {
     // Draft::write fails when parent SHA doesn't exist → process::exit(1) (main.rs:182-183)
     let dir = init_repo();
-    let output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+    let output = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args([
             "commit",
             "--repo",
@@ -750,7 +750,7 @@ fn sign_fails_with_missing_ssh_key_file() {
         ])
         .output()
         .unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+    let output = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args(["sign", "--repo", dir.path().to_str().unwrap(), "hello"])
         .output()
         .expect("failed to spawn fragmentation");
@@ -766,7 +766,7 @@ fn sign_fails_with_missing_ssh_key_file() {
 
 #[test]
 fn frgmnt_binary_shard_works() {
-    let output = Command::new(env!("CARGO_BIN_EXE_frgmnt"))
+    let output = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args(["shard", "hello"])
         .output()
         .expect("failed to run frgmnt");
@@ -789,7 +789,7 @@ fn link_creates_lens_from_commit_sha() {
     let dir = init_repo();
 
     // Create something to link TO
-    let root = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+    let root = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args([
             "commit",
             "--repo",
@@ -804,7 +804,7 @@ fn link_creates_lens_from_commit_sha() {
     let target_sha = String::from_utf8(root.stdout).unwrap().trim().to_string();
 
     // Create a link to that commit
-    let output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+    let output = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args([
             "link",
             "--repo",
@@ -830,7 +830,7 @@ fn link_creates_lens_from_commit_sha() {
 fn ln_alias_works() {
     let dir = init_repo();
 
-    let root = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+    let root = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args([
             "commit",
             "--repo",
@@ -844,7 +844,7 @@ fn ln_alias_works() {
     assert!(root.status.success());
     let target_sha = String::from_utf8(root.stdout).unwrap().trim().to_string();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+    let output = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args([
             "ln",
             "--repo",
@@ -868,7 +868,7 @@ fn ln_alias_works() {
 fn frgmnt_ln_works() {
     let dir = init_repo();
 
-    let root = Command::new(env!("CARGO_BIN_EXE_frgmnt"))
+    let root = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args([
             "commit",
             "--repo",
@@ -882,7 +882,7 @@ fn frgmnt_ln_works() {
     assert!(root.status.success());
     let target_sha = String::from_utf8(root.stdout).unwrap().trim().to_string();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_frgmnt"))
+    let output = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args([
             "ln",
             "--repo",
@@ -906,7 +906,7 @@ fn frgmnt_ln_works() {
 fn link_multiple_targets() {
     let dir = init_repo();
 
-    let c1 = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+    let c1 = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args([
             "commit",
             "--repo",
@@ -920,7 +920,7 @@ fn link_multiple_targets() {
     assert!(c1.status.success());
     let sha1 = String::from_utf8(c1.stdout).unwrap().trim().to_string();
 
-    let c2 = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+    let c2 = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args([
             "commit",
             "--repo",
@@ -934,7 +934,7 @@ fn link_multiple_targets() {
     assert!(c2.status.success());
     let sha2 = String::from_utf8(c2.stdout).unwrap().trim().to_string();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+    let output = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args([
             "link",
             "--repo",
@@ -959,7 +959,7 @@ fn link_multiple_targets() {
 fn link_updates_namespace_ref() {
     let dir = init_repo();
 
-    let root = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+    let root = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args([
             "commit",
             "--repo",
@@ -973,7 +973,7 @@ fn link_updates_namespace_ref() {
     assert!(root.status.success());
     let target_sha = String::from_utf8(root.stdout).unwrap().trim().to_string();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+    let output = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args([
             "link",
             "--repo",
@@ -1009,7 +1009,7 @@ fn link_updates_namespace_ref() {
 fn link_reads_data_from_stdin() {
     let dir = init_repo();
 
-    let root = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+    let root = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args([
             "commit",
             "--repo",
@@ -1023,7 +1023,7 @@ fn link_reads_data_from_stdin() {
     assert!(root.status.success());
     let target_sha = String::from_utf8(root.stdout).unwrap().trim().to_string();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+    let output = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args([
             "link",
             "--repo",
@@ -1058,7 +1058,7 @@ fn link_reads_data_from_stdin() {
 fn link_fails_with_invalid_target() {
     let dir = init_repo();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+    let output = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args([
             "link",
             "--repo",
@@ -1106,7 +1106,7 @@ fn sign_with_ssh_key_produces_hex_output() {
         ])
         .output()
         .unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_fragmentation"))
+    let output = Command::new(env!("CARGO_BIN_EXE_frgmt-git"))
         .args(["sign", "--repo", dir.path().to_str().unwrap(), "hello"])
         .output()
         .expect("failed to spawn fragmentation");

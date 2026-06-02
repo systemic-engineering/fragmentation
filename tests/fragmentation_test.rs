@@ -1,5 +1,5 @@
 use fragmentation::diff::{self, Change};
-use fragmentation::fragment::{self, Fractal, Fragmentable};
+use fragmentation::fragment::{self, ContentAddressed, Fractal, Fragmentable, TreeShaped};
 use fragmentation::ref_::Ref;
 use fragmentation::repo::Repo;
 use fragmentation::sha;

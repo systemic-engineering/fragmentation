@@ -21,11 +21,11 @@
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
 
-use crate::fragment::{Fractal, Fragmentable};
+use fragmentation::fragment::{ContentAddressed, Fractal, Fragmentable, TreeShaped};
 use crate::git::{read_tree_named, write_tree_named};
-use crate::ref_::Ref;
-use crate::sha::Sha;
-use crate::witnessed::Committer;
+use fragmentation::ref_::Ref;
+use fragmentation::sha::Sha;
+use fragmentation::witnessed::Committer;
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -418,7 +418,7 @@ impl FsInner {
                 let data = content[offset..end].to_vec();
 
                 // Witness the read: eager annotation before the response.
-                let content_hash = crate::fragment::blob_oid_bytes(content);
+                let content_hash = fragmentation::fragment::blob_oid_bytes(content);
                 if let Some(path) = self.ino_path(ino) {
                     let visibility = path_visibility(&path);
                     let timestamp = std::time::SystemTime::now()
@@ -486,7 +486,7 @@ impl FsInner {
             let read_fractal = Fractal::new_typed(read_ref, vec![], annotation_shards);
 
             // Inject @read subtree into root fractal's children.
-            if let Fractal::Fractal { fractal, .. } = &mut root_fractal {
+            if let Fractal::Branch { fractal, .. } = &mut root_fractal {
                 fractal.push(read_fractal);
             }
 
@@ -612,7 +612,7 @@ impl FsInner {
     fn build_fractal_for_ino(&self, ino: Ino, name: &str) -> Fractal<Vec<u8>> {
         match self.inodes.get(&ino) {
             Some(Node::File { content }) => {
-                let sha = crate::fragment::blob_oid_bytes(content);
+                let sha = fragmentation::fragment::blob_oid_bytes(content);
                 let ref_ = Ref::new(Sha(sha), name);
                 Fractal::shard_typed(ref_, content.clone())
             }

@@ -1,0 +1,43 @@
+[package]
+name = "fragmentation-mcp"
+version = "0.1.0"
+edition = "2021"
+license-file = "../../LICENSE.md"
+description = "MCP server for content-addressed agent workflows over fragmentation primitives"
+repository = "https://github.com/systemic-engineering/fragmentation"
+keywords = ["mcp", "json-rpc", "agent", "git", "content-addressed"]
+categories = ["command-line-utilities", "development-tools"]
+
+# Per fragmentation-mcp.md §6's Cargo.toml sketch. T1 landed the stdio
+# transport + the twelve-tool registry stubs; T2 wires the four
+# shard sub-tools and the HamiltonScheduler tick on dispatch.
+# `http` and `git-interop` are reserved slots; their `dep:` lines
+# wait for T4 (HTTP) and T4 (git crosswalk). The stub features
+# compile to no-ops until then.
+[features]
+default = ["stdio"]
+stdio = []
+http = []
+git-interop = []
+
+[dependencies]
+fragmentation = { path = "../.." }
+prism-core = { path = "../../../prism/core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# T4: shard IDs are `prism_core::SpectralUuid` newtypes (128 bits,
+# 48 active + 80 dark per `reality-shard-as-crdt.md`). The `uuid`
+# crate was removed in T4 — SpectralUuid carries the same
+# wire-format (36-char hyphenated) PLUS the navigable spectral
+# structure on top.
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "io-std", "io-util"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "io-std", "io-util", "process", "time"] }
+
+# T2: binary renamed `fragmentation-mcp` → `frgmnt`. Per Alex's
+# directive ("build fragmentation as a frgmnt binary"). Single-word
+# binary name; same crate; PATH-friendly.
+[[bin]]
+name = "frgmnt"
+path = "src/bin/frgmnt.rs"
