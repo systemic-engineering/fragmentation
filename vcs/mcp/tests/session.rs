@@ -126,7 +126,7 @@ async fn shard_open_context_oid_is_readable_with_cwd() {
     let context_oid = open["context_oid"].as_str().unwrap().to_string();
 
     let read = unwrap_call_content(
-        &call_tool(&mut stdin, &mut reader, "fragmentation_read", json!({
+        &call_tool(&mut stdin, &mut reader, "fragmentation.read", json!({
             "shard_id": shard_id,
             "oid": context_oid,
         })).await,

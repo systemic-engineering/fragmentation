@@ -13,15 +13,15 @@
 //! # Substrate-pull
 //!
 //! `[substrate-pull:realize]` — the context-gathering is boundary Rust
-//! at the `@io` altitude. No new crate deps: git is probed via
-//! `std::process::Command`; the timestamp is hand-rolled from
-//! `std::time::SystemTime`; the UUID derivation uses
-//! `fragmentation::sha::Sha` (SHA-256, already in the dep tree).
+//! at the `@io` altitude. Git is probed via `std::process::Command`;
+//! the timestamp is hand-rolled from `std::time::SystemTime`; the
+//! UUID derivation uses BLAKE3 — the substrate's canonical content-
+//! address hash, matching `reality-shard-as-crdt.md` and the BLAKE3
+//! prefix that defines `SpectralUuid::EMPTY`'s dark portion.
 
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use fragmentation::sha::{HashAlg, Sha};
 use serde::{Deserialize, Serialize};
 
 use crate::shard::{BudgetMb, ShardContentError, ShardId, ShardRegistry};
@@ -80,26 +80,17 @@ impl SessionContext {
 
     /// Derive a [`ShardId`] from this context's JSON representation.
     ///
-    /// Hashes the JSON with SHA-256 (already available via
-    /// `fragmentation::sha::Sha`), decodes the first 32 bytes of the
-    /// hex digest, and passes them to `ShardId::from_content(0, &bytes)`.
-    /// The result is deterministic for a given context and is guaranteed
-    /// to differ from `ShardId::EMPTY` (the empty-input SHA-256 hash
-    /// is structurally different from the EMPTY canonical).
+    /// Hashes the JSON with BLAKE3 — the substrate's canonical content-
+    /// address hash per `reality-shard-as-crdt.md` §2 — and passes the
+    /// 32-byte digest to `ShardId::from_content(0, &bytes)`. The result
+    /// is deterministic for a given context and is guaranteed to differ
+    /// from `ShardId::EMPTY` (the BLAKE3-of-any-non-empty-input hash is
+    /// structurally different from the BLAKE3-of-empty-input prefix that
+    /// defines `SpectralUuid::EMPTY`'s dark portion).
     pub fn derive_shard_id(&self) -> ShardId {
         let json = self.to_json();
-        let sha = Sha::hash(json.as_bytes());
-        // SHA-256 hex is 64 chars = 32 bytes.
-        let hex_str = sha.as_str();
-        let mut hash_bytes = [0u8; 32];
-        // Decode hex pairs into bytes; safe because Sha always produces
-        // exactly 64 lowercase hex chars.
-        for (i, chunk) in hex_str.as_bytes().chunks(2).enumerate() {
-            let hi = hex_nibble(chunk[0]);
-            let lo = hex_nibble(chunk[1]);
-            hash_bytes[i] = (hi << 4) | lo;
-        }
-        ShardId::from_content(0, &hash_bytes)
+        let hash = blake3::hash(json.as_bytes());
+        ShardId::from_content(0, hash.as_bytes())
     }
 }
 
@@ -200,16 +191,6 @@ fn days_to_ymd(days: u64) -> (u64, u64, u64) {
 }
 
 /// Decode a single ASCII hex nibble to its 0–15 value.
-#[inline]
-fn hex_nibble(b: u8) -> u8 {
-    match b {
-        b'0'..=b'9' => b - b'0',
-        b'a'..=b'f' => b - b'a' + 10,
-        b'A'..=b'F' => b - b'A' + 10,
-        _ => 0,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -31,6 +31,12 @@ serde_json = "1"
 # wire-format (36-char hyphenated) PLUS the navigable spectral
 # structure on top.
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "io-std", "io-util"] }
+# Substrate hash: BLAKE3 is the canonical content-address per
+# `reality-shard-as-crdt.md` §2 + `spectral_uuid.rs` (the EMPTY dark
+# portion is the BLAKE3-of-empty-input prefix). Session-context UUID
+# derivation MUST hash with BLAKE3 to stay consistent with the
+# substrate's content-addressing discipline.
+blake3 = "1"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "io-std", "io-util", "process", "time"] }

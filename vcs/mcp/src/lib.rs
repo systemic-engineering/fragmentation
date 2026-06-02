@@ -22,7 +22,7 @@
 //! - [`ShardId`], [`BudgetMb`], [`Shard`], [`ShardRegistry`] — the
 //!   T2 shard surface.
 //! - [`JSON_RPC_VERSION`] — the protocol-version sentinel value.
-//! - [`FIFTEEN_TOOL_NAMES`] — the §3.4 + §3.6 fifteen.
+//! - [`TOOL_NAMES`] — the §3.4 + §3.6 wire callables (post-T10: 17).
 //! - [`ERROR_NOT_IMPLEMENTED_YET`] — the substrate code returned
 //!   for every `tools/call` whose body hasn't been wired yet
 //!   (T3+).
@@ -52,7 +52,7 @@ pub mod wire;
 // Re-exports — flat public surface for callers.
 pub use mcp::Mcp;
 pub use registry::{
-    is_known_method, Tool, ToolRegistry, ERROR_NOT_IMPLEMENTED_YET, FIFTEEN_TOOL_NAMES,
+    is_known_method, Tool, ToolRegistry, ERROR_NOT_IMPLEMENTED_YET, TOOL_NAMES,
 };
 pub use shard::{BudgetMb, Shard, ShardContentError, ShardId, ShardIdParseError, ShardRegistry};
 pub use tools::content::ERROR_OID_NOT_FOUND;

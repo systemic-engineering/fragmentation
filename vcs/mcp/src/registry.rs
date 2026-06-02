@@ -46,9 +46,14 @@ pub const ERROR_NOT_IMPLEMENTED_YET: i64 = -32001;
 ///
 /// Declaration order matches the §3.6 table with the shard category
 /// expanded inline. T10 adds the two underscore-named shard-open
-/// variants (contextual + empty), bringing the total to 17.
+/// variants (contextual + empty), bringing the total to 17. The dup
+/// `fragmentation_read` was dropped post-SEAM (2026-06-02) — the dotted
+/// `fragmentation.read` is the canonical entry; the underscored alias
+/// was indistinguishable, dispatched to the same body, and confused the
+/// agent surface. The pq reshape (T11+) collapses this whole table to
+/// three trait methods regardless.
 #[allow(dead_code)]
-pub const FIFTEEN_TOOL_NAMES: [&str; 18] = [
+pub const TOOL_NAMES: [&str; 17] = [
     "fragmentation.commit",
     "fragmentation.snapshot",
     "fragmentation.read",
@@ -68,7 +73,6 @@ pub const FIFTEEN_TOOL_NAMES: [&str; 18] = [
     // underscore-named read alias for session-bootstrapped contexts.
     "fragmentation_shard_open",
     "fragmentation_shard_open_empty",
-    "fragmentation_read",
 ];
 
 /// A registered MCP tool.
@@ -331,11 +335,6 @@ impl ToolRegistry {
                 schema_shard_open(),
             ),
             (
-                "fragmentation_read",
-                "Read content by OID from a shard. Underscore-named alias for fragmentation.read, used by session-bootstrapped contexts.",
-                schema_read(),
-            ),
-            (
                 "fragmentation.commit",
                 "Atomic content-addressed commit. Body wired in T3.",
                 schema_commit(),
@@ -418,7 +417,7 @@ impl ToolRegistry {
             by_name.insert(tool.name.clone(), i);
             tools.push(tool);
         }
-        debug_assert_eq!(tools.len(), FIFTEEN_TOOL_NAMES.len());
+        debug_assert_eq!(tools.len(), TOOL_NAMES.len());
         ToolRegistry {
             tools,
             by_name,
@@ -521,9 +520,6 @@ impl ToolRegistry {
         let raw = match tool_str {
             "fragmentation_shard_open" => self.tool_shard_open_contextual(request, &arguments),
             "fragmentation_shard_open_empty" => self.tool_shard_open_empty(request, &arguments),
-            "fragmentation_read" => {
-                content_tools::dispatch_read(request.id.clone(), &arguments, &self.shards)
-            }
             "fragmentation.shard.open" => self.tool_shard_open(request, &arguments),
             "fragmentation.shard.status" => self.tool_shard_status(request, &arguments),
             "fragmentation.shard.flush" => self.tool_shard_flush(request, &arguments),

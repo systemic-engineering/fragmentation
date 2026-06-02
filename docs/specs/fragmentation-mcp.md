@@ -221,18 +221,9 @@ stands.
 
 ### 0.5.4 Sub-Turing and CRDT-safe
 
-pq is closed and bounded (per pq spec §9). It composes monoidally
-over the shard substrate, which is itself a bounded semilattice per
-[[../../../mirror/docs/specs/reality-shard-as-crdt]]. The refract
-step IS the lattice join — each refract returns a Beam whose
-shard-state is `≥` the prior. Strong eventual consistency rides
-through the wire algebra without protocol additions.
+The refract step IS the lattice join — each refract returns a Beam whose shard-state is `≥` the prior. Strong eventual consistency rides through the wire algebra without protocol additions (see pq spec §9 for the closure argument, [[../../../mirror/docs/specs/reality-shard-as-crdt]] for the semilattice).
 
-The `imperfect` field on every Beam carries the kintsugi-objective
-verdict per [[../../../mirror/docs/specs/kintsugi-variety]]. The
-`observe` tool was a separate tool only because the substrate's
-verdicts had no carrier; now they have one, and observation is a
-field, not a call.
+The `observe` tool was a separate tool only because the substrate's verdicts had no carrier; now they have one (the `imperfect` field on every Beam, carrying the kintsugi-objective verdict per [[../../../mirror/docs/specs/kintsugi-variety]]), and observation is a field, not a call.
 
 ---
 
