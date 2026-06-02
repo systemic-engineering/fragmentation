@@ -30,6 +30,24 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 
 const BINARY_NAME: &str = "frgmnt";
 
+/// Extract the structured payload from a `tools/call` response.
+///
+/// Per T7 (MCP 2025-06-18 §tools/call), every `tools/call` result is
+/// wrapped as `{content: [{type: "text", text: "<json>"}], isError:
+/// false}`. This helper unwraps it back to the payload object that
+/// the tool body actually produced.
+fn unwrap_call_content(parsed: &serde_json::Value) -> serde_json::Value {
+    let text = parsed
+        .get("result")
+        .and_then(|r| r.get("content"))
+        .and_then(|c| c.as_array())
+        .and_then(|a| a.first())
+        .and_then(|b| b.get("text"))
+        .and_then(|t| t.as_str())
+        .expect("tools/call result must carry content[0].text per MCP §tools/call");
+    serde_json::from_str(text).expect("content[0].text must parse as JSON payload")
+}
+
 /// Spawn `frgmnt --stdio`. Returns the child + an owned stdin handle
 /// + a buffered stdout reader. Caller drops stdin to signal EOF.
 fn spawn_frgmnt() -> (Child, ChildStdin, BufReader<ChildStdout>) {
@@ -247,9 +265,9 @@ async fn tools_call_after_full_handshake() {
     let parsed: serde_json::Value = serde_json::from_str(&call_line).expect("parse tools/call");
     assert_eq!(parsed.get("id").and_then(|v| v.as_u64()), Some(1));
     assert!(parsed.get("error").is_none(), "tools/call errored: {parsed}");
-    let shard_id = parsed
-        .get("result")
-        .and_then(|r| r.get("shard_id"))
+    let payload = unwrap_call_content(&parsed);
+    let shard_id = payload
+        .get("shard_id")
         .and_then(|s| s.as_str())
         .expect("shard_id");
     assert_eq!(shard_id.len(), 36, "expected hyphenated UUID");
@@ -278,9 +296,8 @@ async fn agent_workflow_round_trip() {
     .await;
     let open_line = read_line(&mut reader).await;
     let open_parsed: serde_json::Value = serde_json::from_str(&open_line).expect("parse open");
-    let shard_id = open_parsed
-        .get("result")
-        .and_then(|r| r.get("shard_id"))
+    let shard_id = unwrap_call_content(&open_parsed)
+        .get("shard_id")
         .and_then(|s| s.as_str())
         .expect("shard_id")
         .to_string();
@@ -297,9 +314,8 @@ async fn agent_workflow_round_trip() {
         commit_parsed.get("error").is_none(),
         "commit errored: {commit_parsed}"
     );
-    let oid = commit_parsed
-        .get("result")
-        .and_then(|r| r.get("oid"))
+    let oid = unwrap_call_content(&commit_parsed)
+        .get("oid")
         .and_then(|s| s.as_str())
         .expect("oid")
         .to_string();
@@ -312,11 +328,11 @@ async fn agent_workflow_round_trip() {
     let read_line_str = read_line(&mut reader).await;
     let read_parsed: serde_json::Value =
         serde_json::from_str(&read_line_str).expect("parse read");
-    let content = read_parsed
-        .get("result")
-        .and_then(|r| r.get("content"))
+    let content = unwrap_call_content(&read_parsed)
+        .get("content")
         .and_then(|s| s.as_str())
-        .expect("content");
+        .expect("content")
+        .to_string();
     assert_eq!(content, "agent payload");
 
     // Step 5: status
@@ -327,9 +343,8 @@ async fn agent_workflow_round_trip() {
     let status_line = read_line(&mut reader).await;
     let status_parsed: serde_json::Value =
         serde_json::from_str(&status_line).expect("parse status");
-    let hot_bytes = status_parsed
-        .get("result")
-        .and_then(|r| r.get("hot_bytes"))
+    let hot_bytes = unwrap_call_content(&status_parsed)
+        .get("hot_bytes")
         .and_then(|v| v.as_u64())
         .expect("hot_bytes");
     assert!(hot_bytes > 0, "expected hot_bytes > 0");
@@ -344,9 +359,8 @@ async fn agent_workflow_round_trip() {
     let close_parsed: serde_json::Value =
         serde_json::from_str(&close_line).expect("parse close");
     assert_eq!(
-        close_parsed
-            .get("result")
-            .and_then(|r| r.get("closed"))
+        unwrap_call_content(&close_parsed)
+            .get("closed")
             .and_then(|b| b.as_bool()),
         Some(true)
     );
@@ -389,14 +403,14 @@ async fn empty_shard_determinism_wire_visible() {
 
     let a: serde_json::Value = serde_json::from_str(&line_a).expect("parse a");
     let b: serde_json::Value = serde_json::from_str(&line_b).expect("parse b");
-    let id_a = a
-        .get("result")
-        .and_then(|r| r.get("shard_id"))
+    let payload_a = unwrap_call_content(&a);
+    let payload_b = unwrap_call_content(&b);
+    let id_a = payload_a
+        .get("shard_id")
         .and_then(|s| s.as_str())
         .expect("a shard_id");
-    let id_b = b
-        .get("result")
-        .and_then(|r| r.get("shard_id"))
+    let id_b = payload_b
+        .get("shard_id")
         .and_then(|s| s.as_str())
         .expect("b shard_id");
     assert_eq!(
@@ -519,16 +533,16 @@ async fn multi_session_concurrent_shards() {
     let open_a = read_line(&mut reader_a).await;
     let open_b = read_line(&mut reader_b).await;
     let shard_a = serde_json::from_str::<serde_json::Value>(&open_a)
+        .map(|v: serde_json::Value| unwrap_call_content(&v))
         .unwrap()
-        .get("result")
-        .and_then(|r| r.get("shard_id"))
+        .get("shard_id")
         .and_then(|s| s.as_str())
         .unwrap()
         .to_string();
     let shard_b = serde_json::from_str::<serde_json::Value>(&open_b)
+        .map(|v: serde_json::Value| unwrap_call_content(&v))
         .unwrap()
-        .get("result")
-        .and_then(|r| r.get("shard_id"))
+        .get("shard_id")
         .and_then(|s| s.as_str())
         .unwrap()
         .to_string();
@@ -547,16 +561,16 @@ async fn multi_session_concurrent_shards() {
     let ca_line = read_line(&mut reader_a).await;
     let cb_line = read_line(&mut reader_b).await;
     let oid_a = serde_json::from_str::<serde_json::Value>(&ca_line)
+        .map(|v: serde_json::Value| unwrap_call_content(&v))
         .unwrap()
-        .get("result")
-        .and_then(|r| r.get("oid"))
+        .get("oid")
         .and_then(|s| s.as_str())
         .unwrap()
         .to_string();
     let oid_b = serde_json::from_str::<serde_json::Value>(&cb_line)
+        .map(|v: serde_json::Value| unwrap_call_content(&v))
         .unwrap()
-        .get("result")
-        .and_then(|r| r.get("oid"))
+        .get("oid")
         .and_then(|s| s.as_str())
         .unwrap()
         .to_string();
@@ -780,6 +794,133 @@ async fn wired_tool_schemas_publish_required_arguments() {
             );
         }
     }
+
+    let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
+}
+
+// ---------------------------------------------------------------------------
+// 15. T7 — tools/call result wrapped in MCP content envelope.
+//
+// Per MCP 2025-06-18 §tools/call, the result MUST be a `CallToolResult`
+// with shape `{content: [<ContentBlock>...], isError?: bool}` where each
+// ContentBlock has a `type` discriminator (`text` / `image` / `audio` /
+// `resource_link` / `resource`).
+//
+// T2/T3/T6 returned the raw payload directly as `result`:
+//   {"jsonrpc":"2.0","id":1,"result":{"budget_bytes":...,"shard_id":"..."}}
+//
+// Required shape:
+//   {"jsonrpc":"2.0","id":1,
+//    "result":{"content":[{"type":"text",
+//                          "text":"{\"budget_bytes\":...,\"shard_id\":\"...\"}"}],
+//              "isError":false}}
+//
+// Alex hit this on first live drive 2026-06-01: tool calls succeeded
+// but Claude Code rendered "no output" because it looks for
+// `result.content[0].text` and finds nothing.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn tools_call_result_wrapped_in_content_envelope() {
+    let (mut child, mut stdin, mut reader) = spawn_frgmnt();
+
+    write_line(&mut stdin, INITIALIZE_REQUEST).await;
+    let _ = read_line(&mut reader).await;
+    write_line(&mut stdin, NOTIFICATIONS_INITIALIZED).await;
+    write_line(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"fragmentation.shard.open","arguments":{"budget_mb":64}}}"#,
+    )
+    .await;
+    drop(stdin);
+
+    let line = read_line(&mut reader).await;
+    let parsed: serde_json::Value =
+        serde_json::from_str(&line).expect("parse tools/call result");
+
+    let result = parsed
+        .get("result")
+        .expect("tools/call must return result, not error");
+
+    // Required envelope: `content` array of ContentBlock objects.
+    let content = result
+        .get("content")
+        .and_then(|c| c.as_array())
+        .expect("tools/call result.content must be an array (MCP 2025-06-18 §tools/call)");
+    assert!(
+        !content.is_empty(),
+        "tools/call result.content must contain at least one ContentBlock"
+    );
+
+    let first = &content[0];
+    let ty = first.get("type").and_then(|t| t.as_str());
+    assert_eq!(
+        ty,
+        Some("text"),
+        "ContentBlock.type must be 'text' (or other discriminated variant); got {ty:?}"
+    );
+    assert!(
+        first.get("text").and_then(|t| t.as_str()).is_some(),
+        "text ContentBlock must carry a `text` field (string)"
+    );
+
+    // isError is optional but MUST be a bool if present.
+    if let Some(is_err) = result.get("isError") {
+        assert!(
+            is_err.is_boolean(),
+            "isError must be a boolean if present; got {is_err}"
+        );
+        assert_eq!(is_err.as_bool(), Some(false), "successful call: isError=false");
+    }
+
+    let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
+}
+
+// ---------------------------------------------------------------------------
+// 16. T7 — the structured payload is recoverable from the text content.
+//
+// The text ContentBlock is a JSON-serialized payload. Round-trip:
+// parsing `text` should yield the structured fields the original raw
+// result carried (`shard_id`, `budget_bytes` for shard.open). This
+// locks the convention: text MUST be JSON-serialized, not arbitrary
+// prose, so agents can extract structured data.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn tools_call_text_content_is_json_with_structured_payload() {
+    let (mut child, mut stdin, mut reader) = spawn_frgmnt();
+
+    write_line(&mut stdin, INITIALIZE_REQUEST).await;
+    let _ = read_line(&mut reader).await;
+    write_line(&mut stdin, NOTIFICATIONS_INITIALIZED).await;
+    write_line(
+        &mut stdin,
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"fragmentation.shard.open","arguments":{"budget_mb":64}}}"#,
+    )
+    .await;
+    drop(stdin);
+
+    let line = read_line(&mut reader).await;
+    let parsed: serde_json::Value = serde_json::from_str(&line).expect("parse result");
+    let text = parsed
+        .get("result")
+        .and_then(|r| r.get("content"))
+        .and_then(|c| c.as_array())
+        .and_then(|a| a.first())
+        .and_then(|b| b.get("text"))
+        .and_then(|t| t.as_str())
+        .expect("text field present");
+
+    let payload: serde_json::Value =
+        serde_json::from_str(text).expect("text content must parse as JSON");
+    assert!(
+        payload.get("shard_id").and_then(|s| s.as_str()).is_some(),
+        "payload missing shard_id: {payload}"
+    );
+    assert!(
+        payload.get("budget_bytes").and_then(|b| b.as_u64()).is_some(),
+        "payload missing budget_bytes: {payload}"
+    );
 
     let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
 }
