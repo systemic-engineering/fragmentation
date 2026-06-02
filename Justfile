@@ -19,25 +19,30 @@ FRGMNT_BIN_RELEASE := CARGO_TARGET + "/release/frgmnt"
 check: lint test test-gleam format-check
 
 lint:
-    nix develop -c cargo clippy --all-features -- -D warnings
+    cargo clippy --workspace --all-features -- -D warnings
 
+# Test the fragmentation workspace.
+#
+# Default test command uses the workspace's package-specific features that
+# actually exist. `cli`/`fuse` live on `fragmentation-git` (not the root),
+# so we enable them via package-qualified syntax. SSH is on fragmentation.
 test:
-    nix develop -c cargo test --features ssh,cli,fuse
+    cargo test --workspace --features fragmentation/ssh,fragmentation-git/cli,fragmentation-git/fuse
 
 test-gleam:
-    nix develop -c sh -c 'cd "$(git rev-parse --show-toplevel)/gleam" && gleam test'
+    sh -c 'cd "$(git rev-parse --show-toplevel)/gleam" && gleam test'
 
 test-mount:
-    nix develop -c cargo test --all-features
+    cargo test --workspace --all-features
 
 format-check:
-    nix develop -c cargo fmt -- --check
+    cargo fmt -- --check
 
 pre-commit: check
 pre-push: check
 
 format:
-    nix develop -c cargo fmt
+    cargo fmt
 
 # Build the `frgmnt` MCP server binary in release mode.
 build-frgmnt:
@@ -74,7 +79,7 @@ merge:
     # Allow only submodule pointer drift (the `m` status line) and untracked
     # files that are gitignored already (no `??` should appear under normal
     # operation). Anything else — reject.
-    dirty=$(git status --porcelain | grep -vE '^(\?\? |m  )' || true)
+    dirty=$(git status --porcelain --ignore-submodules=all | grep -v '^?? ' || true)
     if [ -n "$dirty" ]; then
         echo "✖ error: working tree dirty. Commit or stash first." >&2
         git status --short >&2
