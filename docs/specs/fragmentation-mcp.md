@@ -7,11 +7,29 @@ Standalone. Useful without mirror. Open-source. The substrate any agent
 workflow benefits from, with native git interop at the wire and the
 Hamilton-Scheduler managing the agent's working memory.*
 
-Status: **Red** — the architecture is pinned, the MCP tool surface is
-specified, the HamiltonScheduler integration is wired, the BLAKE3 ↔ SHA-1
-crosswalk is defined, the dependency direction is locked, the existing
-git-MCP landscape is surveyed honestly, the open questions are named.
-None of it runs yet. The implementation tick lands afterward.
+**Status (2026-06-02, post T9/T10/T11 reframe): Red, RESHAPED.** The
+architecture is pinned; the MCP tool surface has collapsed from 18
+enumerated tools to **3 prism operations** (focus / project / refract)
+per [[../../../prism/docs/specs/pq]]; the shard becomes session-implicit
+per T10 (no `shard_open` tool needed); `impl Prism for FrgmntMcp` is
+structural identity. The HamiltonScheduler integration is wired; the
+BLAKE3 ↔ SHA-1 crosswalk is defined; the dependency direction is locked;
+the existing git-MCP landscape is surveyed honestly; the open questions
+are named. None of it runs yet. The implementation tick lands afterward.
+
+> **§3 / §4 below describe the SUPERSEDED 18-tool enumeration surface.**
+> The reshape collapses them into three `prism_core::Prism` operations
+> at the wire altitude. **§0.5 names the new surface; the old
+> enumerations are preserved as the audit trail.** See
+> [[../../../prism/docs/specs/pq]] for the algebra and the wire format.
+
+The original status line is preserved here for the audit trail:
+
+> Status: **Red** — the architecture is pinned, the MCP tool surface is
+> specified, the HamiltonScheduler integration is wired, the BLAKE3 ↔ SHA-1
+> crosswalk is defined, the dependency direction is locked, the existing
+> git-MCP landscape is surveyed honestly, the open questions are named.
+> None of it runs yet. The implementation tick lands afterward.
 
 Depends on:
 - `fragmentation/src/frgmnt_store.rs` — the `FrgmntStore<N: Fragmentable +
@@ -125,6 +143,96 @@ Nothing flows the other direction. `prism_core` stays dependency-free.
 `fragmentation` adds no new dependencies to its substrate manifest;
 the MCP code lives in a NEW workspace member (`vcs/mcp/`), not in
 the core crate.
+
+---
+
+## 0.5 The reshape — pq is the wire, frgmnt-mcp is `impl Prism for FrgmntMcp`
+
+This section supersedes §3 (the 18-tool enumeration) and §3.4 (the
+four shard sub-tools as user-visible). It is load-bearing as of
+2026-06-02. The original sections stay below as audit trail; the
+reshape is what implementation follows.
+
+### 0.5.1 The recognition
+
+The 18-tool surface was the wrong altitude. Two structural problems:
+
+1. **The `fragmentation_` prefix is Java-style stuttering.** MCP
+   already namespaces tools by server-id; repeating the namespace
+   in every method name pays a token tax for a property the
+   protocol already carries.
+
+2. **Eighteen tools where three would do.** Every previous tool is
+   a chain over the same shard substrate. The `prism_core::Prism`
+   trait already has the closed three-operation algebra (focus /
+   project / refract). Enumerating tools above it is decoration;
+   the algebra was the spec.
+
+The reshape: **`impl Prism for FrgmntMcp`**. The wire exposes
+`focus`, `project`, `refract` per [[../../../prism/docs/specs/pq]].
+Every prior tool collapses to a composition:
+
+| Old tool | New pq chain |
+|---|---|
+| `commit(path, content, msg)` | `refract(beam_from_content, { to_path })` |
+| `show(oid)` | `focus({ oid })` |
+| `cat(path)` | `focus({ path })` |
+| `context()` | `focus({})` |
+| `list(prefix)` | `focus({}) → project({ prefix })` |
+| `search(q)` | `focus({}) → project({ match: q })` |
+| `history(oid)` | `focus({ oid }) → project({ walk: "back" })` |
+| `branch(name, oid)` | `focus({ oid }) → refract({ ref: name })` |
+| `diff(a, b)` | `focus({ pair: [a, b] }) → project({ compare })` |
+| `merge(a, b)` | `focus({ pair }) → project({ kintsugi }) → refract({ to_ref })` |
+| `snapshot` | `focus({}) → refract({ snapshot: true })` |
+| `refs.list(prefix)` | `focus({ refs: true }) → project({ prefix })` |
+| `refs.update(ref, new)` | `focus({ ref }) → refract({ cas: { old, new } })` |
+| `observe(scope)` | falls out for free — every Beam carries `imperfect` |
+| `shard.status()` | `focus({ shard: true })` |
+| `shard.flush()` | `focus({ shard: true }) → refract({ flush: true })` |
+| `shard.open(...)` | **implicit on session bootstrap (T10)**; no tool |
+| `shard.close()` | **implicit on session teardown (T10)**; no tool |
+
+### 0.5.2 Session-implicit shard (T10)
+
+The `shard.open` / `shard.close` sub-tools disappear from the wire.
+Per T10, the MCP session IS the shard. Connection setup auto-
+bootstraps a `ShardRef` (per the in-flight `shard-ref-as-prism`
+design, see T9 in this spec's task tree); the session context is
+committed at `session/context` in the shard; durability requires
+fsync at commit time. The agent never opens or closes a shard —
+the connection lifecycle owns it.
+
+### 0.5.3 What this spec describes vs what pq describes
+
+Two specs, two altitudes:
+
+| Concern | Owner |
+|---|---|
+| The wire algebra (three ops, Beam shape, DSL types, composition) | [[../../../prism/docs/specs/pq]] |
+| The wire transport (this spec): JSON-RPC framing, shard session model, scheduler integration, HamiltonScheduler discipline, BLAKE3↔SHA-1 crosswalk, the standalone-deployment thesis | This spec |
+
+The HamiltonScheduler discipline (§4), the BLAKE3 ↔ SHA-1 crosswalk
+(§5), the dependency direction (§6), the comparison-to-existing-git-MCPs
+survey (§1, §7), and the mirror-mcp composition story (§8) all remain
+load-bearing. The 18-tool enumeration in §3 is replaced by the
+three-op surface per [[../../../prism/docs/specs/pq]]; the rest
+stands.
+
+### 0.5.4 Sub-Turing and CRDT-safe
+
+pq is closed and bounded (per pq spec §9). It composes monoidally
+over the shard substrate, which is itself a bounded semilattice per
+[[../../../mirror/docs/specs/reality-shard-as-crdt]]. The refract
+step IS the lattice join — each refract returns a Beam whose
+shard-state is `≥` the prior. Strong eventual consistency rides
+through the wire algebra without protocol additions.
+
+The `imperfect` field on every Beam carries the kintsugi-objective
+verdict per [[../../../mirror/docs/specs/kintsugi-variety]]. The
+`observe` tool was a separate tool only because the substrate's
+verdicts had no carrier; now they have one, and observation is a
+field, not a call.
 
 ---
 
@@ -344,7 +452,17 @@ primitives to the wire.
 
 ---
 
-## 3. The MCP tool surface — twelve tools, structured I/O
+## 3. The MCP tool surface (SUPERSEDED — see §0.5 and [[../../../prism/docs/specs/pq]])
+
+**This section is preserved as audit trail.** The post-2026-06-02
+reshape collapses these 18 tools into the three `prism_core::Prism`
+operations exposed by [[../../../prism/docs/specs/pq]]. The body
+below describes what the wire DID enumerate; the post-reshape body
+is the chain table in §0.5.1.
+
+### 3.0 What §3 used to say (frozen 2026-06-02)
+
+#### 3.0.0 The MCP tool surface — twelve tools, structured I/O
 
 The tool surface is small and orthogonal. Each tool's JSON Schema is
 the spec; the substrate work it invokes is named in the right-hand
@@ -573,6 +691,19 @@ Implementation surface (T2): the fifteen names live as
 `FIFTEEN_TOOL_NAMES` in `vcs/mcp/src/registry.rs`; the four shard
 sub-tools route through `vcs/mcp/src/shard.rs`'s `ShardRegistry`,
 which holds each shard's `HamiltonScheduler` instance.
+
+---
+
+### 3.0.1 End of the audit-trail block
+
+The enumeration above describes the pre-reshape design. The
+post-reshape wire publishes three tools (`focus`, `project`,
+`refract`); each is named via JSON-RPC `tools/call` without a
+leading `fragmentation_` prefix — the MCP server-id already
+namespaces. The `shard.open` and `shard.close` sub-tools are
+removed (session-implicit per T10); every other tool's behaviour
+is preserved as a chain. See [[../../../prism/docs/specs/pq]] §3
+for the chain table.
 
 ---
 
