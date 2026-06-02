@@ -8,22 +8,154 @@ use serde::{Deserialize, Serialize};
 
 /// JSON-RPC 2.0 request `id` field.
 ///
-/// The MCP spec (2025-06-18) permits string or number ids; T1 ships
-/// `u64` only — sufficient for stdio sessions where the client
-/// numbers requests sequentially. String ids are a T2+ refinement.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct RequestId(pub u64);
-
-impl RequestId {
-    pub fn as_u64(self) -> u64 {
-        self.0
-    }
+/// Per JSON-RPC 2.0 §4 (inherited by MCP 2025-06-18): `id` MAY be a
+/// String, a Number, or NULL. We preserve the on-wire shape across
+/// the round trip — a string id in MUST round-trip as a string id
+/// out; an integer in as an integer out; null in as null out. T1
+/// shipped `u64`-only and that's what made
+/// `mcp__frgmnt__fragmentation_read` hang in Claude Code: the
+/// client (TypeScript MCP SDK) sends string ids, our parser
+/// rejected them, we emitted `id: 0`, the client waited forever
+/// for its real id.
+///
+/// Per `[[feedback-no-bare-types]]`: the enum IS the newtype. No
+/// raw `i64`/`String` crosses the wire — the variant tag carries
+/// the JSON-type discipline.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum RequestId {
+    /// JSON number id (integer). JSON-RPC §4 names "Number"; we
+    /// hold `i64` (not `u64`) because negative ids are legal on the
+    /// wire — some clients use them as a tracking-disambiguation
+    /// convention. Whole-valued floats are normalized into this
+    /// variant by the deserializer; non-whole floats are rejected.
+    Number(i64),
+    /// JSON string id. The common shape from JavaScript clients
+    /// (Claude Code, the TypeScript MCP SDK) which often use UUIDs.
+    Str(String),
+    /// JSON null. Per JSON-RPC §5: when the server cannot detect
+    /// the client's id (parse-time failure), the response's `id`
+    /// MUST be Null. Also accepted on the request side — some
+    /// clients explicitly send null when they don't need a paired
+    /// response.
+    Null,
 }
 
 impl From<u64> for RequestId {
     fn from(value: u64) -> Self {
-        RequestId(value)
+        // `u64` callers in tests/internal code never exceed i64::MAX
+        // — the wire range is well below that. The `as` cast is
+        // intentional and lossless within the protocol's actual
+        // range.
+        RequestId::Number(value as i64)
+    }
+}
+
+impl From<i64> for RequestId {
+    fn from(value: i64) -> Self {
+        RequestId::Number(value)
+    }
+}
+
+impl From<i32> for RequestId {
+    fn from(value: i32) -> Self {
+        // Convenience for integer literals (`RequestId::from(1)`)
+        // which default to `i32` in Rust. `i32` always fits in `i64`.
+        RequestId::Number(value as i64)
+    }
+}
+
+impl From<&str> for RequestId {
+    fn from(value: &str) -> Self {
+        RequestId::Str(value.to_owned())
+    }
+}
+
+impl From<String> for RequestId {
+    fn from(value: String) -> Self {
+        RequestId::Str(value)
+    }
+}
+
+impl Serialize for RequestId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            RequestId::Number(n) => serializer.serialize_i64(*n),
+            RequestId::Str(s) => serializer.serialize_str(s),
+            RequestId::Null => serializer.serialize_none(),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for RequestId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::{self, Visitor};
+        use std::fmt;
+
+        struct RequestIdVisitor;
+
+        impl<'de> Visitor<'de> for RequestIdVisitor {
+            type Value = RequestId;
+
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("a JSON-RPC id: string, integer, whole-valued float, or null")
+            }
+
+            fn visit_i64<E: de::Error>(self, v: i64) -> Result<Self::Value, E> {
+                Ok(RequestId::Number(v))
+            }
+
+            fn visit_u64<E: de::Error>(self, v: u64) -> Result<Self::Value, E> {
+                // Above i64::MAX is exotic; clamp by erroring so the
+                // wire-shape contract stays predictable.
+                i64::try_from(v)
+                    .map(RequestId::Number)
+                    .map_err(|_| E::custom(format!("request id {v} exceeds i64::MAX")))
+            }
+
+            fn visit_f64<E: de::Error>(self, v: f64) -> Result<Self::Value, E> {
+                // JavaScript JSON.stringify emits whole-valued floats
+                // for integer ids (`3` → `3.0` in some encoders).
+                // Accept the whole-valued case losslessly; reject
+                // fractional ids — they have no integer meaning at
+                // the JSON-RPC altitude.
+                if v.is_finite() && v.fract() == 0.0 && v >= i64::MIN as f64 && v <= i64::MAX as f64
+                {
+                    Ok(RequestId::Number(v as i64))
+                } else {
+                    Err(E::custom(format!(
+                        "request id {v} is not a whole-valued finite number"
+                    )))
+                }
+            }
+
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
+                Ok(RequestId::Str(v.to_owned()))
+            }
+
+            fn visit_string<E: de::Error>(self, v: String) -> Result<Self::Value, E> {
+                Ok(RequestId::Str(v))
+            }
+
+            fn visit_borrowed_str<E: de::Error>(self, v: &'de str) -> Result<Self::Value, E> {
+                Ok(RequestId::Str(v.to_owned()))
+            }
+
+            fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+                Ok(RequestId::Null)
+            }
+
+            fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+                Ok(RequestId::Null)
+            }
+        }
+
+        deserializer.deserialize_any(RequestIdVisitor)
     }
 }
 

@@ -133,10 +133,16 @@ fn mcp_constructs_with_default_registry() {
 
 #[test]
 fn newtype_request_id_does_not_accept_raw_u64_at_construction_sites() {
-    // Compile-time discipline: RequestId is a newtype. The substrate
-    // forbids bare primitives crossing the wire.
+    // Compile-time discipline: RequestId is the wire-altitude
+    // newtype, even after the enum widening that landed on
+    // `mara/request-id-enum`. The substrate forbids bare primitives
+    // crossing the wire — `From<u64>` lands in the `Number` variant,
+    // `From<&str>` in `Str`, and `RequestId::Null` is its own state
+    // per JSON-RPC §5. This test pins the construction-site shape.
     let id: RequestId = RequestId::from(7u64);
-    assert_eq!(id.as_u64(), 7);
+    assert_eq!(id, RequestId::Number(7));
+    let s: RequestId = RequestId::from("req-abc-123");
+    assert_eq!(s, RequestId::Str("req-abc-123".to_string()));
 }
 
 #[test]
