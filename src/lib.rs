@@ -58,6 +58,7 @@ pub mod prism_bridge;
 pub mod project;
 pub mod ref_;
 pub mod repo;
+pub mod shard_ref;
 pub mod sha;
 #[cfg(feature = "singularity")]
 pub mod singularity;

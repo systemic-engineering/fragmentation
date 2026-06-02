@@ -72,7 +72,7 @@ async fn binary_lists_fifteen_tools_over_stdio() {
         .and_then(|r| r.get("tools"))
         .and_then(|t| t.as_array())
         .expect("tools array");
-    assert_eq!(tools.len(), 15, "expected fifteen tool callables");
+    assert_eq!(tools.len(), 17, "expected seventeen tool callables");
 
     let names: Vec<&str> = tools
         .iter()

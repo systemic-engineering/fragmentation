@@ -53,7 +53,7 @@ ssh = ["dep:ssh-key", "dep:x25519-dalek", "dep:chacha20poly1305", "dep:hkdf"]
 gpg = []
 
 [dependencies]
-prism-core = { path = "../prism/core" }
+prism-core = { path = "../prism/core", features = ["optics"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"

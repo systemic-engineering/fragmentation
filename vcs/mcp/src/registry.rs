@@ -1,4 +1,4 @@
-//! Tool registry — the fifteen fragmentation-mcp wire callables.
+//! Tool registry — the fragmentation-mcp wire callables.
 //!
 //! Per `docs/specs/fragmentation-mcp.md` §3.6, the tool surface is
 //! twelve CATEGORIES; §3.4 names four sub-tools for the SHARD
@@ -8,6 +8,8 @@
 //! T3 wires `fragmentation.commit` + `fragmentation.read` via
 //! [`crate::tools::content`], and `shard.status` reads real numbers
 //! off each shard's [`fragmentation::frgmnt_store::FrgmntStore`].
+//! T10 adds `fragmentation_shard_open` (contextual, returns `context_oid`)
+//! and `fragmentation_shard_open_empty` (bare, no context commit).
 //!
 //! Every remaining tool still returns [`crate::ERROR_NOT_IMPLEMENTED_YET`]
 //! from `tools/call`; T4+ wires the rest.
@@ -22,6 +24,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use crate::session;
 use crate::shard::{BudgetMb, ShardId, ShardRegistry};
 use crate::tools::content as content_tools;
 use crate::types::{MethodName, ToolName};
@@ -42,8 +45,15 @@ pub const ERROR_NOT_IMPLEMENTED_YET: i64 = -32001;
 /// the net wire callable count is fifteen.
 ///
 /// Declaration order matches the §3.6 table with the shard category
-/// expanded inline.
-pub const FIFTEEN_TOOL_NAMES: [&str; 15] = [
+/// expanded inline. T10 adds the two underscore-named shard-open
+/// variants (contextual + empty), bringing the total to 17. The dup
+/// `fragmentation_read` was dropped post-SEAM (2026-06-02) — the dotted
+/// `fragmentation.read` is the canonical entry; the underscored alias
+/// was indistinguishable, dispatched to the same body, and confused the
+/// agent surface. The pq reshape (T11+) collapses this whole table to
+/// three trait methods regardless.
+#[allow(dead_code)]
+pub const TOOL_NAMES: [&str; 17] = [
     "fragmentation.commit",
     "fragmentation.snapshot",
     "fragmentation.read",
@@ -59,6 +69,10 @@ pub const FIFTEEN_TOOL_NAMES: [&str; 15] = [
     "fragmentation.shard.flush",
     "fragmentation.shard.close",
     "fragmentation.observe",
+    // T10: contextual open (returns context_oid) + bare empty open +
+    // underscore-named read alias for session-bootstrapped contexts.
+    "fragmentation_shard_open",
+    "fragmentation_shard_open_empty",
 ];
 
 /// A registered MCP tool.
@@ -311,6 +325,16 @@ impl ToolRegistry {
         // `inputSchema`.
         let entries: Vec<(&str, &str, Value)> = vec![
             (
+                "fragmentation_shard_open",
+                "Open a session shard with full context bootstrap. Returns shard_id, context_oid, and budget_bytes. The context_oid points at session metadata (cwd, git branch, HEAD, timestamp) committed at session/context.",
+                schema_shard_open(),
+            ),
+            (
+                "fragmentation_shard_open_empty",
+                "Open a bare session shard with no context commit. Returns shard_id and budget_bytes only. Use fragmentation_shard_open for contextual sessions.",
+                schema_shard_open(),
+            ),
+            (
                 "fragmentation.commit",
                 "Atomic content-addressed commit. Body wired in T3.",
                 schema_commit(),
@@ -386,14 +410,14 @@ impl ToolRegistry {
                 schema_observe(),
             ),
         ];
-        let mut tools = Vec::with_capacity(15);
-        let mut by_name = HashMap::with_capacity(15);
+        let mut tools = Vec::with_capacity(18);
+        let mut by_name = HashMap::with_capacity(18);
         for (i, (name, desc, schema)) in entries.into_iter().enumerate() {
             let tool = Tool::new(name, desc, schema);
             by_name.insert(tool.name.clone(), i);
             tools.push(tool);
         }
-        debug_assert_eq!(tools.len(), FIFTEEN_TOOL_NAMES.len());
+        debug_assert_eq!(tools.len(), TOOL_NAMES.len());
         ToolRegistry {
             tools,
             by_name,
@@ -494,6 +518,8 @@ impl ToolRegistry {
         // errors (Response::err) pass through unchanged — they
         // remain JSON-RPC `error` objects.
         let raw = match tool_str {
+            "fragmentation_shard_open" => self.tool_shard_open_contextual(request, &arguments),
+            "fragmentation_shard_open_empty" => self.tool_shard_open_empty(request, &arguments),
             "fragmentation.shard.open" => self.tool_shard_open(request, &arguments),
             "fragmentation.shard.status" => self.tool_shard_status(request, &arguments),
             "fragmentation.shard.flush" => self.tool_shard_flush(request, &arguments),
@@ -519,6 +545,72 @@ impl ToolRegistry {
     // -----------------------------------------------------------------
     // Shard sub-tool bodies — the load-bearing T2 wiring.
     // -----------------------------------------------------------------
+
+    /// `fragmentation_shard_open` — contextual open.
+    ///
+    /// Gathers session context (cwd, git branch, HEAD, timestamp),
+    /// commits it into a new shard at `session/context`, and returns
+    /// `shard_id`, `context_oid`, and `budget_bytes`. The shard UUID
+    /// is derived from a SHA-256 hash of the context JSON so it
+    /// differs from `ShardId::EMPTY`.
+    fn tool_shard_open_contextual(&self, request: &Request, args: &Value) -> Response {
+        let Some(budget_mb_raw) = args.get("budget_mb").and_then(|v| v.as_u64()) else {
+            return Response::err(
+                request.id.clone(),
+                ResponseError::new(
+                    ERROR_INVALID_PARAMS,
+                    "fragmentation_shard_open requires `budget_mb` (u64)",
+                ),
+            );
+        };
+        let budget = BudgetMb(budget_mb_raw);
+        match session::open_contextual(&self.shards, budget) {
+            Err(e) => Response::err(
+                request.id.clone(),
+                ResponseError::new(ERROR_INTERNAL, format!("shard open contextual: {e}")),
+            ),
+            Ok((shard_id, context_oid, budget_bytes)) => Response::ok(
+                request.id.clone(),
+                json!({
+                    "shard_id": shard_id.to_string(),
+                    "context_oid": context_oid,
+                    "budget_bytes": budget_bytes,
+                }),
+            ),
+        }
+    }
+
+    /// `fragmentation_shard_open_empty` — bare open, no context commit.
+    ///
+    /// Identical to the original `fragmentation.shard.open` (dot-notation)
+    /// behaviour: returns `shard_id` and `budget_bytes` with no
+    /// `context_oid`. Useful when the caller does not want session
+    /// metadata committed into the shard.
+    fn tool_shard_open_empty(&self, request: &Request, args: &Value) -> Response {
+        let Some(budget_mb_raw) = args.get("budget_mb").and_then(|v| v.as_u64()) else {
+            return Response::err(
+                request.id.clone(),
+                ResponseError::new(
+                    ERROR_INVALID_PARAMS,
+                    "fragmentation_shard_open_empty requires `budget_mb` (u64)",
+                ),
+            );
+        };
+        let budget = BudgetMb(budget_mb_raw);
+        match self.shards.open(budget) {
+            Err(e) => Response::err(
+                request.id.clone(),
+                ResponseError::new(ERROR_INTERNAL, format!("shard open empty: {e}")),
+            ),
+            Ok(id) => Response::ok(
+                request.id.clone(),
+                json!({
+                    "shard_id": id.to_string(),
+                    "budget_bytes": budget.as_bytes(),
+                }),
+            ),
+        }
+    }
 
     fn tool_shard_open(&self, request: &Request, args: &Value) -> Response {
         let Some(budget_mb_raw) = args.get("budget_mb").and_then(|v| v.as_u64()) else {

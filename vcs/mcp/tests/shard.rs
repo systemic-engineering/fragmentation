@@ -47,7 +47,7 @@ fn unwrap_call_content(parsed: &serde_json::Value) -> serde_json::Value {
 
 use fragmentation_mcp::{
     BudgetMb, Mcp, MethodName, Request, RequestId, ShardId, ToolName, ToolRegistry,
-    FIFTEEN_TOOL_NAMES, JSON_RPC_VERSION,
+    TOOL_NAMES, JSON_RPC_VERSION,
 };
 
 // ---------------------------------------------------------------------------
@@ -122,17 +122,17 @@ fn fifteen_tool_names_per_spec_section_3_6_refined() {
         "fragmentation.shard.close",
         "fragmentation.observe",
     ];
-    assert_eq!(FIFTEEN_TOOL_NAMES.len(), 15);
+    assert_eq!(TOOL_NAMES.len(), 17);
     for name in expected {
         assert!(
-            FIFTEEN_TOOL_NAMES.iter().any(|t| *t == name),
+            TOOL_NAMES.iter().any(|t| *t == name),
             "missing tool name: {name}"
         );
     }
     // The aggregate `fragmentation.shard` slot is GONE — it has
     // been split into four sub-tools per the T1 refinement.
     assert!(
-        !FIFTEEN_TOOL_NAMES.iter().any(|t| *t == "fragmentation.shard"),
+        !TOOL_NAMES.iter().any(|t| *t == "fragmentation.shard"),
         "aggregate slot `fragmentation.shard` should be split into four sub-tools"
     );
 }
@@ -153,7 +153,7 @@ fn tools_list_returns_fifteen() {
         .and_then(|r| r.get("tools"))
         .and_then(|t| t.as_array())
         .expect("tools array");
-    assert_eq!(tools.len(), 15, "expected fifteen tool callables");
+    assert_eq!(tools.len(), 17, "expected seventeen tool callables");
 }
 
 // ---------------------------------------------------------------------------

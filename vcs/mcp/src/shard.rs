@@ -386,6 +386,26 @@ impl ShardRegistry {
         }
     }
 
+    /// Open a new shard under an explicit [`ShardId`].
+    ///
+    /// Unlike [`open`][Self::open] (which always uses `ShardId::EMPTY`),
+    /// this variant registers the shard under the caller-supplied `id`.
+    /// Used by the contextual `fragmentation_shard_open` tool: the id
+    /// is derived from the session context hash so it is guaranteed to
+    /// differ from `ShardId::EMPTY`.
+    ///
+    /// If a shard with `id` is already registered the existing shard is
+    /// kept (idempotent open, same contract as [`open`][Self::open]).
+    pub fn open_with_id(&self, budget: BudgetMb, id: ShardId) -> Result<ShardId, ShardContentError> {
+        let mut guard = self.lock();
+        if guard.contains_key(&id) {
+            return Ok(id);
+        }
+        let shard = Shard::new(budget.into_budget_bytes(), id)?;
+        guard.insert(id, shard);
+        Ok(id)
+    }
+
     /// Open a new shard with the given budget. Returns the canonical
     /// `ShardId::EMPTY` for a shard with no committed content; the
     /// deduplication property (two opens with no content share the
