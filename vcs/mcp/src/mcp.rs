@@ -83,9 +83,12 @@ impl Mcp {
     /// NOT respond to a notification).
     ///
     /// Parse errors yield a JSON-RPC parse-error response with
-    /// `id = 0` (per JSON-RPC §5: the server cannot recover the id
-    /// from a malformed request, so it returns `null`/0 by
-    /// convention).
+    /// `id = null`. Per JSON-RPC 2.0 §5: "If detecting the id in
+    /// the Request object was not possible (e.g. Parse error /
+    /// Invalid Request), it MUST be Null." Earlier MCP ticks
+    /// emitted `id: 0` here; that broke Claude Code's MCP client,
+    /// which used string ids and waited indefinitely for a
+    /// response with the matching id.
     ///
     /// On well-formed input: if `params.arguments.shard_id` is
     /// present and parseable to a known [`ShardId`], the named
@@ -104,7 +107,7 @@ impl Mcp {
                 None
             }
             Err(err) => Some(Response::err(
-                crate::types::RequestId::from(0),
+                crate::types::RequestId::Null,
                 ResponseError::new(ERROR_PARSE, format!("parse error: {err}")),
             )),
         }

@@ -430,7 +430,7 @@ impl ToolRegistry {
             "tools/call" => self.handle_tools_call(request),
             "initialize" => self.handle_initialize(request),
             other => Response::err(
-                request.id,
+                request.id.clone(),
                 ResponseError::new(ERROR_METHOD_NOT_FOUND, format!("method not found: {other}")),
             ),
         }
@@ -450,20 +450,20 @@ impl ToolRegistry {
                 })
             })
             .collect();
-        Response::ok(request.id, json!({ "tools": tools_value }))
+        Response::ok(request.id.clone(), json!({ "tools": tools_value }))
     }
 
     fn handle_tools_call(&self, request: &Request) -> Response {
         let Some(params) = request.params.as_ref() else {
             return Response::err(
-                request.id,
+                request.id.clone(),
                 ResponseError::new(ERROR_INVALID_PARAMS, "tools/call requires params"),
             );
         };
         let name = params.get("name").and_then(|n| n.as_str());
         let Some(tool_str) = name else {
             return Response::err(
-                request.id,
+                request.id.clone(),
                 ResponseError::new(
                     ERROR_INVALID_PARAMS,
                     "tools/call params missing `name` field",
@@ -473,7 +473,7 @@ impl ToolRegistry {
         let tool_name = ToolName::from(tool_str);
         if !self.by_name.contains_key(&tool_name) {
             return Response::err(
-                request.id,
+                request.id.clone(),
                 ResponseError::new(ERROR_METHOD_NOT_FOUND, format!("unknown tool: {tool_str}")),
             );
         }
@@ -499,13 +499,13 @@ impl ToolRegistry {
             "fragmentation.shard.flush" => self.tool_shard_flush(request, &arguments),
             "fragmentation.shard.close" => self.tool_shard_close(request, &arguments),
             "fragmentation.commit" => {
-                content_tools::dispatch_commit(request.id, &arguments, &self.shards)
+                content_tools::dispatch_commit(request.id.clone(), &arguments, &self.shards)
             }
             "fragmentation.read" => {
-                content_tools::dispatch_read(request.id, &arguments, &self.shards)
+                content_tools::dispatch_read(request.id.clone(), &arguments, &self.shards)
             }
             _ => Response::err(
-                request.id,
+                request.id.clone(),
                 ResponseError::with_data(
                     ERROR_NOT_IMPLEMENTED_YET,
                     format!("tool `{tool_str}` registered in T1; body lands in T4+"),
@@ -523,7 +523,7 @@ impl ToolRegistry {
     fn tool_shard_open(&self, request: &Request, args: &Value) -> Response {
         let Some(budget_mb_raw) = args.get("budget_mb").and_then(|v| v.as_u64()) else {
             return Response::err(
-                request.id,
+                request.id.clone(),
                 ResponseError::new(
                     ERROR_INVALID_PARAMS,
                     "fragmentation.shard.open requires `budget_mb` (u64)",
@@ -538,13 +538,13 @@ impl ToolRegistry {
             Ok(id) => id,
             Err(e) => {
                 return Response::err(
-                    request.id,
+                    request.id.clone(),
                     ResponseError::new(ERROR_INTERNAL, format!("shard.open: {e}")),
                 );
             }
         };
         Response::ok(
-            request.id,
+            request.id.clone(),
             json!({
                 "shard_id": id.to_string(),
                 "budget_bytes": budget.as_bytes(),
@@ -555,7 +555,7 @@ impl ToolRegistry {
     fn tool_shard_status(&self, request: &Request, args: &Value) -> Response {
         let id = match parse_shard_id_arg(args) {
             Ok(id) => id,
-            Err(err) => return err.into_response(request.id),
+            Err(err) => return err.into_response(request.id.clone()),
         };
         // `Mcp::dispatch_line` already pre-ticked the shard at the
         // dispatch entry; the body reads post-tick state via `with`.
@@ -577,13 +577,13 @@ impl ToolRegistry {
             )
         });
         let Some((budget, tick_count, hot_bytes, hot_entries)) = snapshot else {
-            return shard_not_found(request.id, &id);
+            return shard_not_found(request.id.clone(), &id);
         };
         let cold_bytes: u64 = 0;
         let cold_entries: u64 = 0;
         let total_bytes = hot_bytes + cold_bytes;
         Response::ok(
-            request.id,
+            request.id.clone(),
             json!({
                 "shard_id": id.to_string(),
                 "budget_bytes": budget.as_u64(),
@@ -601,7 +601,7 @@ impl ToolRegistry {
     fn tool_shard_flush(&self, request: &Request, args: &Value) -> Response {
         let id = match parse_shard_id_arg(args) {
             Ok(id) => id,
-            Err(err) => return err.into_response(request.id),
+            Err(err) => return err.into_response(request.id.clone()),
         };
         // Stub: there's no content-bearing FrgmntStore in T2; flush
         // is a zero-eviction report. The dispatch entry already
@@ -609,10 +609,10 @@ impl ToolRegistry {
         // T3+ wires the body once content tools land.
         let ticked = self.shards.with(&id, |shard| shard.tick_count());
         let Some(tick) = ticked else {
-            return shard_not_found(request.id, &id);
+            return shard_not_found(request.id.clone(), &id);
         };
         Response::ok(
-            request.id,
+            request.id.clone(),
             json!({
                 "shard_id": id.to_string(),
                 "evicted_count": 0,
@@ -625,15 +625,15 @@ impl ToolRegistry {
     fn tool_shard_close(&self, request: &Request, args: &Value) -> Response {
         let id = match parse_shard_id_arg(args) {
             Ok(id) => id,
-            Err(err) => return err.into_response(request.id),
+            Err(err) => return err.into_response(request.id.clone()),
         };
         // No tick on close: the shard is about to be removed.
         let removed = self.shards.close(&id);
         if !removed {
-            return shard_not_found(request.id, &id);
+            return shard_not_found(request.id.clone(), &id);
         }
         Response::ok(
-            request.id,
+            request.id.clone(),
             json!({
                 "shard_id": id.to_string(),
                 "closed": true,
@@ -646,7 +646,7 @@ impl ToolRegistry {
         // T2 advertises only the tools capability; resources/prompts
         // land later. The version string follows the MCP draft.
         Response::ok(
-            request.id,
+            request.id.clone(),
             json!({
                 "protocolVersion": "2025-06-18",
                 "capabilities": {
